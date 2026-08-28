@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import infra_tools
 from lib.config import SetupConfig
 from lib.proxmox_vm import ProvisionError, _reconcile_existing_vm
+from lib.vm_storage import VMDiskHardware
 
 
 class TestExistingVMMemoryReconciliation(unittest.TestCase):
@@ -116,6 +117,7 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
                     "name: agent-2\ncpu: kvm64\n"
                     "scsi0: local-lvm:vm-112-disk-0,iothread=1,size=32G\n"
                     "scsi1: bulk:vm-112-disk-1,iothread=1,serial=it-data,size=64G\n"
+                    "scsi2: manual:vm-112-disk-2,size=1T\n"
                     "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
                 ),
             ),
@@ -131,7 +133,8 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
                     "scsi0: local-lvm:vm-112-disk-0,iothread=1,size=32G,"
                     "discard=on,ssd=1\n"
                     "scsi1: bulk:vm-112-disk-1,iothread=1,serial=it-data,"
-                    "size=64G,discard=on,ssd=1\n"
+                    "size=64G,discard=on\n"
+                    "scsi2: manual:vm-112-disk-2,size=1T\n"
                     "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
                 ),
             ),
@@ -145,8 +148,10 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
                 "root",
                 [],
                 desired_cpu_type="x86-64-v2-AES",
-                desired_disk_discard=True,
-                desired_disk_ssd=True,
+                desired_disk_hardware={
+                    "root": VMDiskHardware("root", True, True),
+                    "data": VMDiskHardware("data", True, False),
+                },
             )
         )
 
@@ -159,9 +164,10 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
         )
         self.assertIn(
             "qm set 112 --scsi1 bulk:vm-112-disk-1,iothread=1,serial=it-data,"
-            "size=64G,discard=on,ssd=1",
+            "size=64G,discard=on",
             commands,
         )
+        self.assertFalse(any("--scsi2" in command for command in commands))
 
 
 class TestCachedProvisioningChangeSafety(unittest.TestCase):
@@ -198,6 +204,7 @@ class TestCachedProvisioningChangeSafety(unittest.TestCase):
             vm_cpu_type="x86-64-v2-AES",
             vm_disk_discard=False,
             vm_disk_ssd=True,
+            vm_disk_settings=[["root", "ssd=on"]],
         )
         cached = SetupConfig(
             host="10.0.0.50",
@@ -213,6 +220,7 @@ class TestCachedProvisioningChangeSafety(unittest.TestCase):
                 vm_cpu_type="x86-64-v2-AES",
                 vm_disk_discard=False,
                 vm_disk_ssd=True,
+                vm_disk_settings=[["root", "ssd=on"]],
             ),
         )
 

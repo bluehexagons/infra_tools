@@ -31,6 +31,15 @@ class VMDataDisk:
 
 
 @dataclass(frozen=True)
+class VMDiskHardware:
+    """Effective Proxmox hardware hints for one logical VM disk."""
+
+    name: str
+    discard: bool
+    ssd: bool
+
+
+@dataclass(frozen=True)
 class VMStorageMount:
     """A validated guest mount declaration for one named VM data disk."""
 
@@ -74,6 +83,33 @@ def data_disks(config: SetupConfig) -> list[VMDataDisk]:
         if len(spec) == 3 and spec[0] not in {"root", "template"}:
             result.append(VMDataDisk(spec[0], spec[1], spec[2]))
     return result
+
+
+def disk_hardware(config: SetupConfig) -> dict[str, VMDiskHardware]:
+    """Return VM-wide disk defaults merged with per-device overrides."""
+
+    default_discard = bool(getattr(config, "vm_disk_discard", True))
+    default_ssd = bool(getattr(config, "vm_disk_ssd", False))
+    settings = {
+        name: VMDiskHardware(name, default_discard, default_ssd)
+        for name in ["root", *(disk.name for disk in data_disks(config))]
+    }
+    for spec in getattr(config, "vm_disk_settings", None) or []:
+        if len(spec) < 2 or spec[0] not in settings:
+            continue
+        current = settings[spec[0]]
+        discard = current.discard
+        ssd = current.ssd
+        for option in spec[1:]:
+            setting, separator, enabled = option.partition("=")
+            if not separator or enabled not in {"on", "off"}:
+                continue
+            if setting == "discard":
+                discard = enabled == "on"
+            elif setting == "ssd":
+                ssd = enabled == "on"
+        settings[spec[0]] = VMDiskHardware(spec[0], discard, ssd)
+    return settings
 
 
 def storage_mounts(config: SetupConfig) -> list[VMStorageMount]:

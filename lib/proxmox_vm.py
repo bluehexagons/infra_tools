@@ -63,7 +63,15 @@ from lib.proxmox_memory import (
 from lib.types import NestedStrList, StrList
 from lib.validation import parse_memory_mib
 from lib.validators import validate_username
-from lib.vm_storage import VMDataDisk, data_disks, has_home_mount, storage_size_kib
+from lib.vm_storage import (
+    VMDataDisk,
+    VMDiskHardware,
+    data_disks,
+    disk_hardware,
+    has_home_mount,
+    storage_disk_serial,
+    storage_size_kib,
+)
 
 
 class VMAlreadyExists(Exception):
@@ -151,6 +159,54 @@ def _disk_hardware_matches(value: str, *, discard: bool, ssd: bool) -> bool:
         and (options.get("ssd") == "1") == ssd
         and options.get("iothread") == "1"
     )
+
+
+def _disk_option(value: str, name: str) -> Optional[str]:
+    """Return one comma-delimited Proxmox disk option."""
+
+    for item in value.split(",")[1:]:
+        key, separator, option_value = item.partition("=")
+        if separator and key == name:
+            return option_value
+    return None
+
+
+def _existing_managed_disks(
+    vm: _ExistingVM,
+    desired: dict[str, VMDiskHardware],
+) -> dict[str, tuple[str, str]]:
+    """Map declared logical disks to provider devices without adopting extras."""
+
+    expected_serials = {
+        storage_disk_serial(name): name
+        for name in desired
+        if name != "root"
+    }
+    managed: dict[str, tuple[str, str]] = {}
+    for device, value in vm.scsi_disks:
+        logical_name: Optional[str] = None
+        if device == "scsi0" and "root" in desired:
+            logical_name = "root"
+        else:
+            serial = _disk_option(value, "serial")
+            if serial is not None:
+                logical_name = expected_serials.get(serial)
+        if logical_name is None:
+            continue
+        if logical_name in managed:
+            raise ProvisionError(
+                f"VM {vm.vmid} has multiple provider disks identified as "
+                f"'{logical_name}'"
+            )
+        managed[logical_name] = (device, value)
+
+    missing = [name for name in desired if name not in managed]
+    if missing:
+        raise ProvisionError(
+            f"VM {vm.vmid} is missing declared disk identities: "
+            + ", ".join(missing)
+        )
+    return managed
 
 
 def _parse_size_kib(value: str, *, label: str) -> int:
@@ -561,8 +617,7 @@ def _reconcile_existing_vm(
     desired_balloon_min_mib: Optional[int] = None,
     desired_balloon_shares: Optional[int] = None,
     desired_cpu_type: Optional[str] = None,
-    desired_disk_discard: Optional[bool] = None,
-    desired_disk_ssd: Optional[bool] = None,
+    desired_disk_hardware: Optional[dict[str, VMDiskHardware]] = None,
     allow_memory_overcommit: bool = False,
     dry_run: bool = False,
 ) -> bool:
@@ -596,12 +651,15 @@ def _reconcile_existing_vm(
         raise ProvisionError("VM balloon shares must be between 1 and 50000")
     if desired_cpu_type is not None:
         desired_cpu_type = _validate_cpu_type(desired_cpu_type)
-    if desired_disk_discard is not None and not isinstance(
-        desired_disk_discard, bool
-    ):
-        raise ProvisionError("VM disk discard setting must be true or false")
-    if desired_disk_ssd is not None and not isinstance(desired_disk_ssd, bool):
-        raise ProvisionError("VM disk SSD setting must be true or false")
+    if desired_disk_hardware is not None:
+        for name, hardware in desired_disk_hardware.items():
+            if (
+                not isinstance(hardware, VMDiskHardware)
+                or hardware.name != name
+                or not isinstance(hardware.discard, bool)
+                or not isinstance(hardware.ssd, bool)
+            ):
+                raise ProvisionError("Invalid per-device VM disk hardware settings")
     existing = _list_existing_vms(node_ip, user, ssh_opts)
     ip_matches = [vm for vm in existing if target_ip in vm.ipv4_addresses]
     if len(ip_matches) > 1:
@@ -676,17 +734,19 @@ def _reconcile_existing_vm(
     cpu_changed = bool(
         desired_cpu_type is not None and matched.cpu_type != desired_cpu_type
     )
+    managed_disks = (
+        _existing_managed_disks(matched, desired_disk_hardware)
+        if desired_disk_hardware is not None
+        else {}
+    )
     disk_changes = [
-        (disk_name, disk_value)
-        for disk_name, disk_value in matched.scsi_disks
-        if (
-            desired_disk_discard is not None
-            and desired_disk_ssd is not None
-            and not _disk_hardware_matches(
-                disk_value,
-                discard=desired_disk_discard,
-                ssd=desired_disk_ssd,
-            )
+        (logical_name, device, value, desired_disk_hardware[logical_name])
+        for logical_name, (device, value) in managed_disks.items()
+        if desired_disk_hardware is not None
+        and not _disk_hardware_matches(
+            value,
+            discard=desired_disk_hardware[logical_name].discard,
+            ssd=desired_disk_hardware[logical_name].ssd,
         )
     ]
     if memory_changed:
@@ -734,13 +794,11 @@ def _reconcile_existing_vm(
                 f"Failed to reconcile VM {matched.vmid} provider settings: {detail}"
             )
 
-    for disk_name, disk_value in disk_changes:
-        assert desired_disk_discard is not None
-        assert desired_disk_ssd is not None
+    for _logical_name, disk_name, disk_value, hardware in disk_changes:
         updated_value = _disk_hardware_value(
             disk_value,
-            discard=desired_disk_discard,
-            ssd=desired_disk_ssd,
+            discard=hardware.discard,
+            ssd=hardware.ssd,
         )
         update = _ssh_run(
             node_ip,
@@ -782,10 +840,10 @@ def _reconcile_existing_vm(
             disk_name in observed_disks
             and _disk_hardware_matches(
                 observed_disks[disk_name],
-                discard=cast(bool, desired_disk_discard),
-                ssd=cast(bool, desired_disk_ssd),
+                discard=hardware.discard,
+                ssd=hardware.ssd,
             )
-            for disk_name, _disk_value in disk_changes
+            for _logical_name, disk_name, _disk_value, hardware in disk_changes
         )
         if (
             verify.returncode != 0
@@ -843,12 +901,14 @@ def _reconcile_existing_vm(
             f"{matched.cpu_type or 'the Proxmox default'} to {desired_cpu_type}"
         )
     if disk_changes:
-        assert desired_disk_discard is not None
-        assert desired_disk_ssd is not None
+        details = ", ".join(
+            f"{logical_name} (discard={'on' if hardware.discard else 'off'}, "
+            f"SSD={'on' if hardware.ssd else 'off'})"
+            for logical_name, _device, _value, hardware in disk_changes
+        )
         print(
-            f"  ✓ Reconfigured {len(disk_changes)} disk(s) on VM {matched.vmid} "
-            f"(discard={'on' if desired_disk_discard else 'off'}, "
-            f"SSD={'on' if desired_disk_ssd else 'off'})"
+            f"  ✓ Reconfigured {len(disk_changes)} managed disk(s) on VM "
+            f"{matched.vmid}: {details}"
         )
     if cpu_changed or disk_changes:
         print(
@@ -1245,6 +1305,7 @@ def _create_vm(
     cpu_type: str = "host",
     disk_discard: bool = True,
     disk_ssd: bool = False,
+    disk_hardware_settings: Optional[dict[str, VMDiskHardware]] = None,
 ) -> bool:
     """Build, populate, and start the VM on ``node_ip``."""
     cpu_type = _validate_cpu_type(cpu_type)
@@ -1319,10 +1380,15 @@ def _create_vm(
             _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
         raise ProvisionError("No image source available to attach to VM disk")
 
+    default_hardware = VMDiskHardware("root", disk_discard, disk_ssd)
+    root_hardware = (disk_hardware_settings or {}).get(
+        "root",
+        default_hardware,
+    )
     root_disk_value = _disk_hardware_value(
         disk_volume,
-        discard=disk_discard,
-        ssd=disk_ssd,
+        discard=root_hardware.discard,
+        ssd=root_hardware.ssd,
     )
     set_cmd = (
         f"qm set {vmid} "
@@ -1351,13 +1417,17 @@ def _create_vm(
 
     for index, disk in enumerate(data_disk_specs, 1):
         data_size_gib = _parse_disk_size_gib(disk.size)
+        hardware = (disk_hardware_settings or {}).get(
+            disk.name,
+            VMDiskHardware(disk.name, disk_discard, disk_ssd),
+        )
         # For a newly allocated volume, qm's STORAGE:SIZE syntax takes a bare
         # GiB count. A suffix such as ``32G`` is parsed as an existing LVM
         # volume name instead of a requested size.
         disk_option = _disk_hardware_value(
             f"{disk.pool}:{data_size_gib}",
-            discard=disk_discard,
-            ssd=disk_ssd,
+            discard=hardware.discard,
+            ssd=hardware.ssd,
             serial=disk.serial,
         )
         attach_result = _ssh_run(
@@ -1506,6 +1576,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     cpu_type = _validate_cpu_type(getattr(config, "vm_cpu_type", "host"))
     disk_discard = getattr(config, "vm_disk_discard", True)
     disk_ssd = getattr(config, "vm_disk_ssd", False)
+    disk_hardware_settings = disk_hardware(config)
 
     hostname = config.system_hostname or _build_guest_hostname(
         target_ip,
@@ -1555,7 +1626,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         print(f"  Cores: {config.container_cores}")
         print(f"  CPU model: {cpu_type}")
         print(
-            "  Disk hints: "
+            "  Disk hint defaults: "
             f"discard={'on' if disk_discard else 'off'}, "
             f"SSD={'on' if disk_ssd else 'off'}"
         )
@@ -1563,11 +1634,20 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             "  Console: "
             + ("VirtIO-GPU + serial" if _needs_graphical_console(config) else "serial")
         )
-        print(f"  Root storage: {root_pool_arg} ({disk_size_gib}G)")
+        root_hardware = disk_hardware_settings["root"]
+        print(
+            f"  Root storage: {root_pool_arg} ({disk_size_gib}G, "
+            f"discard={'on' if root_hardware.discard else 'off'}, "
+            f"SSD={'on' if root_hardware.ssd else 'off'})"
+        )
         for index, disk in enumerate(declared_data_disks, 1):
+            hardware = disk_hardware_settings[disk.name]
             print(
                 f"  Data storage {disk.name}: {disk.pool} "
-                f"({_parse_disk_size_gib(disk.size)}G, scsi{index}, serial={disk.serial})"
+                f"({_parse_disk_size_gib(disk.size)}G, scsi{index}, "
+                f"serial={disk.serial}, "
+                f"discard={'on' if hardware.discard else 'off'}, "
+                f"SSD={'on' if hardware.ssd else 'off'})"
             )
         if catalog_entry:
             print(f"  Image (catalog): {catalog_entry['codename']} {catalog_entry['snapshot']} → {catalog_entry['filename']}")
@@ -1626,8 +1706,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         desired_balloon_min_mib=balloon_min_mb,
         desired_balloon_shares=balloon_shares,
         desired_cpu_type=cpu_type,
-        desired_disk_discard=disk_discard,
-        desired_disk_ssd=disk_ssd,
+        desired_disk_hardware=disk_hardware_settings,
         allow_memory_overcommit=getattr(
             config,
             "allow_memory_overcommit",
@@ -1750,6 +1829,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             "cpu_type": cpu_type,
             "disk_discard": disk_discard,
             "disk_ssd": disk_ssd,
+            "disk_hardware_settings": disk_hardware_settings,
         }
         try:
             _create_vm(**create_kwargs)

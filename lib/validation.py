@@ -1553,16 +1553,21 @@ def validate_vm_storage_settings(
     cache_specs = _nested_string_specs(
         getattr(config, "storage_caches", None), "--storage-cache"
     )
+    disk_setting_specs = _nested_string_specs(
+        getattr(config, "vm_disk_settings", None), "--disk-ssd/--disk-discard"
+    )
     agent_workspace = getattr(config, "agent_workspace", None)
 
-    has_storage_declaration = bool(storage_specs or mount_specs or cache_specs)
+    has_storage_declaration = bool(
+        storage_specs or mount_specs or cache_specs or disk_setting_specs
+    )
     if (
         require_provisioning
         and has_storage_declaration
         and not getattr(config, "hosted_node", None)
     ):
         raise ValueError(
-            "--storage, --storage-mount, and --storage-cache require --provision-on"
+            "VM storage and per-device disk settings require --provision-on"
         )
 
     if agent_workspace is not None:
@@ -1604,6 +1609,42 @@ def validate_vm_storage_settings(
         )
     if len(data_names) > 30:
         raise ValueError("A Proxmox VM supports at most 30 declared data disks")
+
+    declared_disk_names = {"root", *data_names}
+    disk_setting_names: set[str] = set()
+    for spec in disk_setting_specs:
+        if not 2 <= len(spec) <= 3:
+            raise ValueError(
+                "Per-device disk settings require NAME and one or both of "
+                "discard=on|off and ssd=on|off"
+            )
+        name = spec[0]
+        if name != "root":
+            validate_vm_storage_name(name)
+        if name in disk_setting_names:
+            raise ValueError(f"Duplicate per-device disk settings for '{name}'")
+        disk_setting_names.add(name)
+        if name not in declared_disk_names:
+            raise ValueError(
+                f"Per-device disk settings reference unknown VM disk '{name}'"
+            )
+        setting_names: set[str] = set()
+        for option in spec[1:]:
+            setting, separator, enabled = option.partition("=")
+            if (
+                not separator
+                or setting not in {"discard", "ssd"}
+                or enabled not in {"on", "off"}
+            ):
+                raise ValueError(
+                    "Per-device disk settings must use discard=on|off or "
+                    "ssd=on|off"
+                )
+            if setting in setting_names:
+                raise ValueError(
+                    f"Duplicate {setting} setting for VM disk '{name}'"
+                )
+            setting_names.add(setting)
 
     mount_names: set[str] = set()
     mount_paths: list[str] = []
@@ -1700,9 +1741,12 @@ def validate_vm_storage_settings(
             + ", ".join(sorted(unknown_mounts))
         )
 
-    if (data_names or mount_names or cache_specs) and machine_type != "vm":
+    if (
+        data_names or mount_names or cache_specs or disk_setting_specs
+    ) and machine_type != "vm":
         raise ValueError(
-            "Named data disks, --storage-mount, and --storage-cache require --machine vm"
+            "Named data disks, mounts, caches, and per-device disk settings "
+            "require --machine vm"
         )
 
 

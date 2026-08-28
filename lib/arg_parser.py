@@ -47,6 +47,46 @@ class CommaSeparatedChoicesAction(argparse.Action):
         setattr(namespace, self.dest, selected)
 
 
+class VMDiskSettingAction(argparse.Action):
+    """Set a VM-wide disk default or one logical disk override."""
+
+    def __init__(self, option_strings, dest, setting: str, **kwargs):
+        if setting not in {"discard", "ssd"}:
+            raise ValueError(f"Unsupported VM disk setting: {setting}")
+        self.setting = setting
+        super().__init__(option_strings, dest, **kwargs)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | None,
+        option_string: str | None = None,
+    ) -> None:
+        del parser
+        enabled = not str(option_string or "").startswith("--no-")
+        if values is None:
+            setattr(namespace, self.dest, enabled)
+            return
+
+        specs = [
+            list(spec)
+            for spec in getattr(namespace, "vm_disk_settings", None) or []
+        ]
+        matching = next((spec for spec in specs if spec and spec[0] == values), None)
+        if matching is None:
+            matching = [values]
+            specs.append(matching)
+        prefix = f"{self.setting}="
+        matching[:] = [
+            part
+            for part in matching
+            if not part.startswith(prefix)
+        ]
+        matching.append(f"{self.setting}={'on' if enabled else 'off'}")
+        setattr(namespace, "vm_disk_settings", specs)
+
+
 from lib.plugin_registry import get_system_type_names
 
 
@@ -353,21 +393,32 @@ def add_setup_arguments(
         )
         parser.add_argument(
             "--disk-discard",
+            "--no-disk-discard",
             dest="vm_disk_discard",
-            action=argparse.BooleanOptionalAction,
+            action=VMDiskSettingAction,
+            setting="discard",
+            nargs="?",
             default=argparse.SUPPRESS,
+            metavar="NAME",
             help=(
-                "Expose discard/TRIM on provisioned VM disks (default: enabled)"
+                "Expose discard/TRIM on provisioned VM disks; optionally name "
+                "root or a declared data disk to override only that device "
+                "(default: enabled)"
             ),
         )
         parser.add_argument(
             "--disk-ssd",
+            "--no-disk-ssd",
             dest="vm_disk_ssd",
-            action=argparse.BooleanOptionalAction,
+            action=VMDiskSettingAction,
+            setting="ssd",
+            nargs="?",
             default=argparse.SUPPRESS,
+            metavar="NAME",
             help=(
-                "Advertise provisioned VM disks as SSDs (default: disabled; "
-                "enable only when the backing storage has SSD-like latency)"
+                "Advertise provisioned VM disks as SSDs; optionally name root "
+                "or a declared data disk to override only that device (default: "
+                "disabled; enable only for SSD-like backing storage)"
             ),
         )
         parser.add_argument(

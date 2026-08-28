@@ -819,6 +819,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertIsNone(config.storage_mounts)
         self.assertIsNone(config.storage_caches)
         self.assertEqual(config.container_cores, 1)
+        self.assertIsNone(config.vm_disk_settings)
         self.assertEqual(config.container_base, 'debian')
 
     def test_hosted_fields(self):
@@ -831,6 +832,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
             storage_mounts=[['data', '/srv/data', 'xfs']],
             storage_caches=[['data', 'data-cache', 'writethrough']],
+            vm_disk_settings=[['root', 'ssd=on'], ['data', 'discard=off']],
             container_cores=4,
             container_base='ubuntu',
             vm_image_storage='fast-files',
@@ -846,6 +848,10 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             config.storage_caches,
             [['data', 'data-cache', 'writethrough']],
         )
+        self.assertEqual(
+            config.vm_disk_settings,
+            [['root', 'ssd=on'], ['data', 'discard=off']],
+        )
         self.assertEqual(config.container_cores, 4)
         self.assertEqual(config.container_base, 'ubuntu')
         self.assertEqual(config.vm_image_storage, 'fast-files')
@@ -858,6 +864,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
             storage_mounts=[['data', '/srv/data', 'xfs']],
             storage_caches=[['data', 'data-cache']],
+            vm_disk_settings=[['root', 'ssd=on']],
             vm_image_storage='fast-files',
         )
         d = config.to_dict()
@@ -867,6 +874,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertEqual(d['container_storage'], [['root', 'auto', '10G'], ['template', 'local']])
         self.assertEqual(d['storage_mounts'], [['data', '/srv/data', 'xfs']])
         self.assertEqual(d['storage_caches'], [['data', 'data-cache']])
+        self.assertEqual(d['vm_disk_settings'], [['root', 'ssd=on']])
         self.assertEqual(d['vm_image_storage'], 'fast-files')
 
     def test_from_dict_restores_hosted_fields(self):
@@ -878,6 +886,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             'container_storage': [['template', 'local'], ['root', 'auto', '5G']],
             'storage_mounts': [['data', '/srv/data', 'xfs']],
             'storage_caches': [['data', 'data-cache']],
+            'vm_disk_settings': [['root', 'ssd=on']],
             'container_cores': 8,
             'container_base': 'fedora',
             'vm_image_storage': 'fast-files',
@@ -889,6 +898,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertEqual(config.container_storage, [['template', 'local'], ['root', 'auto', '5G']])
         self.assertEqual(config.storage_mounts, [['data', '/srv/data', 'xfs']])
         self.assertEqual(config.storage_caches, [['data', 'data-cache']])
+        self.assertEqual(config.vm_disk_settings, [['root', 'ssd=on']])
         self.assertEqual(config.container_cores, 8)
         self.assertEqual(config.container_base, 'fedora')
         self.assertEqual(config.vm_image_storage, 'fast-files')
@@ -941,6 +951,10 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             ],
             storage_mounts=[['git-data', '/srv/gogs', 'xfs']],
             storage_caches=[['git-data', 'git-cache', 'writethrough']],
+            vm_disk_settings=[
+                ['root', 'ssd=on'],
+                ['git-data', 'discard=off', 'ssd=off'],
+            ],
         )
 
         command = ' '.join(config.to_setup_command())
@@ -951,6 +965,9 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             '--storage-cache git-data git-cache writethrough',
             command,
         )
+        self.assertIn('--disk-ssd root', command)
+        self.assertIn('--no-disk-discard git-data', command)
+        self.assertIn('--no-disk-ssd git-data', command)
 
     def test_provisioning_fields_are_reconstructed_in_setup_command(self):
         config = self._make_config(

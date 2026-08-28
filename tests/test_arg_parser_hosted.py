@@ -121,6 +121,7 @@ class TestHostedFlagParsing(unittest.TestCase):
         self.assertFalse(hasattr(args, "vm_cpu_type"))
         self.assertFalse(hasattr(args, "vm_disk_discard"))
         self.assertFalse(hasattr(args, "vm_disk_ssd"))
+        self.assertFalse(hasattr(args, "vm_disk_settings"))
 
     def test_vm_hardware_overrides(self):
         args = self.parser.parse_args(
@@ -136,6 +137,42 @@ class TestHostedFlagParsing(unittest.TestCase):
         self.assertEqual(args.vm_cpu_type, "x86-64-v2-AES")
         self.assertFalse(args.vm_disk_discard)
         self.assertTrue(args.vm_disk_ssd)
+
+    def test_vm_hardware_per_device_overrides(self):
+        args = self.parser.parse_args(
+            [
+                "10.0.0.50",
+                "--disk-ssd",
+                "root",
+                "--no-disk-discard",
+                "archive",
+                "--no-disk-ssd",
+                "archive",
+            ]
+        )
+
+        self.assertFalse(hasattr(args, "vm_disk_ssd"))
+        self.assertFalse(hasattr(args, "vm_disk_discard"))
+        self.assertEqual(
+            args.vm_disk_settings,
+            [
+                ["root", "ssd=on"],
+                ["archive", "discard=off", "ssd=off"],
+            ],
+        )
+
+    def test_vm_hardware_global_default_and_named_exception(self):
+        args = self.parser.parse_args(
+            [
+                "10.0.0.50",
+                "--disk-ssd",
+                "--no-disk-ssd",
+                "archive",
+            ]
+        )
+
+        self.assertTrue(args.vm_disk_ssd)
+        self.assertEqual(args.vm_disk_settings, [["archive", "ssd=off"]])
 
     def test_base_default_is_deferred_to_setup_config(self):
         args = self.parser.parse_args(["10.0.0.50"])
@@ -314,6 +351,7 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
         self.assertFalse(hasattr(args, "vm_cpu_type"))
         self.assertFalse(hasattr(args, "vm_disk_discard"))
         self.assertFalse(hasattr(args, "vm_disk_ssd"))
+        self.assertFalse(hasattr(args, "vm_disk_settings"))
 
     def test_explicit_agent_tool_flags_exist_remotely(self):
         args = self.parser.parse_args([

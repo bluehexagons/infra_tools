@@ -984,6 +984,7 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
                 "vm_cpu_type",
                 "vm_disk_discard",
                 "vm_disk_ssd",
+                "vm_disk_settings",
                 "container_base",
                 "vm_image",
             }
@@ -1055,6 +1056,7 @@ _PROVISIONING_CHANGE_ARGS = (
     "vm_cpu_type",
     "vm_disk_discard",
     "vm_disk_ssd",
+    "vm_disk_settings",
     "container_base",
     "vm_image",
     "vm_image_storage",
@@ -1077,6 +1079,7 @@ _CACHED_PROVISIONING_FIELDS = (
     "vm_cpu_type",
     "vm_disk_discard",
     "vm_disk_ssd",
+    "vm_disk_settings",
     "container_base",
     "vm_image",
     "vm_image_storage",
@@ -1091,6 +1094,7 @@ _RECONCILABLE_VM_PROVISIONING_CHANGES = {
     "vm_cpu_type",
     "vm_disk_discard",
     "vm_disk_ssd",
+    "vm_disk_settings",
 }
 
 _PROVISIONING_FIELD_FLAGS = {
@@ -1107,6 +1111,7 @@ _PROVISIONING_FIELD_FLAGS = {
     "vm_cpu_type": "--cpu-type",
     "vm_disk_discard": "--disk-discard",
     "vm_disk_ssd": "--disk-ssd",
+    "vm_disk_settings": "--disk-ssd/--disk-discard NAME",
     "container_base": "--base",
     "vm_image": "--image",
     "vm_image_storage": "--image-storage",

@@ -179,6 +179,7 @@ mounts in the same declaration:
 ```bash
 infra-tools setup workstation_dev 10.0.0.51 agent \
   --provision-on pve1 --memory 8G --storage root 40G \
+  --disk-ssd root \
   --storage agent-data bulk-lvm 128G \
   --storage-mount agent-data /srv/agent-workspace ext4 \
   --agent-workspace /srv/agent-workspace \
@@ -192,6 +193,12 @@ cache media by `--storage-cache`. When `POOL` is omitted, the root-pool default
 is used. Provisioning checks that each selected pool is active, accepts VM
 images, and reports enough aggregate free capacity. It then attaches the disks
 as `scsi1`, `scsi2`, and so on with stable `it-NAME` serials.
+The example advertises only the SSD-backed root device as an SSD; the named
+data disk keeps the VM-wide default of SSD emulation disabled. Append a logical
+disk name to any disk flag for a device-specific override, such as
+`--disk-ssd root`, `--no-disk-discard agent-data`, or
+`--disk-discard agent-data`. An unqualified flag remains the default for all
+declared disks, and a named override wins over that default.
 
 To accelerate one durable HDD-backed data disk with a separate SSD-backed
 virtual disk, add an LVM cache declaration:
@@ -199,6 +206,7 @@ virtual disk, add an LVM cache declaration:
 ```bash
 --storage data ts1-storage 3T \
 --storage data-cache local-lvm 128G \
+--disk-ssd data-cache \
 --storage-cache data data-cache writethrough \
 --storage-mount data /srv/data ext4 empty
 ```
@@ -283,8 +291,11 @@ Use `--verify-provider` to check a cached provisioned guest against Proxmox even
 when its declaration matches saved local metadata. Setup reconciles and
 verifies the provider-side VM name, vCPU count, memory maximum, balloon
 minimum, balloon shares, CPU model, and managed hardware hints on every SCSI
-disk. Disk reconciliation preserves the existing volume reference, size,
-serial, and unowned options. Before changing memory, setup repeats the host
+disk declared by logical name. Root is identified as `scsi0`; named data and
+cache disks are identified by their stable `it-NAME` serials. Unrelated
+manually attached SCSI disks are not modified. Disk reconciliation preserves
+the existing volume reference, size, serial, and unowned options. Before
+changing memory, setup repeats the host
 capacity check while replacing the existing VM's allocation rather than
 counting it twice. An unsafe balloon floor remains blocked unless
 `--allow-memory-overcommit` is explicit. A running VM may need to be restarted
@@ -339,8 +350,8 @@ The resulting Proxmox baseline is:
 | CPU | `host` | Best performance on one node or a CPU-homogeneous cluster. Use `--cpu-type` with a compatible `x86-64-v*` model when cross-generation live migration matters. |
 | Machine/firmware | Proxmox defaults | Q35/OVMF are not required for an emulated display or XRDP; prefer them when PCIe GPU passthrough requires them. |
 | Disk controller | VirtIO SCSI single with `iothread=1` on every disk | Uses the per-disk I/O thread supported by the selected controller. |
-| Disk discard | Enabled | Passes guest TRIM through to thin or sparse storage. Use `--no-disk-discard` when backend policy forbids it. |
-| SSD emulation | Disabled | Use `--disk-ssd` when all declared pools have SSD-like latency. It is not auto-detected because one VM can span remote or mixed-media pools. |
+| Disk discard | Enabled | Passes guest TRIM through to thin or sparse storage. Use `--no-disk-discard` as the VM-wide default, or append a logical disk name to either form for an override. |
+| SSD emulation | Disabled | Use `--disk-ssd` as a VM-wide default or `--disk-ssd NAME` for only SSD-like devices. It is not auto-detected because one VM can span remote or mixed-media pools. |
 | Network | VirtIO | Lowest-overhead normal Linux guest path. Multiqueue is normally unnecessary for interactive RDP traffic. |
 | Guest agent | Enabled and installed | Supports clean lifecycle and guest inspection from Proxmox. |
 | Entropy | VirtIO RNG backed by `/dev/urandom` | Gives Linux guests a reliable entropy source during early boot and key generation. |
@@ -412,12 +423,15 @@ guest mount and cache declarations are VM-only.
 The guest bridge defaults to the bridge carrying the Proxmox host's default
 route; use `--bridge NAME` when the host has multiple routed bridge networks.
 VM disks default to discard enabled and SSD emulation disabled. Use
-`--no-disk-discard` to suppress TRIM, `--disk-ssd` when all declared backing
-storage has SSD-like latency, and `--cpu-type MODEL` to trade host CPU exposure
-for cross-node compatibility. The disk flags cover both root and named data
-disks. Infra-tools deliberately does not guess SSD status from a pool name or
-storage type because LVM, ZFS, Ceph, directory, and cached pools can all span
-mixed or remote media.
+`--no-disk-discard` to suppress TRIM or `--disk-ssd` when every declared backing
+device has SSD-like latency. Append `root` or a named data/cache disk to any
+positive or negative disk flag to override only that device. For example,
+`--disk-ssd root` models an SSD boot device with default HDD-like data devices;
+`--disk-ssd --no-disk-ssd archive` does the inverse selection from an SSD
+default. Infra-tools deliberately does not guess SSD status from a pool name
+or storage type because LVM, ZFS, Ceph, directory, and cached pools can all
+span mixed or remote media. Use `--cpu-type MODEL` to trade host CPU exposure
+for cross-node compatibility.
 The positional target is also the guest IPv4 address: a bare address assumes
 `/24`, while `ADDRESS/PREFIX` selects another subnet without a duplicate
 `--ip` option. Unless explicitly set, the IPv4 gateway is selected from the

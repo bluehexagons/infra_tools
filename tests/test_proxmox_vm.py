@@ -28,7 +28,8 @@ from lib.proxmox_vm import (
     _wait_for_guest_agent,
     check_vm_exists,
 )
-from lib.vm_storage import VMDataDisk
+from lib.config import SetupConfig
+from lib.vm_storage import VMDataDisk, VMDiskHardware, disk_hardware
 
 
 class TestImageStorage(unittest.TestCase):
@@ -316,6 +317,31 @@ class TestVMHardwareProfile(unittest.TestCase):
         self.assertTrue(_needs_graphical_console(rdp))
         self.assertFalse(_needs_graphical_console(server))
 
+    def test_per_device_settings_override_vm_defaults(self):
+        config = SetupConfig(
+            host="10.0.0.50",
+            username="agent",
+            system_type="agent_code_vm",
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["archive", "bulk-lvm", "2T"],
+            ],
+            vm_disk_discard=False,
+            vm_disk_ssd=False,
+            vm_disk_settings=[
+                ["root", "discard=on", "ssd=on"],
+                ["archive", "ssd=off"],
+            ],
+        )
+
+        settings = disk_hardware(config)
+
+        self.assertEqual(settings["root"], VMDiskHardware("root", True, True))
+        self.assertEqual(
+            settings["archive"],
+            VMDiskHardware("archive", False, False),
+        )
+
     @patch("lib.proxmox_vm._ssh_run")
     def test_graphical_vm_uses_virtio_gpu_and_disk_iothread(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -477,7 +503,7 @@ class TestVMDataDisks(unittest.TestCase):
             MagicMock(
                 returncode=0,
                 stdout=(
-                    "scsi0: local-lvm:vm-101-disk-0,iothread=1,discard=on\n"
+                    "scsi0: local-lvm:vm-101-disk-0,iothread=1,discard=on,ssd=1\n"
                     "scsi1: bulk-lvm:vm-101-disk-1,iothread=1,"
                     "discard=on,"
                     "serial=it-agent-data,size=128G\n"
@@ -509,9 +535,17 @@ class TestVMDataDisks(unittest.TestCase):
             node_ip="10.0.0.10",
             user="root",
             ssh_opts=[],
+            disk_hardware_settings={
+                "root": VMDiskHardware("root", True, True),
+                "agent-data": VMDiskHardware("agent-data", True, False),
+            },
         )
 
         commands = [call.args[3] for call in mock_run.call_args_list]
+        self.assertIn(
+            "--scsi0 local-lvm:vm-101-disk-0,iothread=1,discard=on,ssd=1",
+            commands[2],
+        )
         self.assertIn(
             "qm set 101 --scsi1 bulk-lvm:128,iothread=1,serial=it-agent-data,discard=on",
             commands,

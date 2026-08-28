@@ -712,8 +712,8 @@ reboots explicitly.
 | `--storage template` | LXC shorthand for the saved/default template pool |
 | `--cores N` | Guest vCPU count |
 | `--cpu-type MODEL` | Proxmox VM CPU model; defaults to `host` |
-| `--disk-discard` / `--no-disk-discard` | Enable or disable discard/TRIM on every provisioned VM disk; enabled by default |
-| `--disk-ssd` / `--no-disk-ssd` | Advertise every provisioned VM disk as SSD-backed; disabled by default |
+| `--disk-discard [NAME]` / `--no-disk-discard [NAME]` | Enable or disable discard/TRIM globally, or override only `root` or one named VM disk; enabled by default |
+| `--disk-ssd [NAME]` / `--no-disk-ssd [NAME]` | Advertise all declared VM disks, or only `root` or one named disk, as SSD-backed; disabled by default |
 | `--base NAME` | Base image family |
 
 Notes:
@@ -724,7 +724,22 @@ Notes:
   discard enabled. Use `--no-disk-discard` when storage policy must suppress
   guest TRIM. `--disk-ssd` is explicit because a Proxmox pool can be remote,
   mixed-media, or backed by a cache whose latency cannot be inferred reliably;
-  the setting applies to the root disk and every named data disk.
+  an unqualified disk flag changes the VM-wide default. Append `root` or a
+  declared data/cache disk name to override only that device. Device overrides
+  win over the default regardless of command-line order.
+- A mixed-media VM with an SSD boot disk and HDD data disk can use:
+
+  ```bash
+  --storage root local-lvm 32G \
+  --disk-ssd root \
+  --storage archive bulk-lvm 2T \
+  --storage-mount archive /srv/archive ext4 empty
+  ```
+
+  To start from an all-SSD default and exclude one device, use
+  `--disk-ssd --no-disk-ssd archive`. Reruns identify `root` as `scsi0` and
+  named disks by their stable serials; manually attached SCSI disks outside
+  the declaration are left unchanged.
 - `--cpu-type host` exposes the node CPU for the best single-node performance.
   Choose a common Proxmox `x86-64-*` model for guests that must migrate across
   nodes with different CPU generations.

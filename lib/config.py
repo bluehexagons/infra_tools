@@ -133,6 +133,25 @@ def _normalize_nested_specs(value: NestedStrList | list[str] | None) -> Optional
     return None
 
 
+def _vm_disk_setting_args(value: Optional[NestedStrList]) -> StrList:
+    """Return per-device disk setting flags for a reconstructed setup."""
+
+    args: StrList = []
+    for spec in _normalize_nested_specs(value) or []:
+        if len(spec) < 2:
+            continue
+        name = shlex.quote(spec[0])
+        for option in spec[1:]:
+            setting, separator, enabled = option.partition("=")
+            if separator and setting in {"discard", "ssd"} and enabled in {
+                "on",
+                "off",
+            }:
+                prefix = "" if enabled == "on" else "no-"
+                args.append(f"--{prefix}disk-{setting} {name}")
+    return args
+
+
 def _strip_passwords_from_share_users(users_field: str) -> str:
     sanitized_users: StrList = []
     for user_spec in users_field.split(','):
@@ -345,6 +364,7 @@ class SetupConfig:
     vm_cpu_type: str = "host"
     vm_disk_discard: bool = True
     vm_disk_ssd: bool = False
+    vm_disk_settings: Optional[NestedStrList] = None  # [[name, discard=on?, ssd=on?], ...]
     container_base: str = "debian"
     vm_image: MaybeStr = None  # HTTPS URL or 'storage:import/file.qcow2'
     vm_image_sha512: MaybeStr = None  # Required for custom HTTPS VM images
@@ -964,6 +984,7 @@ class SetupConfig:
                 cmd_parts.append("--no-disk-discard")
             if self.vm_disk_ssd:
                 cmd_parts.append("--disk-ssd")
+            cmd_parts.extend(_vm_disk_setting_args(self.vm_disk_settings))
             if self.container_base != "debian":
                 cmd_parts.append(f"--base {shlex.quote(self.container_base)}")
             if self.vm_image:
@@ -1453,6 +1474,7 @@ class SetupConfig:
         data['container_storage'] = _normalize_nested_specs(data.get('container_storage'))
         data['storage_mounts'] = _normalize_nested_specs(data.get('storage_mounts'))
         data['storage_caches'] = _normalize_nested_specs(data.get('storage_caches'))
+        data['vm_disk_settings'] = _normalize_nested_specs(data.get('vm_disk_settings'))
         system_defaults = get_system_type_definition(system_type)
         if not data.get('agent_tools') and not data.get('agent_tools_removed'):
             data['agent_tools'] = list(system_defaults.default_agent_tools) or None
@@ -1923,6 +1945,7 @@ class SetupConfig:
             vm_cpu_type=getattr(args, 'vm_cpu_type', 'host'),
             vm_disk_discard=getattr(args, 'vm_disk_discard', True),
             vm_disk_ssd=getattr(args, 'vm_disk_ssd', False),
+            vm_disk_settings=_normalize_nested_specs(getattr(args, 'vm_disk_settings', None)),
             container_base=getattr(args, 'container_base', 'debian'),
             vm_image=getattr(args, 'vm_image', None),
             vm_image_sha512=getattr(args, 'vm_image_sha512', None),
