@@ -17,7 +17,7 @@ from common.service_tools import user_cache_maintenance
 
 class TestUserCacheHelpers(unittest.TestCase):
     def _context(self, home: str) -> user_cache_maintenance.UserContext:
-        return user_cache_maintenance.UserContext("agent", home, 1000)
+        return user_cache_maintenance.UserContext("agent", home, os.getuid())
 
     def test_cache_usage_counts_files_without_following_links(self):
         with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as outside:

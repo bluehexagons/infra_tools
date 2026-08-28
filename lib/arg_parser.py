@@ -342,6 +342,35 @@ def add_setup_arguments(
             help="Provisioned guest CPU cores (default: 1)",
         )
         parser.add_argument(
+            "--cpu-type",
+            dest="vm_cpu_type",
+            default=argparse.SUPPRESS,
+            metavar="MODEL",
+            help=(
+                "Proxmox VM CPU model (default: host; use a common x86-64-* "
+                "model when migration compatibility is more important)"
+            ),
+        )
+        parser.add_argument(
+            "--disk-discard",
+            dest="vm_disk_discard",
+            action=argparse.BooleanOptionalAction,
+            default=argparse.SUPPRESS,
+            help=(
+                "Expose discard/TRIM on provisioned VM disks (default: enabled)"
+            ),
+        )
+        parser.add_argument(
+            "--disk-ssd",
+            dest="vm_disk_ssd",
+            action=argparse.BooleanOptionalAction,
+            default=argparse.SUPPRESS,
+            help=(
+                "Advertise provisioned VM disks as SSDs (default: disabled; "
+                "enable only when the backing storage has SSD-like latency)"
+            ),
+        )
+        parser.add_argument(
             "--base",
             dest="container_base",
             default=argparse.SUPPRESS,

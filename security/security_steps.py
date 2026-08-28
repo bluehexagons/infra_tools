@@ -49,6 +49,23 @@ _APPARMOR_USERNS_RESTRICTION = (
 )
 
 
+def _run_ufw(command: str, *, check: bool = False):
+    """Run one UFW command without printing routine success messages."""
+
+    return run(command, check=check, capture_output=True)
+
+
+def _ufw_failure(message: str, result: object) -> RuntimeError:
+    """Include captured UFW diagnostics when a required mutation fails."""
+
+    detail = (
+        getattr(result, "stderr", None)
+        or getattr(result, "stdout", None)
+        or ""
+    ).strip()
+    return RuntimeError(f"{message}: {detail}" if detail else message)
+
+
 def _apparmor_userns_restriction_enabled() -> bool:
     """Return whether AppArmor mediates unprivileged user namespaces."""
     try:
@@ -152,7 +169,7 @@ def _remove_stale_managed_rules(
             stale_rule_numbers.append(int(match.group(1)))
 
     for rule_number in sorted(stale_rule_numbers, reverse=True):
-        run(f"ufw --force delete {rule_number}", check=False)
+        _run_ufw(f"ufw --force delete {rule_number}")
 
 
 def _configure_rdp_firewall(config: SetupConfig) -> None:
@@ -163,22 +180,25 @@ def _configure_rdp_firewall(config: SetupConfig) -> None:
     if not has_restricted_sources:
         # A legacy untagged limit rule is indistinguishable from the desired
         # global rule to UFW. Replace it so future reruns can reconcile by tag.
-        run("ufw delete allow 3389/tcp", check=False)
-        run("ufw delete limit 3389/tcp", check=False)
+        _run_ufw("ufw delete allow 3389/tcp")
+        _run_ufw("ufw delete limit 3389/tcp")
 
     for _comment, command in rules:
-        result = run(command, check=False)
+        result = _run_ufw(command)
         if result.returncode != 0:
             if not has_restricted_sources:
                 # Preserve the pre-existing reachability contract if tagging
                 # the replacement global rule unexpectedly fails.
-                run("ufw limit 3389/tcp", check=False)
-            raise RuntimeError("Failed to install the requested RDP firewall rule")
+                _run_ufw("ufw limit 3389/tcp")
+            raise _ufw_failure(
+                "Failed to install the requested RDP firewall rule",
+                result,
+            )
 
     if has_restricted_sources:
         # Replacements are active before broad legacy access is removed.
-        run("ufw delete allow 3389/tcp", check=False)
-        run("ufw delete limit 3389/tcp", check=False)
+        _run_ufw("ufw delete allow 3389/tcp")
+        _run_ufw("ufw delete limit 3389/tcp")
 
     _remove_stale_managed_rules(
         _RDP_RULE_COMMENT_PREFIX,
@@ -194,27 +214,32 @@ def _configure_ssh_firewall(config: SetupConfig) -> None:
         for source in config.effective_access_sources()
     ]
     if not sources:
-        result = run("ufw limit ssh", check=False)
+        result = _run_ufw("ufw limit ssh")
         if result.returncode != 0:
-            raise RuntimeError("Failed to install the requested SSH firewall rule")
+            raise _ufw_failure(
+                "Failed to install the requested SSH firewall rule",
+                result,
+            )
         _remove_stale_managed_rules(_SSH_RULE_COMMENT_PREFIX, set())
         return
 
     desired_comments: set[str] = set()
     for source in sources:
         comment = f"{_SSH_RULE_COMMENT_PREFIX} trusted source {source}"
-        result = run(
+        result = _run_ufw(
             "ufw allow from "
             f"{shlex.quote(source)} to any port 22 proto tcp "
-            f"comment {shlex.quote(comment)}",
-            check=False,
+            f"comment {shlex.quote(comment)}"
         )
         if result.returncode != 0:
-            raise RuntimeError("Failed to install the requested SSH firewall rule")
+            raise _ufw_failure(
+                "Failed to install the requested SSH firewall rule",
+                result,
+            )
         desired_comments.add(comment)
 
     for broad_rule in ("allow ssh", "limit ssh", "allow 22/tcp", "limit 22/tcp"):
-        run(f"ufw delete {broad_rule}", check=False)
+        _run_ufw(f"ufw delete {broad_rule}")
     _remove_stale_managed_rules(_SSH_RULE_COMMENT_PREFIX, desired_comments)
 
 
@@ -231,28 +256,28 @@ def _configure_managed_web_ports(config: SetupConfig) -> list[int]:
         if sources:
             for source in sources:
                 comment = f"{_WEB_RULE_COMMENT_PREFIX} {port} source {source}"
-                result = run(
+                result = _run_ufw(
                     "ufw allow from "
                     f"{shlex.quote(source)} to any port {port} proto tcp "
-                    f"comment {shlex.quote(comment)}",
-                    check=False,
+                    f"comment {shlex.quote(comment)}"
                 )
                 if result.returncode != 0:
-                    raise RuntimeError(
-                        f"Failed to install web firewall rule for TCP {port}"
+                    raise _ufw_failure(
+                        f"Failed to install web firewall rule for TCP {port}",
+                        result,
                     )
                 desired_comments.add(comment)
             # Replacements are active before the old broad rule is removed.
-            run(f"ufw delete allow {port}/tcp", check=False)
+            _run_ufw(f"ufw delete allow {port}/tcp")
         else:
             comment = f"{_WEB_RULE_COMMENT_PREFIX} {port}"
-            result = run(
-                f"ufw allow {port}/tcp comment {shlex.quote(comment)}",
-                check=False,
+            result = _run_ufw(
+                f"ufw allow {port}/tcp comment {shlex.quote(comment)}"
             )
             if result.returncode != 0:
-                raise RuntimeError(
-                    f"Failed to install web firewall rule for TCP {port}"
+                raise _ufw_failure(
+                    f"Failed to install web firewall rule for TCP {port}",
+                    result,
                 )
             desired_comments.add(comment)
 
@@ -278,12 +303,11 @@ def _configure_mdns_firewall(config: SetupConfig) -> None:
         return
 
     comment = _MDNS_RULE_COMMENT_PREFIX
-    result = run(
-        f"ufw allow 5353/udp comment {shlex.quote(comment)}",
-        check=False,
+    result = _run_ufw(
+        f"ufw allow 5353/udp comment {shlex.quote(comment)}"
     )
     if result.returncode != 0:
-        raise RuntimeError("Failed to install the mDNS firewall rule")
+        raise _ufw_failure("Failed to install the mDNS firewall rule", result)
     _remove_stale_managed_rules(_MDNS_RULE_COMMENT_PREFIX, {comment})
 
 
@@ -294,8 +318,10 @@ def configure_firewall(config: SetupConfig) -> None:
     if not firewall_active:
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq ufw")
-        run("ufw default deny incoming", check=True)
-        run("ufw default allow outgoing", check=True)
+        for command in ("ufw default deny incoming", "ufw default allow outgoing"):
+            policy_result = _run_ufw(command, check=True)
+            if policy_result.returncode != 0:
+                raise _ufw_failure("Failed to configure firewall defaults", policy_result)
     _configure_ssh_firewall(config)
     if config.enable_rdp:
         _configure_rdp_firewall(config)
@@ -312,7 +338,7 @@ def configure_firewall(config: SetupConfig) -> None:
             print("  ✓ Firewall already configured")
         return
 
-    result = run("ufw --force enable", check=False)
+    result = _run_ufw("ufw --force enable")
     if result.returncode != 0:
         if is_container():
             print("  ⚠ Firewall could not be enabled (container may lack capabilities)")
@@ -853,8 +879,10 @@ def configure_firewall_web(config: SetupConfig) -> None:
     if not firewall_active:
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq ufw")
-        run("ufw default deny incoming", check=True)
-        run("ufw default allow outgoing", check=True)
+        for command in ("ufw default deny incoming", "ufw default allow outgoing"):
+            policy_result = _run_ufw(command, check=True)
+            if policy_result.returncode != 0:
+                raise _ufw_failure("Failed to configure firewall defaults", policy_result)
     _configure_ssh_firewall(config)
     web_ports = _configure_managed_web_ports(config)
     _configure_mdns_firewall(config)
@@ -866,7 +894,7 @@ def configure_firewall_web(config: SetupConfig) -> None:
         )
         return
 
-    result = run("ufw --force enable", check=False)
+    result = _run_ufw("ufw --force enable")
     if result.returncode != 0:
         if is_container():
             print("  ⚠ Firewall could not be enabled (container may lack capabilities)")
@@ -889,8 +917,10 @@ def configure_firewall_ssh_only(config: SetupConfig) -> None:
     if not firewall_active:
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq ufw")
-        run("ufw default deny incoming", check=True)
-        run("ufw default allow outgoing", check=True)
+        for command in ("ufw default deny incoming", "ufw default allow outgoing"):
+            policy_result = _run_ufw(command, check=True)
+            if policy_result.returncode != 0:
+                raise _ufw_failure("Failed to configure firewall defaults", policy_result)
     _configure_ssh_firewall(config)
     _configure_mdns_firewall(config)
 
@@ -898,7 +928,7 @@ def configure_firewall_ssh_only(config: SetupConfig) -> None:
         print("  ✓ Firewall already configured")
         return
     
-    result = run("ufw --force enable", check=False)
+    result = _run_ufw("ufw --force enable")
     if result.returncode != 0:
         if is_container():
             print("  ⚠ Firewall could not be enabled (container may lack capabilities)")

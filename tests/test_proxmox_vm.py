@@ -356,6 +356,7 @@ class TestVMHardwareProfile(unittest.TestCase):
             commands[0],
         )
         self.assertIn("--scsihw virtio-scsi-single", commands[0])
+        self.assertIn("--cpu host", commands[0])
         self.assertIn("--memory 8192 --balloon 4096", commands[0])
         self.assertEqual(
             commands[1],
@@ -363,7 +364,11 @@ class TestVMHardwareProfile(unittest.TestCase):
         )
         self.assertIn("ip6=2001:db8::50/64", commands[0])
         self.assertIn("gw6=2001:db8::1", commands[0])
-        self.assertIn("--scsi0 local-lvm:vm-101-disk-0,iothread=1", commands[2])
+        self.assertIn(
+            "--scsi0 local-lvm:vm-101-disk-0,iothread=1,discard=on",
+            commands[2],
+        )
+        self.assertNotIn("ssd=1", commands[2])
 
     @patch("lib.proxmox_vm._ssh_run")
     def test_partial_vm_is_destroyed_when_import_fails(self, mock_run):
@@ -472,8 +477,9 @@ class TestVMDataDisks(unittest.TestCase):
             MagicMock(
                 returncode=0,
                 stdout=(
-                    "scsi0: local-lvm:vm-101-disk-0,iothread=1\n"
+                    "scsi0: local-lvm:vm-101-disk-0,iothread=1,discard=on\n"
                     "scsi1: bulk-lvm:vm-101-disk-1,iothread=1,"
+                    "discard=on,"
                     "serial=it-agent-data,size=128G\n"
                 ),
                 stderr="",
@@ -507,7 +513,7 @@ class TestVMDataDisks(unittest.TestCase):
 
         commands = [call.args[3] for call in mock_run.call_args_list]
         self.assertIn(
-            "qm set 101 --scsi1 bulk-lvm:128,iothread=1,serial=it-agent-data",
+            "qm set 101 --scsi1 bulk-lvm:128,iothread=1,serial=it-agent-data,discard=on",
             commands,
         )
         self.assertNotIn("bulk-lvm:128G", "\n".join(commands))

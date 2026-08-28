@@ -41,7 +41,7 @@ infra-tools setup server_web 192.168.1.60 deploy \
   --memory 16G --cores 8 \
   --storage root local-lvm 96G \
   --storage cicd-data ts1-storage 3500G \
-  --storage-mount cicd-data /var/lib/infra_tools/cicd xfs empty \
+  --storage-mount cicd-data /var/lib/infra_tools/cicd ext4 empty \
   --build-server --node --python --go
 ```
 

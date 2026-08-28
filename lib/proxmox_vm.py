@@ -90,9 +90,67 @@ class _ExistingVM:
     memory_mib: Optional[int]
     balloon_min_mib: Optional[int]
     balloon_shares: Optional[int]
+    cpu_type: Optional[str]
+    scsi_disks: tuple[tuple[str, str], ...]
 
 
 _UNIT_TO_KIB = {"K": 1, "M": 1024, "G": 1024 * 1024, "T": 1024 * 1024 * 1024}
+_CPU_TYPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]*$")
+
+
+def _validate_cpu_type(value: str) -> str:
+    """Return a safe Proxmox CPU model token."""
+
+    cpu_type = (value or "").strip()
+    if not _CPU_TYPE_RE.fullmatch(cpu_type):
+        raise ProvisionError(
+            "VM CPU type must be a Proxmox model name containing only letters, "
+            "numbers, dots, underscores, plus signs, and hyphens"
+        )
+    return cpu_type
+
+
+def _disk_hardware_value(
+    volume: str,
+    *,
+    discard: bool,
+    ssd: bool,
+    serial: Optional[str] = None,
+) -> str:
+    """Apply infra_tools-managed hardware hints to a Proxmox disk value."""
+
+    parts = [
+        part
+        for part in volume.split(",")
+        if not part.startswith(("discard=", "ssd="))
+    ]
+    if not any(part == "iothread=1" for part in parts[1:]):
+        parts.append("iothread=1")
+    if serial is not None and not any(
+        part.startswith("serial=") for part in parts[1:]
+    ):
+        parts.append(f"serial={serial}")
+    if discard:
+        parts.append("discard=on")
+    if ssd:
+        parts.append("ssd=1")
+    return ",".join(parts)
+
+
+def _disk_hardware_matches(value: str, *, discard: bool, ssd: bool) -> bool:
+    """Return whether one Proxmox disk has the requested managed hints."""
+
+    options = {
+        key: option_value
+        for item in value.split(",")[1:]
+        for key, separator, option_value in [item.partition("=")]
+        if separator
+    }
+    return (
+        (options.get("discard") == "on") == discard
+        and (options.get("ssd") == "1") == ssd
+        and options.get("iothread") == "1"
+    )
 
 
 def _parse_size_kib(value: str, *, label: str) -> int:
@@ -401,6 +459,8 @@ def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
     memory_mib: Optional[int] = None
     balloon_min_mib: Optional[int] = None
     balloon_shares: Optional[int] = None
+    cpu_type: Optional[str] = None
+    scsi_disks: list[tuple[str, str]] = []
     for line in config_text.splitlines():
         key, separator, value = line.partition(":")
         if not separator:
@@ -408,6 +468,12 @@ def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
         normalized_key = key.strip()
         if normalized_key == "name":
             name = value.strip()
+            continue
+        if normalized_key == "cpu":
+            cpu_type = value.strip().split(",", 1)[0] or None
+            continue
+        if re.fullmatch(r"scsi\d+", normalized_key):
+            scsi_disks.append((normalized_key, value.strip()))
             continue
         if normalized_key == "cores":
             try:
@@ -448,6 +514,8 @@ def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
         memory_mib=memory_mib,
         balloon_min_mib=balloon_min_mib,
         balloon_shares=balloon_shares,
+        cpu_type=cpu_type,
+        scsi_disks=tuple(scsi_disks),
     )
 
 
@@ -492,6 +560,9 @@ def _reconcile_existing_vm(
     desired_memory_mib: Optional[int] = None,
     desired_balloon_min_mib: Optional[int] = None,
     desired_balloon_shares: Optional[int] = None,
+    desired_cpu_type: Optional[str] = None,
+    desired_disk_discard: Optional[bool] = None,
+    desired_disk_ssd: Optional[bool] = None,
     allow_memory_overcommit: bool = False,
     dry_run: bool = False,
 ) -> bool:
@@ -523,6 +594,14 @@ def _reconcile_existing_vm(
         1 <= desired_balloon_shares <= 50000
     ):
         raise ProvisionError("VM balloon shares must be between 1 and 50000")
+    if desired_cpu_type is not None:
+        desired_cpu_type = _validate_cpu_type(desired_cpu_type)
+    if desired_disk_discard is not None and not isinstance(
+        desired_disk_discard, bool
+    ):
+        raise ProvisionError("VM disk discard setting must be true or false")
+    if desired_disk_ssd is not None and not isinstance(desired_disk_ssd, bool):
+        raise ProvisionError("VM disk SSD setting must be true or false")
     existing = _list_existing_vms(node_ip, user, ssh_opts)
     ip_matches = [vm for vm in existing if target_ip in vm.ipv4_addresses]
     if len(ip_matches) > 1:
@@ -594,6 +673,22 @@ def _reconcile_existing_vm(
         desired_balloon_shares is not None
         and (matched.balloon_shares or 1000) != desired_balloon_shares
     )
+    cpu_changed = bool(
+        desired_cpu_type is not None and matched.cpu_type != desired_cpu_type
+    )
+    disk_changes = [
+        (disk_name, disk_value)
+        for disk_name, disk_value in matched.scsi_disks
+        if (
+            desired_disk_discard is not None
+            and desired_disk_ssd is not None
+            and not _disk_hardware_matches(
+                disk_value,
+                discard=desired_disk_discard,
+                ssd=desired_disk_ssd,
+            )
+        )
+    ]
     if memory_changed:
         assert desired_memory_mib is not None
         assert desired_balloon_min_mib is not None
@@ -622,6 +717,8 @@ def _reconcile_existing_vm(
         )
     if shares_changed:
         set_options.extend(["--shares", str(desired_balloon_shares)])
+    if cpu_changed:
+        set_options.extend(["--cpu", shlex.quote(cast(str, desired_cpu_type))])
 
     if set_options:
         update = _ssh_run(
@@ -636,6 +733,29 @@ def _reconcile_existing_vm(
             raise ProvisionError(
                 f"Failed to reconcile VM {matched.vmid} provider settings: {detail}"
             )
+
+    for disk_name, disk_value in disk_changes:
+        assert desired_disk_discard is not None
+        assert desired_disk_ssd is not None
+        updated_value = _disk_hardware_value(
+            disk_value,
+            discard=desired_disk_discard,
+            ssd=desired_disk_ssd,
+        )
+        update = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"qm set {matched.vmid} --{disk_name} {shlex.quote(updated_value)}",
+            dry_run=False,
+        )
+        if update.returncode != 0:
+            detail = (update.stderr or update.stdout or "").strip() or "unknown error"
+            raise ProvisionError(
+                f"Failed to reconcile VM {matched.vmid} disk {disk_name}: {detail}"
+            )
+
+    if set_options or disk_changes:
         verify = _ssh_run(
             node_ip,
             user,
@@ -656,12 +776,25 @@ def _reconcile_existing_vm(
         shares_verified = not shares_changed or (
             (observed.balloon_shares or 1000) == desired_balloon_shares
         )
+        cpu_verified = not cpu_changed or observed.cpu_type == desired_cpu_type
+        observed_disks = dict(observed.scsi_disks)
+        disks_verified = not disk_changes or all(
+            disk_name in observed_disks
+            and _disk_hardware_matches(
+                observed_disks[disk_name],
+                discard=cast(bool, desired_disk_discard),
+                ssd=cast(bool, desired_disk_ssd),
+            )
+            for disk_name, _disk_value in disk_changes
+        )
         if (
             verify.returncode != 0
             or not name_verified
             or not cores_verified
             or not memory_verified
             or not shares_verified
+            or not cpu_verified
+            or not disks_verified
         ):
             raise ProvisionError(
                 f"Proxmox did not preserve the requested provider settings "
@@ -703,6 +836,24 @@ def _reconcile_existing_vm(
         print(
             f"  ✓ Reconfigured existing VM {matched.vmid} balloon shares from "
             f"{matched.balloon_shares or 1000} to {desired_balloon_shares}"
+        )
+    if cpu_changed:
+        print(
+            f"  ✓ Reconfigured existing VM {matched.vmid} CPU model from "
+            f"{matched.cpu_type or 'the Proxmox default'} to {desired_cpu_type}"
+        )
+    if disk_changes:
+        assert desired_disk_discard is not None
+        assert desired_disk_ssd is not None
+        print(
+            f"  ✓ Reconfigured {len(disk_changes)} disk(s) on VM {matched.vmid} "
+            f"(discard={'on' if desired_disk_discard else 'off'}, "
+            f"SSD={'on' if desired_disk_ssd else 'off'})"
+        )
+    if cpu_changed or disk_changes:
+        print(
+            f"  ⚠ VM {matched.vmid} is running; restart it for all hardware "
+            "model changes to take effect in the guest"
         )
 
     print(
@@ -1091,8 +1242,12 @@ def _create_vm(
     dry_run: bool = False,
     ipv6_cidr: Optional[str] = None,
     gateway6: Optional[str] = None,
+    cpu_type: str = "host",
+    disk_discard: bool = True,
+    disk_ssd: bool = False,
 ) -> bool:
     """Build, populate, and start the VM on ``node_ip``."""
+    cpu_type = _validate_cpu_type(cpu_type)
     ipconfig_parts = [
         f"ip={target_ip}/{cidr_prefix}",
         f"gw={gateway}",
@@ -1109,7 +1264,7 @@ def _create_vm(
         f"--balloon {balloon_min_mb}",
         f"--shares {balloon_shares}",
         f"--cores {cores}",
-        "--cpu host",
+        f"--cpu {shlex.quote(cpu_type)}",
         "--ostype l26",
         "--scsihw virtio-scsi-single",
         "--serial0 socket",
@@ -1164,9 +1319,14 @@ def _create_vm(
             _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
         raise ProvisionError("No image source available to attach to VM disk")
 
+    root_disk_value = _disk_hardware_value(
+        disk_volume,
+        discard=disk_discard,
+        ssd=disk_ssd,
+    )
     set_cmd = (
         f"qm set {vmid} "
-        f"--scsi0 {shlex.quote(disk_volume)},iothread=1 "
+        f"--scsi0 {shlex.quote(root_disk_value)} "
         f"--ide2 {shlex.quote(root_pool)}:cloudinit "
         f"--boot order=scsi0"
     )
@@ -1194,8 +1354,11 @@ def _create_vm(
         # For a newly allocated volume, qm's STORAGE:SIZE syntax takes a bare
         # GiB count. A suffix such as ``32G`` is parsed as an existing LVM
         # volume name instead of a requested size.
-        disk_option = (
-            f"{disk.pool}:{data_size_gib},iothread=1,serial={disk.serial}"
+        disk_option = _disk_hardware_value(
+            f"{disk.pool}:{data_size_gib}",
+            discard=disk_discard,
+            ssd=disk_ssd,
+            serial=disk.serial,
         )
         attach_result = _ssh_run(
             node_ip,
@@ -1340,6 +1503,9 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     )
     balloon_shares = getattr(config, "vm_balloon_shares", 1000)
     disk_size_gib = _parse_disk_size_gib(disk_amount)
+    cpu_type = _validate_cpu_type(getattr(config, "vm_cpu_type", "host"))
+    disk_discard = getattr(config, "vm_disk_discard", True)
+    disk_ssd = getattr(config, "vm_disk_ssd", False)
 
     hostname = config.system_hostname or _build_guest_hostname(
         target_ip,
@@ -1387,6 +1553,12 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         else:
             print(f"  Balloon minimum: {balloon_min_mb} MiB (fixed allocation)")
         print(f"  Cores: {config.container_cores}")
+        print(f"  CPU model: {cpu_type}")
+        print(
+            "  Disk hints: "
+            f"discard={'on' if disk_discard else 'off'}, "
+            f"SSD={'on' if disk_ssd else 'off'}"
+        )
         print(
             "  Console: "
             + ("VirtIO-GPU + serial" if _needs_graphical_console(config) else "serial")
@@ -1453,6 +1625,9 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         desired_memory_mib=memory_mb,
         desired_balloon_min_mib=balloon_min_mb,
         desired_balloon_shares=balloon_shares,
+        desired_cpu_type=cpu_type,
+        desired_disk_discard=disk_discard,
+        desired_disk_ssd=disk_ssd,
         allow_memory_overcommit=getattr(
             config,
             "allow_memory_overcommit",
@@ -1572,6 +1747,9 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             "dry_run": dry_run,
             "ipv6_cidr": config.static_ipv6,
             "gateway6": config.network_gateway6,
+            "cpu_type": cpu_type,
+            "disk_discard": disk_discard,
+            "disk_ssd": disk_ssd,
         }
         try:
             _create_vm(**create_kwargs)

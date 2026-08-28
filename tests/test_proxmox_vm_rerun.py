@@ -106,6 +106,63 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
 
         self.assertEqual(len(mock_run.call_args_list), 4)
 
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_cpu_and_disk_hints_are_reconciled_and_verified(self, mock_run) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\ncpu: kvm64\n"
+                    "scsi0: local-lvm:vm-112-disk-0,iothread=1,size=32G\n"
+                    "scsi1: bulk:vm-112-disk-1,iothread=1,serial=it-data,size=64G\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\ncpu: x86-64-v2-AES\n"
+                    "scsi0: local-lvm:vm-112-disk-0,iothread=1,size=32G,"
+                    "discard=on,ssd=1\n"
+                    "scsi1: bulk:vm-112-disk-1,iothread=1,serial=it-data,"
+                    "size=64G,discard=on,ssd=1\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+        ]
+
+        self.assertTrue(
+            _reconcile_existing_vm(
+                "10.0.0.1",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_cpu_type="x86-64-v2-AES",
+                desired_disk_discard=True,
+                desired_disk_ssd=True,
+            )
+        )
+
+        commands = [call.args[3] for call in mock_run.call_args_list]
+        self.assertIn("qm set 112 --cpu x86-64-v2-AES", commands)
+        self.assertIn(
+            "qm set 112 --scsi0 local-lvm:vm-112-disk-0,iothread=1,size=32G,"
+            "discard=on,ssd=1",
+            commands,
+        )
+        self.assertIn(
+            "qm set 112 --scsi1 bulk:vm-112-disk-1,iothread=1,serial=it-data,"
+            "size=64G,discard=on,ssd=1",
+            commands,
+        )
+
 
 class TestCachedProvisioningChangeSafety(unittest.TestCase):
     def test_vm_memory_changes_are_reconcilable(self) -> None:
@@ -128,6 +185,35 @@ class TestCachedProvisioningChangeSafety(unittest.TestCase):
             current,
             cached,
             Namespace(container_memory="8G"),
+        )
+
+        self.assertEqual(changes, [])
+
+    def test_vm_hardware_changes_are_reconcilable(self) -> None:
+        current = SetupConfig(
+            host="10.0.0.50",
+            username="agent",
+            system_type="agent_code_vm",
+            machine_type="vm",
+            vm_cpu_type="x86-64-v2-AES",
+            vm_disk_discard=False,
+            vm_disk_ssd=True,
+        )
+        cached = SetupConfig(
+            host="10.0.0.50",
+            username="agent",
+            system_type="agent_code_vm",
+            machine_type="vm",
+        )
+
+        changes = infra_tools._unsupported_cached_provisioning_changes(
+            current,
+            cached,
+            Namespace(
+                vm_cpu_type="x86-64-v2-AES",
+                vm_disk_discard=False,
+                vm_disk_ssd=True,
+            ),
         )
 
         self.assertEqual(changes, [])

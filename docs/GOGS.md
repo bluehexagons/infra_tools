@@ -172,7 +172,7 @@ infra-tools setup server_web 192.168.1.10 deploy \
   --storage git-data ts1-storage 3T \
   --storage git-cache local-lvm 128G \
   --storage-cache git-data git-cache writethrough \
-  --storage-mount git-data /srv/data xfs \
+  --storage-mount git-data /srv/data ext4 \
   --samba --samba-source 192.168.1.0/24 \
   --credential alice "$SAMBA_ALICE_PASSWORD" \
   --credential bob "$SAMBA_BOB_PASSWORD" \
@@ -186,7 +186,7 @@ This example puts the VM root and the 128 GiB cache disk on `local-lvm`, while
 the durable 3 TiB origin is allocated from `ts1-storage`. It intentionally
 leaves capacity unallocated on a nominal 4 TB disk. Infra-tools identifies
 both data devices by stable serial, requires them to be blank, constructs an
-LVM writethrough cache, and mounts the resulting XFS filesystem before Gogs or
+LVM writethrough cache, and mounts the resulting ext4 filesystem before Gogs or
 Samba creates data. Gogs and each Samba share then check the mount marker. A
 missing or wrong mount stops setup instead of allowing repositories, LFS
 objects, or shared files to spill onto the SSD boot filesystem.

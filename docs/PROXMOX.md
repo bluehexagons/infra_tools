@@ -200,7 +200,7 @@ virtual disk, add an LVM cache declaration:
 --storage data ts1-storage 3T \
 --storage data-cache local-lvm 128G \
 --storage-cache data data-cache writethrough \
---storage-mount data /srv/data xfs empty
+--storage-mount data /srv/data ext4 empty
 ```
 
 Infra-tools verifies both whole disks are blank, creates a guest-side LVM
@@ -274,27 +274,31 @@ reuses its recorded Proxmox details and skips contacting the Proxmox host
 before updating the guest. Guest-shape options emitted by a saved reconstructed
 command are also accepted when they match that metadata. Changing any of
 `--machine`, `--bridge`, `--memory`, `--balloon-min`, `--balloon-shares`,
-`--allow-memory-overcommit`, `--storage`, `--cores`, `--base`, `--image`, or
-`--image-storage` requests a provisioning check instead. A target without
-saved provisioning metadata still requires `--memory` and root `--storage` on
-its first run.
+`--allow-memory-overcommit`, `--storage`, `--cores`, `--cpu-type`,
+`--disk-discard`, `--disk-ssd`, `--base`, `--image`, or `--image-storage`
+requests a provisioning check instead. A target without saved provisioning
+metadata still requires `--memory` and root `--storage` on its first run.
 
 Use `--verify-provider` to check a cached provisioned guest against Proxmox even
 when its declaration matches saved local metadata. Setup reconciles and
 verifies the provider-side VM name, vCPU count, memory maximum, balloon
-minimum, and balloon shares. Before changing memory, it repeats the host
+minimum, balloon shares, CPU model, and managed hardware hints on every SCSI
+disk. Disk reconciliation preserves the existing volume reference, size,
+serial, and unowned options. Before changing memory, setup repeats the host
 capacity check while replacing the existing VM's allocation rather than
 counting it twice. An unsafe balloon floor remains blocked unless
 `--allow-memory-overcommit` is explicit. A running VM may need to be restarted
-before the guest observes a vCPU or memory-maximum change; setup reports that
-requirement without interrupting the guest automatically.
+before the guest observes a vCPU, memory-maximum, CPU-model, or disk-hardware
+change; setup reports that requirement without interrupting the guest
+automatically.
 
-Existing-guest setup does not mutate bridges, root or data disks, cache media,
-base images, or image staging storage. When saved metadata shows that one of
-those provisioning-only declarations changed, setup now rejects the rerun
-instead of saving a value it did not apply. Use the explicit `vm` or `proxmox`
-management command for a supported lifecycle change, or provision a
-replacement guest.
+Existing-guest setup does not replace, resize, attach, or detach root/data
+volumes, and does not mutate bridges, cache declarations, base images, or image
+staging storage. It may update the managed discard and SSD hints in place.
+When saved metadata shows that another provisioning-only declaration changed,
+setup rejects the rerun instead of saving a value it did not apply. Use the
+explicit `vm` or `proxmox` management command for a supported lifecycle change,
+or provision a replacement guest.
 
 During a provisioning check, the configured IPv4 address is the stable guest
 identity. If that VM already exists and the corrected declaration changes its
@@ -332,9 +336,11 @@ The resulting Proxmox baseline is:
 | --- | --- | --- |
 | Display | VirtIO-GPU for desktop/RDP; serial-only for servers | VirtIO-GPU is a recovery console, not XRDP acceleration by itself. QXL/SPICE and `virtio-gl` do not replace the guest render-node probe. |
 | Serial | `serial0: socket` | Retains low-level diagnostics alongside the graphical console. |
-| CPU | `host` | Best performance on one node or a CPU-homogeneous cluster. Use a compatible `x86-64-v*` model when cross-generation live migration matters. |
+| CPU | `host` | Best performance on one node or a CPU-homogeneous cluster. Use `--cpu-type` with a compatible `x86-64-v*` model when cross-generation live migration matters. |
 | Machine/firmware | Proxmox defaults | Q35/OVMF are not required for an emulated display or XRDP; prefer them when PCIe GPU passthrough requires them. |
-| Disk controller | VirtIO SCSI single with `iothread=1` on the root disk | Uses the per-disk I/O thread supported by the selected controller. Enable discard/SSD flags only when the backing storage policy supports them. |
+| Disk controller | VirtIO SCSI single with `iothread=1` on every disk | Uses the per-disk I/O thread supported by the selected controller. |
+| Disk discard | Enabled | Passes guest TRIM through to thin or sparse storage. Use `--no-disk-discard` when backend policy forbids it. |
+| SSD emulation | Disabled | Use `--disk-ssd` when all declared pools have SSD-like latency. It is not auto-detected because one VM can span remote or mixed-media pools. |
 | Network | VirtIO | Lowest-overhead normal Linux guest path. Multiqueue is normally unnecessary for interactive RDP traffic. |
 | Guest agent | Enabled and installed | Supports clean lifecycle and guest inspection from Proxmox. |
 | Entropy | VirtIO RNG backed by `/dev/urandom` | Gives Linux guests a reliable entropy source during early boot and key generation. |
@@ -405,6 +411,13 @@ LXC provisioning uses root storage and
 guest mount and cache declarations are VM-only.
 The guest bridge defaults to the bridge carrying the Proxmox host's default
 route; use `--bridge NAME` when the host has multiple routed bridge networks.
+VM disks default to discard enabled and SSD emulation disabled. Use
+`--no-disk-discard` to suppress TRIM, `--disk-ssd` when all declared backing
+storage has SSD-like latency, and `--cpu-type MODEL` to trade host CPU exposure
+for cross-node compatibility. The disk flags cover both root and named data
+disks. Infra-tools deliberately does not guess SSD status from a pool name or
+storage type because LVM, ZFS, Ceph, directory, and cached pools can all span
+mixed or remote media.
 The positional target is also the guest IPv4 address: a bare address assumes
 `/24`, while `ADDRESS/PREFIX` selects another subnet without a duplicate
 `--ip` option. Unless explicitly set, the IPv4 gateway is selected from the

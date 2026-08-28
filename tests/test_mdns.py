@@ -126,6 +126,7 @@ class TestMdnsSetup(unittest.TestCase):
         run.assert_called_once_with(
             "ufw allow 5353/udp comment 'infra_tools mDNS UDP'",
             check=False,
+            capture_output=True,
         )
         remove.assert_called_once_with(
             "infra_tools mDNS UDP",

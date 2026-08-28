@@ -145,9 +145,17 @@ def _remove_managed_rules(
         and comment not in desired_comments
     ]
     for number in sorted(stale_numbers, reverse=True):
-        result = run(f"ufw --force delete {number}", check=False)
+        result = run(
+            f"ufw --force delete {number}",
+            check=False,
+            capture_output=True,
+        )
         if result.returncode != 0:
-            raise RuntimeError("Could not remove a stale T3 Code firewall rule")
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                "Could not remove a stale T3 Code firewall rule"
+                + (f": {detail}" if detail else "")
+            )
 
 
 def _configure_firewall(config: SetupConfig, port: int, host: str) -> None:
@@ -214,10 +222,13 @@ def _configure_firewall(config: SetupConfig, port: int, host: str) -> None:
                 f"{shlex.quote(source)} to any port {exposed_port} proto tcp "
                 f"comment {shlex.quote(comment)}",
                 check=False,
+                capture_output=True,
             )
             if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "").strip()
                 raise RuntimeError(
                     f"Could not install T3 Code firewall rule for {source}"
+                    + (f": {detail}" if detail else "")
                 )
     updated_rules = _ufw_numbered_rules()
     observed_comments = {comment for _number, comment, _line in updated_rules}

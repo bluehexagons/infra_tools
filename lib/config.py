@@ -342,6 +342,9 @@ class SetupConfig:
     storage_mounts: Optional[NestedStrList] = None  # [[name, path, filesystem?, policy?], ...]
     storage_caches: Optional[NestedStrList] = None  # [[data_name, cache_name, mode?], ...]
     container_cores: int = 1
+    vm_cpu_type: str = "host"
+    vm_disk_discard: bool = True
+    vm_disk_ssd: bool = False
     container_base: str = "debian"
     vm_image: MaybeStr = None  # HTTPS URL or 'storage:import/file.qcow2'
     vm_image_sha512: MaybeStr = None  # Required for custom HTTPS VM images
@@ -955,6 +958,12 @@ class SetupConfig:
                 cmd_parts.append(f"--storage-cache {escaped_spec}")
             if self.container_cores != 1:
                 cmd_parts.append(f"--cores {self.container_cores}")
+            if self.vm_cpu_type != "host":
+                cmd_parts.append(f"--cpu-type {shlex.quote(self.vm_cpu_type)}")
+            if not self.vm_disk_discard:
+                cmd_parts.append("--no-disk-discard")
+            if self.vm_disk_ssd:
+                cmd_parts.append("--disk-ssd")
             if self.container_base != "debian":
                 cmd_parts.append(f"--base {shlex.quote(self.container_base)}")
             if self.vm_image:
@@ -1911,6 +1920,9 @@ class SetupConfig:
             storage_mounts=_normalize_nested_specs(getattr(args, 'storage_mounts', None)),
             storage_caches=_normalize_nested_specs(getattr(args, 'storage_caches', None)),
             container_cores=getattr(args, 'container_cores', 1),
+            vm_cpu_type=getattr(args, 'vm_cpu_type', 'host'),
+            vm_disk_discard=getattr(args, 'vm_disk_discard', True),
+            vm_disk_ssd=getattr(args, 'vm_disk_ssd', False),
             container_base=getattr(args, 'container_base', 'debian'),
             vm_image=getattr(args, 'vm_image', None),
             vm_image_sha512=getattr(args, 'vm_image_sha512', None),

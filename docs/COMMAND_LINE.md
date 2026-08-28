@@ -711,12 +711,23 @@ reboots explicitly.
 | `--storage template POOL` | LXC template storage spec |
 | `--storage template` | LXC shorthand for the saved/default template pool |
 | `--cores N` | Guest vCPU count |
+| `--cpu-type MODEL` | Proxmox VM CPU model; defaults to `host` |
+| `--disk-discard` / `--no-disk-discard` | Enable or disable discard/TRIM on every provisioned VM disk; enabled by default |
+| `--disk-ssd` / `--no-disk-ssd` | Advertise every provisioned VM disk as SSD-backed; disabled by default |
 | `--base NAME` | Base image family |
 
 Notes:
 
 - `--storage` is repeatable.
 - `root` storage is required when `--provision-on` is used.
+- Provisioned VM disks use VirtIO SCSI single with a per-disk I/O thread and
+  discard enabled. Use `--no-disk-discard` when storage policy must suppress
+  guest TRIM. `--disk-ssd` is explicit because a Proxmox pool can be remote,
+  mixed-media, or backed by a cache whose latency cannot be inferred reliably;
+  the setting applies to the root disk and every named data disk.
+- `--cpu-type host` exposes the node CPU for the best single-node performance.
+  Choose a common Proxmox `x86-64-*` model for guests that must migrate across
+  nodes with different CPU generations.
 - Named data disks are available only while provisioning a new QEMU VM. Every
   name must have exactly one mount declaration unless it is consumed as the
   cache device in `--storage-cache`; logical names use lowercase letters,

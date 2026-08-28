@@ -115,6 +115,28 @@ class TestHostedFlagParsing(unittest.TestCase):
         ])
         self.assertEqual(args.container_cores, 4)
 
+    def test_vm_hardware_defaults_are_deferred_to_setup_config(self):
+        args = self.parser.parse_args(["10.0.0.50"])
+
+        self.assertFalse(hasattr(args, "vm_cpu_type"))
+        self.assertFalse(hasattr(args, "vm_disk_discard"))
+        self.assertFalse(hasattr(args, "vm_disk_ssd"))
+
+    def test_vm_hardware_overrides(self):
+        args = self.parser.parse_args(
+            [
+                "10.0.0.50",
+                "--cpu-type",
+                "x86-64-v2-AES",
+                "--no-disk-discard",
+                "--disk-ssd",
+            ]
+        )
+
+        self.assertEqual(args.vm_cpu_type, "x86-64-v2-AES")
+        self.assertFalse(args.vm_disk_discard)
+        self.assertTrue(args.vm_disk_ssd)
+
     def test_base_default_is_deferred_to_setup_config(self):
         args = self.parser.parse_args(["10.0.0.50"])
         self.assertFalse(hasattr(args, "container_base"))
@@ -283,6 +305,15 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
             "--system-type", "server_lite", "--username", "root"
         ])
         self.assertFalse(hasattr(args, 'vm_balloon_min'))
+
+    def test_no_vm_hardware_flags(self):
+        args = self.parser.parse_args([
+            "--system-type", "server_lite", "--username", "root"
+        ])
+
+        self.assertFalse(hasattr(args, "vm_cpu_type"))
+        self.assertFalse(hasattr(args, "vm_disk_discard"))
+        self.assertFalse(hasattr(args, "vm_disk_ssd"))
 
     def test_explicit_agent_tool_flags_exist_remotely(self):
         args = self.parser.parse_args([
