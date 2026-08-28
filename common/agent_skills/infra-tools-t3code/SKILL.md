@@ -1,6 +1,6 @@
 ---
 name: infra-tools-t3code
-description: Work with the managed T3 Code server, pairing, Git, and HTTPS endpoints on an infra-tools VM.
+description: Operate and troubleshoot the managed T3 Code server, pairing flow, and server-side Git environment on an infra-tools VM.
 metadata:
   managed-by: infra_tools
 ---
@@ -38,11 +38,12 @@ infra-tools keeps networking and workspace settings in
 
 ## Updates
 
-T3 Code does not silently update. A connected T3 client may offer an explicit
-**Update server** action for this background service. The supported host-side
-update path is:
+T3 Code does not silently update. Prefer the connected client's explicit
+**Update server** action. For a host-side update, set `T3_RELEASE` to `latest`
+or the exact version required by the client, then run:
 
 ```bash
+T3_RELEASE=latest
 env -u npm_config_dangerously_allow_all_scripts \
   -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
   -u npm_config_allow_scripts \
@@ -51,7 +52,7 @@ env -u npm_config_dangerously_allow_all_scripts \
   CXX=g++ \
   npm_config_strict_allow_scripts=false \
   npm_config_foreground_scripts=true \
-  npx --yes --package=t3@latest -c \
+  npx --yes --package="t3@$T3_RELEASE" -c \
   'env -u npm_config_allow_scripts \
     -u NPM_CONFIG_ALLOW_SCRIPTS \
     -u npm_config_dangerously_allow_all_scripts \
@@ -62,44 +63,12 @@ infra-tools agent doctor --capability t3code --fix
 
 Keep those npm settings scoped to this trusted T3 update command. npm 12
 rejects inherited `allow-scripts` and `dangerously-allow-all-scripts` settings
-in T3's nested project-scoped runtime install. The inner `env -u` is required
-because outer `npx` commands re-export policies loaded from `.npmrc`. The
-doctor uses a short-lived allowlist for T3's required native packages. After
-an interrupted or older update, repair and verify the managed runtime with:
+in T3's nested runtime. The doctor performs the bounded native-module repair
+and verifies the service. `infra-tools agent update` is not a T3 updater; it
+updates selected Codex, Claude Code, and OpenCode installations. Do not start a
+second foreground T3 server on the managed port.
 
-```bash
-infra-tools agent doctor --capability t3code --fix
-```
-
-Headless infra-tools setup also verifies lingering before satisfying T3's
-no-argument `loginctl enable-linger` call, supplying the validated target
-username only when needed. This setup-scoped compatibility path is removed as
-soon as the upstream updater exits.
-
-This updates the same service managed by infra-tools. When a desktop client
-requires an exact matching version, use:
-
-```bash
-env -u npm_config_dangerously_allow_all_scripts \
-  -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
-  -u npm_config_allow_scripts \
-  -u NPM_CONFIG_ALLOW_SCRIPTS \
-  CC=gcc \
-  CXX=g++ \
-  npm_config_strict_allow_scripts=false \
-  npm_config_foreground_scripts=true \
-  npx --yes --package=t3@CLIENT_VERSION -c \
-  'env -u npm_config_allow_scripts \
-    -u NPM_CONFIG_ALLOW_SCRIPTS \
-    -u npm_config_dangerously_allow_all_scripts \
-    -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
-    t3 service update'
-infra-tools agent doctor --capability t3code --fix
-```
-
-Do not start a second foreground `npx t3` server on the managed port.
-
-## Disruptive maintenance
+## Long-running work
 
 For a long agent or build session that must cross the host's normal restart
 window, create a bounded hold as the agent account:
@@ -115,10 +84,8 @@ Release it promptly when the protected work is complete:
 infra-tools agent maintenance release
 ```
 
-The hold expires after at most 72 hours and does not disable the host's forced
-restart deadline. The restart job separately recognizes active coding agents,
-builds, Git operations, terminal multiplexers, and processes inside managed
-agent worktrees. After a deliberate T3 update or host reboot, persist the
+The hold expires after at most 72 hours and does not override the host's forced
+restart deadline. After a deliberate T3 update or host reboot, persist the
 composite result and confirm it belongs to the current boot:
 
 ```bash
@@ -127,8 +94,7 @@ infra-tools agent doctor --last-record --json
 ```
 
 The record is private and redacted. A healthy prior-boot record still exits
-nonzero. Deliberate `infra-tools agent update` runs record their post-update
-tools-and-host result automatically and include T3 when installed.
+nonzero.
 
 ## Browser previews
 
@@ -136,16 +102,9 @@ Prefer T3 Code's collaborative preview tools when they are available in the
 current session. They keep navigation and evidence visible to the connected
 user and do not require a second VM-local browser runtime.
 
-Some SSH-only Codex or OpenCode sessions need an independent fallback. It is
-installed only when the VM setup explicitly includes:
-
-```bash
---browser-automation playwright
-```
-
-For that fallback, verify it with `infra-tools agent doctor --capability
-browser`. Do not assume a missing Playwright capability is an error on a
-T3-focused VM that uses collaborative preview.
+For an SSH-only fallback, first run `infra-tools agent doctor --capability
+browser`. A missing Playwright capability is expected unless setup explicitly
+requested `--browser-automation playwright`.
 
 ## Pairing
 

@@ -71,8 +71,9 @@ GitHub CLI is installed from its APT repository and therefore follows the APT
 job. Explicitly selected Codex CLI, Claude Code, and OpenCode installations
 remain outside recurring root updates; their rebuildable caches are covered
 by the separate user maintenance job. T3 Code's per-user service is also not
-silently updated. Update it deliberately as the target user with `npx
-t3@latest service update`, or rerun setup with `--refresh-packages`. Run
+silently updated. Use the client's **Update server** action, the npm 12-safe
+host command in [`T3_CODE.md`](T3_CODE.md), or rerun setup with
+`--refresh-packages`. Run
 `infra-tools agent update --dry-run` and then `infra-tools agent update` as the
 account that owns the terminal tools (for example,
 `sudo -u agent -H infra-tools agent update --tool codex`) for a deliberate

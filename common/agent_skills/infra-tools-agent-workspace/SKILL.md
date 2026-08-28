@@ -1,6 +1,6 @@
 ---
 name: infra-tools-agent-workspace
-description: Use when concurrent coding tasks need isolated Git branches and worktrees on an infra-tools agent VM.
+description: Isolate concurrent coding tasks in managed Git branches and worktrees on an infra-tools agent VM.
 metadata:
   managed-by: infra_tools
 ---

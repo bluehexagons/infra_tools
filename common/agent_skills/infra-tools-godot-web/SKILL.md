@@ -1,6 +1,6 @@
 ---
 name: infra-tools-godot-web
-description: Export, publish, and browser-test Godot web games on an infra_tools-managed VM.
+description: Export, publish, and browser-test Godot web games on an infra-tools-managed VM.
 metadata:
   managed-by: infra_tools
 ---
@@ -20,18 +20,23 @@ a public plain-HTTP server or edit Nginx and UFW directly.
 3. From the project root, run `infra-web publish godot`. It derives a stable
    game slug from the project. Pass an explicit slug, `--preset`, or `--debug`
    only when the task requires them.
-4. Use `infra-web url <game>` as the authoritative externally reachable URL,
-   then use `infra-web doctor <game>` to verify the Nginx HTTPS endpoint. Replace
-   `<game>` with the lowercase slug printed by `publish`; do not type the angle
-   brackets. Do not infer the public URL from a local upstream port or bypass
-   certificate verification with `curl -k` or an equivalent option.
-5. When Playwright is installed, load the published URL and check that the
-   game canvas initializes without browser console errors before declaring a
-   browser-facing change complete.
+4. Replace `GAME` below with the lowercase slug printed by `publish`:
+
+   ```bash
+   infra-web url GAME
+   infra-web doctor GAME
+   ```
+
+   Treat the returned URL as authoritative. Do not substitute a local port or
+   bypass certificate verification with `curl -k` or an equivalent option.
+5. Use a collaborative T3 preview when attached. Otherwise, use VM-local
+   browser automation only after `infra-tools agent doctor --capability
+   browser` succeeds. Confirm that the game canvas initializes without browser
+   console errors.
 
 Published games are independent and remain available under their stable URLs.
 Use `infra-web list` to inspect them. Remove one only when explicitly requested,
-using `infra-web remove <game> --yes`.
+using `infra-web remove GAME --yes`.
 
 Setup enrolls the VM-local CA in the managed user's system and VM-local
 Chromium trust stores. A collaborative T3 preview may run on the connected

@@ -1,6 +1,6 @@
 ---
 name: infra-tools-vm-triage
-description: Use when an infra-tools agent VM is slow, unhealthy, low on capacity, or needs a shareable diagnostic snapshot.
+description: Diagnose an infra-tools agent VM that is slow, unhealthy, low on capacity, or needs a shareable support snapshot.
 metadata:
   managed-by: infra_tools
 ---
@@ -10,8 +10,12 @@ metadata:
 Start with stable, non-secret diagnostics:
 
 ```bash
-infra-tools agent doctor --capability t3code --capability host --json
+infra-tools agent doctor --capability host --json
 ```
+
+Add `--capability t3code` when the VM was provisioned for T3 Code. Add explicit
+`--tool` checks for the coding agents involved in the failure; the default tool
+set may include tools that were intentionally not installed.
 
 Interpret T3 service readiness separately from host warnings. Host warnings
 cover memory, swap, disk headroom, bounded agent storage, maintenance timers,

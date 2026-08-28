@@ -132,15 +132,16 @@ publishing, automatic Vite previews, service lifecycle, health waits, logs,
 cleanup, and certificate trust.
 
 The configured account already has the VM setup's non-interactive sudo access;
-only forward mutations require it. `infra-web` allocates TCP 8444–8999 by
-default, restricts upstreams to unprivileged loopback ports, reuses the managed
-certificate, enables WebSocket proxying, inherits the saved `--access-source`
-policy, and reconciles comment-tagged UFW rules. It validates Nginx before a
-reload and restores the previous generated configuration and state when a
-mutation fails. Raw Nginx directives, non-loopback targets, and source-policy
-overrides are not accepted. The `--to` port is private HTTP on loopback; the
-allocated `--listen` port is public HTTPS on Nginx, and only that listener is
-opened through the managed firewall policy.
+preview and forward mutations require it, while publication and inspection do
+not. `infra-web` allocates TCP 8444–8999 by default, restricts upstreams to
+unprivileged loopback ports, reuses the managed certificate, enables WebSocket
+proxying, inherits the saved `--access-source` policy, and reconciles
+comment-tagged UFW rules. It validates Nginx before a reload and restores the
+previous generated configuration and state when a mutation fails. Raw Nginx
+directives, non-loopback targets, and source-policy overrides are not accepted.
+The `--to` port is private HTTP on loopback; the allocated `--listen` port is
+public HTTPS on Nginx, and only that listener is opened through the managed
+firewall policy.
 
 If a current Let's Encrypt certificate already exists for a configured DNS
 name, the origin reuses it. Otherwise setup creates a VM-local certificate

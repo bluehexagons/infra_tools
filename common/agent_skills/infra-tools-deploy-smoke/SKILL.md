@@ -1,6 +1,6 @@
 ---
 name: infra-tools-deploy-smoke
-description: Use when preparing or verifying a test deployment from an infra-tools-managed coding VM.
+description: Prepare and verify a test deployment from an infra-tools-managed coding VM.
 metadata:
   managed-by: infra_tools
 ---
@@ -18,8 +18,12 @@ confirm both checkouts are clean except for the intended commits:
 ```bash
 git status --short --branch
 git log -1 --oneline
-infra-tools agent doctor --capability t3code --capability host --json
+infra-tools agent doctor --capability host --json
 ```
+
+Check `--capability t3code` separately when the deployment workflow actually
+depends on the managed T3 service. Do not make T3 readiness a prerequisite for
+an SSH-only agent VM.
 
 Inspect the application's deployment manifest and the saved infra-tools setup
 before mutation. Use the repository's documented test command and deployment
