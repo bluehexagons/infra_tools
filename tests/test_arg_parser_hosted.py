@@ -121,6 +121,7 @@ class TestHostedFlagParsing(unittest.TestCase):
         self.assertFalse(hasattr(args, "vm_cpu_type"))
         self.assertFalse(hasattr(args, "vm_disk_discard"))
         self.assertFalse(hasattr(args, "vm_disk_ssd"))
+        self.assertFalse(hasattr(args, "vm_disk_backup"))
         self.assertFalse(hasattr(args, "vm_disk_settings"))
 
     def test_vm_hardware_overrides(self):
@@ -148,6 +149,8 @@ class TestHostedFlagParsing(unittest.TestCase):
                 "archive",
                 "--no-disk-ssd",
                 "archive",
+                "--no-disk-backup",
+                "archive",
             ]
         )
 
@@ -157,7 +160,7 @@ class TestHostedFlagParsing(unittest.TestCase):
             args.vm_disk_settings,
             [
                 ["root", "ssd=on"],
-                ["archive", "discard=off", "ssd=off"],
+                ["archive", "discard=off", "ssd=off", "backup=off"],
             ],
         )
 
@@ -173,6 +176,28 @@ class TestHostedFlagParsing(unittest.TestCase):
 
         self.assertTrue(args.vm_disk_ssd)
         self.assertEqual(args.vm_disk_settings, [["archive", "ssd=off"]])
+
+    def test_swap_tiers_and_tuning(self):
+        args = self.parser.parse_args(
+            [
+                "10.0.0.50",
+                "--swap-zram", "fast", "1G", "priority=300", "algorithm=zstd",
+                "--swap-device", "bulk", "archive", "priority=10", "discard=once",
+                "--swappiness", "120",
+                "--swap-resume", "bulk",
+            ]
+        )
+
+        self.assertEqual(
+            args.swap_zram,
+            [["fast", "1G", "priority=300", "algorithm=zstd"]],
+        )
+        self.assertEqual(
+            args.swap_devices,
+            [["bulk", "archive", "priority=10", "discard=once"]],
+        )
+        self.assertEqual(args.swappiness, 120)
+        self.assertEqual(args.swap_resume, "bulk")
 
     def test_base_default_is_deferred_to_setup_config(self):
         args = self.parser.parse_args(["10.0.0.50"])
@@ -351,6 +376,7 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
         self.assertFalse(hasattr(args, "vm_cpu_type"))
         self.assertFalse(hasattr(args, "vm_disk_discard"))
         self.assertFalse(hasattr(args, "vm_disk_ssd"))
+        self.assertFalse(hasattr(args, "vm_disk_backup"))
         self.assertFalse(hasattr(args, "vm_disk_settings"))
 
     def test_explicit_agent_tool_flags_exist_remotely(self):

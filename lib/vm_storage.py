@@ -37,6 +37,7 @@ class VMDiskHardware:
     name: str
     discard: bool
     ssd: bool
+    backup: bool = True
 
 
 @dataclass(frozen=True)
@@ -90,8 +91,9 @@ def disk_hardware(config: SetupConfig) -> dict[str, VMDiskHardware]:
 
     default_discard = bool(getattr(config, "vm_disk_discard", True))
     default_ssd = bool(getattr(config, "vm_disk_ssd", False))
+    default_backup = bool(getattr(config, "vm_disk_backup", True))
     settings = {
-        name: VMDiskHardware(name, default_discard, default_ssd)
+        name: VMDiskHardware(name, default_discard, default_ssd, default_backup)
         for name in ["root", *(disk.name for disk in data_disks(config))]
     }
     for spec in getattr(config, "vm_disk_settings", None) or []:
@@ -100,6 +102,7 @@ def disk_hardware(config: SetupConfig) -> dict[str, VMDiskHardware]:
         current = settings[spec[0]]
         discard = current.discard
         ssd = current.ssd
+        backup = current.backup
         for option in spec[1:]:
             setting, separator, enabled = option.partition("=")
             if not separator or enabled not in {"on", "off"}:
@@ -108,7 +111,17 @@ def disk_hardware(config: SetupConfig) -> dict[str, VMDiskHardware]:
                 discard = enabled == "on"
             elif setting == "ssd":
                 ssd = enabled == "on"
-        settings[spec[0]] = VMDiskHardware(spec[0], discard, ssd)
+            elif setting == "backup":
+                backup = enabled == "on"
+        settings[spec[0]] = VMDiskHardware(spec[0], discard, ssd, backup)
+
+    # Swap contains no durable guest data. Excluding it also prevents restore
+    # jobs from spending time and backup space on an unusable memory snapshot.
+    from lib.swap_config import swap_device_disk_names
+
+    for name in swap_device_disk_names(config):
+        current = settings[name]
+        settings[name] = VMDiskHardware(name, current.discard, current.ssd, False)
     return settings
 
 

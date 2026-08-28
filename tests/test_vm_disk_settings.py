@@ -17,6 +17,7 @@ class TestVMDiskSettingsValidation(unittest.TestCase):
             ],
             "storage_mounts": [["archive", "/srv/archive", "ext4"]],
             "storage_caches": None,
+            "swap_devices": None,
             "vm_disk_settings": [
                 ["root", "ssd=on"],
                 ["archive", "discard=off", "ssd=off"],
@@ -65,6 +66,31 @@ class TestVMDiskSettingsValidation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "require --machine vm"):
             validate_vm_storage_settings(
                 self._config(machine_type="unprivileged"),
+                require_provisioning=True,
+            )
+
+    def test_swap_disk_needs_no_mount_and_cannot_be_backed_up(self):
+        config = self._config(
+            storage_mounts=None,
+            swap_devices=[["bulk", "archive", "priority=10"]],
+            vm_disk_settings=[["archive", "backup=off"]],
+        )
+        validate_vm_storage_settings(config, require_provisioning=True)
+
+        with self.assertRaisesRegex(ValueError, "cannot be included"):
+            validate_vm_storage_settings(
+                self._config(
+                    storage_mounts=None,
+                    swap_devices=[["bulk", "archive"]],
+                    vm_disk_settings=[["archive", "backup=on"]],
+                ),
+                require_provisioning=True,
+            )
+
+    def test_swap_disk_cannot_also_be_mounted(self):
+        with self.assertRaisesRegex(ValueError, "must not use --storage-mount"):
+            validate_vm_storage_settings(
+                self._config(swap_devices=[["bulk", "archive"]]),
                 require_provisioning=True,
             )
 

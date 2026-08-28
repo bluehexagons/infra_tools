@@ -1554,12 +1554,27 @@ def validate_vm_storage_settings(
         getattr(config, "storage_caches", None), "--storage-cache"
     )
     disk_setting_specs = _nested_string_specs(
-        getattr(config, "vm_disk_settings", None), "--disk-ssd/--disk-discard"
+        getattr(config, "vm_disk_settings", None),
+        "--disk-ssd/--disk-discard/--disk-backup",
+    )
+    swap_device_specs = _nested_string_specs(
+        getattr(config, "swap_devices", None), "--swap-device"
     )
     agent_workspace = getattr(config, "agent_workspace", None)
 
+    provisional_data_names = {
+        spec[0]
+        for spec in storage_specs
+        if len(spec) == 3 and spec[0] not in {"root", "template"}
+    }
+    named_swap_sources = {
+        spec[1]
+        for spec in swap_device_specs
+        if len(spec) >= 2 and spec[1] in provisional_data_names
+    }
     has_storage_declaration = bool(
         storage_specs or mount_specs or cache_specs or disk_setting_specs
+        or named_swap_sources
     )
     if (
         require_provisioning
@@ -1613,10 +1628,10 @@ def validate_vm_storage_settings(
     declared_disk_names = {"root", *data_names}
     disk_setting_names: set[str] = set()
     for spec in disk_setting_specs:
-        if not 2 <= len(spec) <= 3:
+        if not 2 <= len(spec) <= 4:
             raise ValueError(
                 "Per-device disk settings require NAME and one or both of "
-                "discard=on|off and ssd=on|off"
+                "discard=on|off, ssd=on|off, and backup=on|off"
             )
         name = spec[0]
         if name != "root":
@@ -1633,12 +1648,12 @@ def validate_vm_storage_settings(
             setting, separator, enabled = option.partition("=")
             if (
                 not separator
-                or setting not in {"discard", "ssd"}
+                or setting not in {"discard", "ssd", "backup"}
                 or enabled not in {"on", "off"}
             ):
                 raise ValueError(
-                    "Per-device disk settings must use discard=on|off or "
-                    "ssd=on|off"
+                    "Per-device disk settings must use discard=on|off, "
+                    "ssd=on|off, or backup=on|off"
                 )
             if setting in setting_names:
                 raise ValueError(
@@ -1728,7 +1743,27 @@ def validate_vm_storage_settings(
             + ", ".join(sorted(mounted_cache_devices))
         )
 
-    missing_mounts = data_names - mount_names - cache_devices
+    swap_mount_conflicts = named_swap_sources & mount_names
+    if swap_mount_conflicts:
+        raise ValueError(
+            "Swap disks must not use --storage-mount: "
+            + ", ".join(sorted(swap_mount_conflicts))
+        )
+    swap_cache_conflicts = named_swap_sources & (cache_origins | cache_devices)
+    if swap_cache_conflicts:
+        raise ValueError(
+            "Swap disks cannot also participate in --storage-cache: "
+            + ", ".join(sorted(swap_cache_conflicts))
+        )
+    for spec in disk_setting_specs:
+        if spec[0] not in named_swap_sources:
+            continue
+        if "backup=on" in spec[1:]:
+            raise ValueError(
+                f"Swap disk '{spec[0]}' cannot be included in Proxmox backups"
+            )
+
+    missing_mounts = data_names - mount_names - cache_devices - named_swap_sources
     if missing_mounts:
         raise ValueError(
             "Every VM data disk requires --storage-mount; missing: "
@@ -1743,11 +1778,179 @@ def validate_vm_storage_settings(
 
     if (
         data_names or mount_names or cache_specs or disk_setting_specs
+        or named_swap_sources
     ) and machine_type != "vm":
         raise ValueError(
             "Named data disks, mounts, caches, and per-device disk settings "
             "require --machine vm"
         )
+
+
+_SWAP_AREA_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+_SWAP_ALGORITHM_PATTERN = re.compile(r"^[a-z0-9_-]{1,32}$")
+
+
+def validate_swap_settings(config: Any) -> None:
+    """Validate declarative swap areas before any block-device mutation."""
+
+    mode = getattr(config, "swap_mode", "auto")
+    if mode not in {"auto", "preserve", "none"}:
+        raise ValueError("--swap-mode must be auto, preserve, or none")
+
+    file_specs = _nested_string_specs(
+        getattr(config, "swap_files", None), "--swap-file"
+    )
+    device_specs = _nested_string_specs(
+        getattr(config, "swap_devices", None), "--swap-device"
+    )
+    zram_specs = _nested_string_specs(
+        getattr(config, "swap_zram", None), "--swap-zram"
+    )
+    explicit_areas = bool(file_specs or device_specs or zram_specs)
+    if explicit_areas and mode != "auto":
+        raise ValueError("Explicit swap areas require --swap-mode auto")
+
+    names: set[str] = set()
+
+    def add_name(name: str) -> None:
+        if not _SWAP_AREA_NAME_PATTERN.fullmatch(name):
+            raise ValueError(
+                "Swap NAME must start with a lowercase letter and contain only "
+                "lowercase letters, numbers, and '-' (maximum 32 characters)"
+            )
+        if name in names:
+            raise ValueError(f"Duplicate swap area NAME '{name}'")
+        names.add(name)
+
+    def parse_options(
+        spec: list[str], start: int, allowed: set[str], flag: str
+    ) -> dict[str, str]:
+        options: dict[str, str] = {}
+        for option in spec[start:]:
+            key, separator, value = option.partition("=")
+            if not separator or key not in allowed or not value:
+                raise ValueError(
+                    f"{flag} options must use "
+                    + " or ".join(f"{item}=VALUE" for item in sorted(allowed))
+                )
+            if key in options:
+                raise ValueError(f"Duplicate {key} option for swap area '{spec[0]}'")
+            options[key] = value
+        if "priority" in options:
+            try:
+                priority = int(options["priority"])
+            except ValueError as exc:
+                raise ValueError(f"{flag} priority must be an integer") from exc
+            if not 0 <= priority <= 32767:
+                raise ValueError(f"{flag} priority must be between 0 and 32767")
+        return options
+
+    for spec in file_specs:
+        if len(spec) < 3:
+            raise ValueError("--swap-file requires NAME PATH SIZE [priority=N]")
+        add_name(spec[0])
+        path = spec[1]
+        if not os.path.isabs(path) or os.path.normpath(path) != path or path == "/":
+            raise ValueError("--swap-file PATH must be an absolute normalized file path")
+        validate_no_control_characters(path, "--swap-file PATH")
+        if _memory_string_kib(spec[2], "--swap-file SIZE") < 64 * 1024:
+            raise ValueError("--swap-file SIZE must be at least 64M")
+        parse_options(spec, 3, {"priority"}, "--swap-file")
+
+    device_names: set[str] = set()
+    declared_data = {
+        spec[0]
+        for spec in getattr(config, "container_storage", None) or []
+        if len(spec) == 3 and spec[0] not in {"root", "template"}
+    }
+    for spec in device_specs:
+        if len(spec) < 2:
+            raise ValueError(
+                "--swap-device requires NAME SOURCE [priority=N] [discard=POLICY]"
+            )
+        add_name(spec[0])
+        device_names.add(spec[0])
+        source = spec[1]
+        validate_no_control_characters(source, "--swap-device SOURCE")
+        stable_uuid = re.fullmatch(r"UUID=[A-Fa-f0-9-]{8,64}", source)
+        stable_by_id = re.fullmatch(
+            r"/dev/disk/by-id/[A-Za-z0-9._:+-]+", source
+        )
+        if (
+            source not in declared_data
+            and stable_uuid is None
+            and stable_by_id is None
+        ):
+            raise ValueError(
+                "--swap-device SOURCE must name a declared VM data disk, use "
+                "UUID=..., or use /dev/disk/by-id/..."
+            )
+        options = parse_options(
+            spec, 2, {"discard", "priority"}, "--swap-device"
+        )
+        if options.get("discard", "off") not in {"off", "once", "pages", "both"}:
+            raise ValueError(
+                "--swap-device discard must be off, once, pages, or both"
+            )
+
+    for spec in zram_specs:
+        if len(spec) < 2:
+            raise ValueError(
+                "--swap-zram requires NAME SIZE [priority=N] [algorithm=TOKEN]"
+            )
+        add_name(spec[0])
+        if _memory_string_kib(spec[1], "--swap-zram SIZE") < 64 * 1024:
+            raise ValueError("--swap-zram SIZE must be at least 64M")
+        options = parse_options(
+            spec, 2, {"algorithm", "priority"}, "--swap-zram"
+        )
+        algorithm = options.get("algorithm", "auto")
+        if algorithm != "auto" and not _SWAP_ALGORITHM_PATTERN.fullmatch(algorithm):
+            raise ValueError("--swap-zram algorithm contains unsupported characters")
+
+    initialize = getattr(config, "swap_initialize", None) or []
+    unknown_initialize = set(initialize) - device_names
+    if unknown_initialize:
+        raise ValueError(
+            "--swap-initialize references unknown swap area(s): "
+            + ", ".join(sorted(unknown_initialize))
+        )
+
+    resume = getattr(config, "swap_resume", None)
+    if resume and resume not in device_names:
+        raise ValueError("--swap-resume must name a declared --swap-device")
+
+    swappiness = getattr(config, "swappiness", None)
+    if swappiness is not None and (
+        isinstance(swappiness, bool)
+        or not isinstance(swappiness, int)
+        or not 0 <= swappiness <= 200
+    ):
+        raise ValueError("--swappiness must be an integer between 0 and 200")
+    zswap = getattr(config, "zswap", None)
+    zswap_pool = getattr(config, "zswap_max_pool_percent", None)
+    if zswap_pool is not None and (
+        isinstance(zswap_pool, bool)
+        or not isinstance(zswap_pool, int)
+        or not 1 <= zswap_pool <= 50
+    ):
+        raise ValueError("--zswap-max-pool-percent must be between 1 and 50")
+    if zswap_pool is not None and zswap is not True:
+        raise ValueError("--zswap-max-pool-percent requires --zswap")
+    if zram_specs and zswap is True:
+        raise ValueError("Managed zram and zswap cannot both be enabled")
+
+    if explicit_areas and getattr(config, "machine_type", None) in {
+        "unprivileged",
+        "privileged",
+        "oci",
+    }:
+        raise ValueError("Explicit swap areas are not supported inside containers")
+    if (
+        getattr(config, "system_type", None) == "server_proxmox"
+        and swappiness not in {None, 10}
+    ):
+        raise ValueError("Proxmox hosts require vm.swappiness=10")
 
 
 def validate_proxmox_balloon_settings(config: Any) -> None:
@@ -1780,6 +1983,7 @@ def validate_hosted_flags(config: Any) -> None:
         ValueError: If required flags are missing or invalid
     """
     validate_proxmox_balloon_settings(config)
+    validate_swap_settings(config)
     balloon_min = getattr(config, "vm_balloon_min", None)
     balloon_shares = getattr(config, "vm_balloon_shares", 1000)
     allow_memory_overcommit = getattr(config, "allow_memory_overcommit", False)

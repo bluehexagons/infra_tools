@@ -38,6 +38,7 @@ from lib.validation import (
     validate_samba_share_credentials,
     validate_samba_share_specs,
     validate_smb_mount_specs,
+    validate_swap_settings,
     validate_vm_storage_settings,
 )
 from lib.validators import validate_username
@@ -335,6 +336,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     validate_samba_share_credentials(config)
     validate_smb_mount_specs(config.smb_mounts)
     validate_gogs_settings(config)
+    validate_swap_settings(config)
     validate_vm_storage_settings(config, require_provisioning=False)
     validate_network_setup_settings(config)
     validate_rdp_settings(config)

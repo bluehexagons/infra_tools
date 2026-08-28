@@ -189,7 +189,7 @@ infra-tools setup workstation_dev 10.0.0.51 agent \
 
 Each non-root `--storage NAME [POOL] AMOUNT` requires exactly one matching
 `--storage-mount NAME PATH [ext4|xfs] [empty]`, unless that disk is consumed as
-cache media by `--storage-cache`. When `POOL` is omitted, the root-pool default
+cache media by `--storage-cache` or as swap by `--swap-device`. When `POOL` is omitted, the root-pool default
 is used. Provisioning checks that each selected pool is active, accepts VM
 images, and reports enough aggregate free capacity. It then attaches the disks
 as `scsi1`, `scsi2`, and so on with stable `it-NAME` serials.
@@ -199,6 +199,29 @@ disk name to any disk flag for a device-specific override, such as
 `--disk-ssd root`, `--no-disk-discard agent-data`, or
 `--disk-discard agent-data`. An unqualified flag remains the default for all
 declared disks, and a named override wins over that default.
+
+Backup inclusion is also per device. Non-swap disks default to included; use
+`--no-disk-backup` for a disposable VM and `--disk-backup work` to retain one
+important working-data disk. A swap disk is always emitted with `backup=0`,
+and an explicit attempt to enable backup on it is rejected.
+
+A VM can use different provider pools for prioritized swap tiers:
+
+```bash
+--storage swap-fast local-lvm 16G \
+--disk-ssd swap-fast \
+--swap-device fast swap-fast priority=200 discard=once \
+--storage swap-bulk bulk-lvm 64G \
+--swap-device bulk swap-bulk priority=10
+```
+
+The provider attaches both disks with stable serials; target setup confirms
+that each whole disk is blank before creating swap and then persists UUID-based
+fstab entries. The higher-priority SSD tier is exhausted before the HDD tier.
+Neither disk uses `--storage-mount`. If a selected pool is a Proxmox `zfspool`,
+setup warns that the layout is unqualified. This guest block-I/O layout is not
+the same as configuring host swap directly on a zvol, but sustained guest swap
+can still amplify ZFS I/O and memory pressure.
 
 To accelerate one durable HDD-backed data disk with a separate SSD-backed
 virtual disk, add an LVM cache declaration:
@@ -352,6 +375,7 @@ The resulting Proxmox baseline is:
 | Disk controller | VirtIO SCSI single with `iothread=1` on every disk | Uses the per-disk I/O thread supported by the selected controller. |
 | Disk discard | Enabled | Passes guest TRIM through to thin or sparse storage. Use `--no-disk-discard` as the VM-wide default, or append a logical disk name to either form for an override. |
 | SSD emulation | Disabled | Use `--disk-ssd` as a VM-wide default or `--disk-ssd NAME` for only SSD-like devices. It is not auto-detected because one VM can span remote or mixed-media pools. |
+| Backup inclusion | Enabled for non-swap disks | Use `--no-disk-backup [NAME]` for disposable data. Swap disks are always excluded. |
 | Network | VirtIO | Lowest-overhead normal Linux guest path. Multiqueue is normally unnecessary for interactive RDP traffic. |
 | Guest agent | Enabled and installed | Supports clean lifecycle and guest inspection from Proxmox. |
 | Entropy | VirtIO RNG backed by `/dev/urandom` | Gives Linux guests a reliable entropy source during early boot and key generation. |

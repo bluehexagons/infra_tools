@@ -962,6 +962,21 @@ def _execute_patch_config(config: SetupConfig) -> int:
 
 def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
     preserve_keys: set[str] = set()
+    explicit_swap_mode = getattr(args, "swap_mode", None)
+    if explicit_swap_mode is None:
+        preserve_keys.add("swap_mode")
+    if explicit_swap_mode is None:
+        for field in ("swap_files", "swap_devices", "swap_zram"):
+            if getattr(args, field, None) is None:
+                preserve_keys.add(field)
+    for field in (
+        "swappiness",
+        "zswap",
+        "zswap_max_pool_percent",
+        "swap_resume",
+    ):
+        if getattr(args, field, None) is None:
+            preserve_keys.add(field)
     if getattr(args, "proxmox_balloon_target", None) is None:
         preserve_keys.add("proxmox_balloon_target")
     if getattr(args, "machine_type", None) is None:
@@ -984,6 +999,7 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
                 "vm_cpu_type",
                 "vm_disk_discard",
                 "vm_disk_ssd",
+                "vm_disk_backup",
                 "vm_disk_settings",
                 "container_base",
                 "vm_image",
@@ -1056,6 +1072,7 @@ _PROVISIONING_CHANGE_ARGS = (
     "vm_cpu_type",
     "vm_disk_discard",
     "vm_disk_ssd",
+    "vm_disk_backup",
     "vm_disk_settings",
     "container_base",
     "vm_image",
@@ -1079,6 +1096,7 @@ _CACHED_PROVISIONING_FIELDS = (
     "vm_cpu_type",
     "vm_disk_discard",
     "vm_disk_ssd",
+    "vm_disk_backup",
     "vm_disk_settings",
     "container_base",
     "vm_image",
@@ -1094,6 +1112,7 @@ _RECONCILABLE_VM_PROVISIONING_CHANGES = {
     "vm_cpu_type",
     "vm_disk_discard",
     "vm_disk_ssd",
+    "vm_disk_backup",
     "vm_disk_settings",
 }
 
@@ -1111,6 +1130,7 @@ _PROVISIONING_FIELD_FLAGS = {
     "vm_cpu_type": "--cpu-type",
     "vm_disk_discard": "--disk-discard",
     "vm_disk_ssd": "--disk-ssd",
+    "vm_disk_backup": "--disk-backup",
     "vm_disk_settings": "--disk-ssd/--disk-discard NAME",
     "container_base": "--base",
     "vm_image": "--image",
@@ -1489,9 +1509,16 @@ def run_setup_command(args: argparse.Namespace) -> int:
             try:
                 provision_vm(config, image=config.vm_image)
             except VMAlreadyExists:
-                if config.storage_mounts or config.storage_caches:
+                from lib.swap_config import swap_device_disk_names
+
+                if (
+                    config.storage_mounts
+                    or config.storage_caches
+                    or swap_device_disk_names(config)
+                ):
                     print(
-                        "Error: named VM data disks and caches are provisioning-only; "
+                        "Error: named VM data disks, caches, and swap disks are "
+                        "provisioning-only; "
                         "refusing to adopt disks on an existing unsaved VM"
                     )
                     return 1

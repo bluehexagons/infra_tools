@@ -123,6 +123,7 @@ def _disk_hardware_value(
     *,
     discard: bool,
     ssd: bool,
+    backup: bool,
     serial: Optional[str] = None,
 ) -> str:
     """Apply infra_tools-managed hardware hints to a Proxmox disk value."""
@@ -130,7 +131,7 @@ def _disk_hardware_value(
     parts = [
         part
         for part in volume.split(",")
-        if not part.startswith(("discard=", "ssd="))
+        if not part.startswith(("discard=", "ssd=", "backup="))
     ]
     if not any(part == "iothread=1" for part in parts[1:]):
         parts.append("iothread=1")
@@ -142,10 +143,14 @@ def _disk_hardware_value(
         parts.append("discard=on")
     if ssd:
         parts.append("ssd=1")
+    if not backup:
+        parts.append("backup=0")
     return ",".join(parts)
 
 
-def _disk_hardware_matches(value: str, *, discard: bool, ssd: bool) -> bool:
+def _disk_hardware_matches(
+    value: str, *, discard: bool, ssd: bool, backup: bool
+) -> bool:
     """Return whether one Proxmox disk has the requested managed hints."""
 
     options = {
@@ -157,6 +162,7 @@ def _disk_hardware_matches(value: str, *, discard: bool, ssd: bool) -> bool:
     return (
         (options.get("discard") == "on") == discard
         and (options.get("ssd") == "1") == ssd
+        and (options.get("backup", "1") == "1") == backup
         and options.get("iothread") == "1"
     )
 
@@ -658,6 +664,7 @@ def _reconcile_existing_vm(
                 or hardware.name != name
                 or not isinstance(hardware.discard, bool)
                 or not isinstance(hardware.ssd, bool)
+                or not isinstance(hardware.backup, bool)
             ):
                 raise ProvisionError("Invalid per-device VM disk hardware settings")
     existing = _list_existing_vms(node_ip, user, ssh_opts)
@@ -747,6 +754,7 @@ def _reconcile_existing_vm(
             value,
             discard=desired_disk_hardware[logical_name].discard,
             ssd=desired_disk_hardware[logical_name].ssd,
+            backup=desired_disk_hardware[logical_name].backup,
         )
     ]
     if memory_changed:
@@ -799,6 +807,7 @@ def _reconcile_existing_vm(
             disk_value,
             discard=hardware.discard,
             ssd=hardware.ssd,
+            backup=hardware.backup,
         )
         update = _ssh_run(
             node_ip,
@@ -842,6 +851,7 @@ def _reconcile_existing_vm(
                 observed_disks[disk_name],
                 discard=hardware.discard,
                 ssd=hardware.ssd,
+                backup=hardware.backup,
             )
             for _logical_name, disk_name, _disk_value, hardware in disk_changes
         )
@@ -903,14 +913,21 @@ def _reconcile_existing_vm(
     if disk_changes:
         details = ", ".join(
             f"{logical_name} (discard={'on' if hardware.discard else 'off'}, "
-            f"SSD={'on' if hardware.ssd else 'off'})"
+            f"SSD={'on' if hardware.ssd else 'off'}, "
+            f"backup={'on' if hardware.backup else 'off'})"
             for logical_name, _device, _value, hardware in disk_changes
         )
         print(
             f"  ✓ Reconfigured {len(disk_changes)} managed disk(s) on VM "
             f"{matched.vmid}: {details}"
         )
-    if cpu_changed or disk_changes:
+    disk_model_changed = any(
+        ((_disk_option(value, "discard") == "on") != hardware.discard)
+        or ((_disk_option(value, "ssd") == "1") != hardware.ssd)
+        or _disk_option(value, "iothread") != "1"
+        for _logical_name, _device, value, hardware in disk_changes
+    )
+    if cpu_changed or disk_model_changed:
         print(
             f"  ⚠ VM {matched.vmid} is running; restart it for all hardware "
             "model changes to take effect in the guest"
@@ -1028,6 +1045,45 @@ def _resolve_image_storage(
         f"Storage pool '{requested_pool}' does not support 'import' or 'iso' "
         "content; choose a file-based storage with --image-storage STORAGE"
     )
+
+
+def _warn_zfs_swap_storage(
+    disks: list[VMDataDisk],
+    swap_disk_names: set[str],
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+) -> None:
+    """Warn when a guest swap disk is allocated from a Proxmox ZFS pool."""
+
+    checked: dict[str, str | None] = {}
+    for disk in disks:
+        if disk.name not in swap_disk_names:
+            continue
+        if disk.pool not in checked:
+            result = _ssh_run(
+                node_ip,
+                user,
+                ssh_opts,
+                f"pvesh get /storage/{shlex.quote(disk.pool)} --output-format json",
+                dry_run=False,
+            )
+            storage_type: str | None = None
+            if result.returncode == 0:
+                try:
+                    payload = json.loads(result.stdout or "{}")
+                except json.JSONDecodeError:
+                    payload = {}
+                if isinstance(payload, dict) and isinstance(payload.get("type"), str):
+                    storage_type = payload["type"]
+            checked[disk.pool] = storage_type
+        if checked[disk.pool] == "zfspool":
+            print(
+                f"  ⚠ Swap disk '{disk.name}' uses ZFS pool '{disk.pool}'. This "
+                "is guest block I/O, not host zvol swap, but heavy swapping can "
+                "still increase ZFS I/O and memory pressure; this layout is not "
+                "yet qualified by infra-tools."
+            )
 
 
 def _download_image_to_host(
@@ -1380,7 +1436,7 @@ def _create_vm(
             _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
         raise ProvisionError("No image source available to attach to VM disk")
 
-    default_hardware = VMDiskHardware("root", disk_discard, disk_ssd)
+    default_hardware = VMDiskHardware("root", disk_discard, disk_ssd, True)
     root_hardware = (disk_hardware_settings or {}).get(
         "root",
         default_hardware,
@@ -1389,6 +1445,7 @@ def _create_vm(
         disk_volume,
         discard=root_hardware.discard,
         ssd=root_hardware.ssd,
+        backup=root_hardware.backup,
     )
     set_cmd = (
         f"qm set {vmid} "
@@ -1419,7 +1476,7 @@ def _create_vm(
         data_size_gib = _parse_disk_size_gib(disk.size)
         hardware = (disk_hardware_settings or {}).get(
             disk.name,
-            VMDiskHardware(disk.name, disk_discard, disk_ssd),
+            VMDiskHardware(disk.name, disk_discard, disk_ssd, True),
         )
         # For a newly allocated volume, qm's STORAGE:SIZE syntax takes a bare
         # GiB count. A suffix such as ``32G`` is parsed as an existing LVM
@@ -1428,6 +1485,7 @@ def _create_vm(
             f"{disk.pool}:{data_size_gib}",
             discard=hardware.discard,
             ssd=hardware.ssd,
+            backup=hardware.backup,
             serial=disk.serial,
         )
         attach_result = _ssh_run(
@@ -1628,7 +1686,8 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         print(
             "  Disk hint defaults: "
             f"discard={'on' if disk_discard else 'off'}, "
-            f"SSD={'on' if disk_ssd else 'off'}"
+            f"SSD={'on' if disk_ssd else 'off'}, "
+            f"backup={'on' if getattr(config, 'vm_disk_backup', True) else 'off'}"
         )
         print(
             "  Console: "
@@ -1638,7 +1697,8 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         print(
             f"  Root storage: {root_pool_arg} ({disk_size_gib}G, "
             f"discard={'on' if root_hardware.discard else 'off'}, "
-            f"SSD={'on' if root_hardware.ssd else 'off'})"
+            f"SSD={'on' if root_hardware.ssd else 'off'}, "
+            f"backup={'on' if root_hardware.backup else 'off'})"
         )
         for index, disk in enumerate(declared_data_disks, 1):
             hardware = disk_hardware_settings[disk.name]
@@ -1647,7 +1707,8 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
                 f"({_parse_disk_size_gib(disk.size)}G, scsi{index}, "
                 f"serial={disk.serial}, "
                 f"discard={'on' if hardware.discard else 'off'}, "
-                f"SSD={'on' if hardware.ssd else 'off'})"
+                f"SSD={'on' if hardware.ssd else 'off'}, "
+                f"backup={'on' if hardware.backup else 'off'})"
             )
         if catalog_entry:
             print(f"  Image (catalog): {catalog_entry['codename']} {catalog_entry['snapshot']} → {catalog_entry['filename']}")
@@ -1742,6 +1803,15 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         )
         for disk in declared_data_disks
     ]
+    from lib.swap_config import swap_device_disk_names
+
+    _warn_zfs_swap_storage(
+        resolved_data_disks,
+        swap_device_disk_names(config),
+        node_ip,
+        user,
+        ssh_opts,
+    )
     _preflight_data_disk_capacity(
         resolved_data_disks,
         node_ip,

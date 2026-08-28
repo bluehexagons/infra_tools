@@ -51,7 +51,7 @@ class VMDiskSettingAction(argparse.Action):
     """Set a VM-wide disk default or one logical disk override."""
 
     def __init__(self, option_strings, dest, setting: str, **kwargs):
-        if setting not in {"discard", "ssd"}:
+        if setting not in {"discard", "ssd", "backup"}:
             raise ValueError(f"Unsupported VM disk setting: {setting}")
         self.setting = setting
         super().__init__(option_strings, dest, **kwargs)
@@ -310,6 +310,79 @@ def add_setup_arguments(
             else argparse.SUPPRESS
         ),
     )
+    parser.add_argument(
+        "--swap-mode",
+        choices=("auto", "preserve", "none"),
+        default=argparse.SUPPRESS,
+        help=(
+            "Swap ownership policy: auto creates a root swap file only when no "
+            "swap exists, preserve leaves areas alone, and none removes only "
+            "infra-tools-managed areas"
+        ),
+    )
+    parser.add_argument(
+        "--swap-file",
+        dest="swap_files",
+        action="append",
+        nargs="+",
+        metavar="SWAP",
+        help="Managed swap file: NAME PATH SIZE [priority=N]; repeat as needed",
+    )
+    parser.add_argument(
+        "--swap-device",
+        dest="swap_devices",
+        action="append",
+        nargs="+",
+        metavar="SWAP",
+        help=(
+            "Managed swap block device: NAME SOURCE [priority=N] "
+            "[discard=off|once|pages|both]; SOURCE may name a declared VM disk"
+        ),
+    )
+    parser.add_argument(
+        "--swap-zram",
+        dest="swap_zram",
+        action="append",
+        nargs="+",
+        metavar="SWAP",
+        help="Managed compressed-RAM swap: NAME SIZE [priority=N] [algorithm=TOKEN]",
+    )
+    parser.add_argument(
+        "--swappiness",
+        type=int,
+        default=argparse.SUPPRESS,
+        metavar="N",
+        help="Linux vm.swappiness value (0-200)",
+    )
+    parser.add_argument(
+        "--zswap",
+        action=argparse.BooleanOptionalAction,
+        default=argparse.SUPPRESS,
+        help="Enable or disable the Linux zswap compressed swap cache",
+    )
+    parser.add_argument(
+        "--zswap-max-pool-percent",
+        type=int,
+        default=argparse.SUPPRESS,
+        metavar="N",
+        help="Maximum percentage of RAM used by zswap (1-50)",
+    )
+    parser.add_argument(
+        "--swap-resume",
+        default=argparse.SUPPRESS,
+        metavar="NAME",
+        help="Use one managed swap device as the hibernation resume device",
+    )
+    parser.add_argument(
+        "--swap-initialize",
+        action="append",
+        default=argparse.SUPPRESS,
+        metavar="NAME",
+        help=(
+            "Authorize initialization of a blank direct --swap-device once; "
+            "named newly provisioned VM disks do not require this flag"
+        ),
+    )
 
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
@@ -419,6 +492,21 @@ def add_setup_arguments(
                 "Advertise provisioned VM disks as SSDs; optionally name root "
                 "or a declared data disk to override only that device (default: "
                 "disabled; enable only for SSD-like backing storage)"
+            ),
+        )
+        parser.add_argument(
+            "--disk-backup",
+            "--no-disk-backup",
+            dest="vm_disk_backup",
+            action=VMDiskSettingAction,
+            setting="backup",
+            nargs="?",
+            default=argparse.SUPPRESS,
+            metavar="NAME",
+            help=(
+                "Include provisioned VM disks in Proxmox backups; optionally "
+                "name root or a declared data disk (default: enabled for "
+                "non-swap disks and disabled for swap disks)"
             ),
         )
         parser.add_argument(

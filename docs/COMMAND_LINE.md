@@ -714,6 +714,7 @@ reboots explicitly.
 | `--cpu-type MODEL` | Proxmox VM CPU model; defaults to `host` |
 | `--disk-discard [NAME]` / `--no-disk-discard [NAME]` | Enable or disable discard/TRIM globally, or override only `root` or one named VM disk; enabled by default |
 | `--disk-ssd [NAME]` / `--no-disk-ssd [NAME]` | Advertise all declared VM disks, or only `root` or one named disk, as SSD-backed; disabled by default |
+| `--disk-backup [NAME]` / `--no-disk-backup [NAME]` | Include disks in Proxmox backups globally or per device; enabled for non-swap disks and forced off for swap disks |
 | `--base NAME` | Base image family |
 
 Notes:
@@ -745,7 +746,7 @@ Notes:
   nodes with different CPU generations.
 - Named data disks are available only while provisioning a new QEMU VM. Every
   name must have exactly one mount declaration unless it is consumed as the
-  cache device in `--storage-cache`; logical names use lowercase letters,
+  cache device in `--storage-cache` or by `--swap-device`; logical names use lowercase letters,
   numbers, and hyphens and are at most 17 characters.
 - `--storage-cache` builds a guest-side LVM cache from two entire blank disks.
   Put the data disk on the durable pool and the cache disk on SSD storage. The
@@ -805,6 +806,47 @@ Notes:
   comes from the Proxmox node (with bridge-specific values preferred). The
   controller machine's gateway is not reused because it may be on a different
   LAN or VPN.
+
+### Swap configuration flags
+
+| Flag | Description |
+|------|-------------|
+| `--swap-mode auto|preserve|none` | `auto` reconciles declarations or creates `/swapfile` only when no swap exists; `preserve` changes no areas; `none` removes only infra-tools-owned areas |
+| `--swap-file NAME PATH SIZE [priority=N]` | Manage a swap file; repeatable |
+| `--swap-device NAME SOURCE [priority=N] [discard=POLICY]` | Manage a whole block device; `SOURCE` is a declared VM disk, `UUID=...`, or `/dev/disk/by-id/...`; discard is `off`, `once`, `pages`, or `both` |
+| `--swap-zram NAME SIZE [priority=N] [algorithm=TOKEN]` | Manage compressed-RAM swap with `systemd-zram-generator`; repeatable |
+| `--swappiness N` | Set `vm.swappiness` from 0 through 200 |
+| `--zswap` / `--no-zswap` | Enable or disable the kernel's compressed zswap cache; managed zram and enabled zswap are mutually exclusive |
+| `--zswap-max-pool-percent N` | Limit zswap to 1-50% of RAM; requires `--zswap` |
+| `--swap-resume NAME` | Configure a declared swap device for hibernation resume |
+| `--swap-initialize NAME` | One-shot authorization to initialize a blank direct device; newly provisioned named VM swap disks are already tool-owned |
+
+Linux uses the highest-priority swap first and shares I/O across areas with
+equal priority. This makes a small SSD tier plus a larger HDD tier explicit:
+
+```bash
+--storage swap-fast local-lvm 16G \
+--disk-ssd swap-fast \
+--swap-device fast swap-fast priority=200 discard=once \
+--storage swap-bulk bulk-lvm 64G \
+--swap-device bulk swap-bulk priority=10 \
+--swappiness 80
+```
+
+Swap disks cannot also be mounted or used as LVM cache media, and they are
+always excluded from Proxmox backups. Other disks default to backup enabled;
+use `--no-disk-backup` for a disposable VM and selectively restore important
+working data with `--disk-backup NAME`. Direct devices are never reformatted
+unless blank and named by `--swap-initialize`; existing filesystems,
+partitions, mounts, or unrelated signatures stop setup. Removing a swap
+declaration never wipes its block-device signature.
+
+Infra-tools records owned areas in `/opt/infra_tools/state/swap.json` and
+edits only a marked block in `/etc/fstab`. Existing unmanaged swap is
+preserved. Btrfs swap files are rejected because their creation is
+filesystem-specific. ZFS swap files, zvol-like devices, and Proxmox guest
+swap disks allocated on a `zfspool` produce warnings because those layouts
+have not yet been qualified by this project.
 
 ## Deployment Flags
 

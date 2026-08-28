@@ -143,7 +143,7 @@ def _vm_disk_setting_args(value: Optional[NestedStrList]) -> StrList:
         name = shlex.quote(spec[0])
         for option in spec[1:]:
             setting, separator, enabled = option.partition("=")
-            if separator and setting in {"discard", "ssd"} and enabled in {
+            if separator and setting in {"discard", "ssd", "backup"} and enabled in {
                 "on",
                 "off",
             }:
@@ -360,11 +360,21 @@ class SetupConfig:
     container_storage: Optional[NestedStrList] = None  # [[name, pool, amount?], ...]
     storage_mounts: Optional[NestedStrList] = None  # [[name, path, filesystem?, policy?], ...]
     storage_caches: Optional[NestedStrList] = None  # [[data_name, cache_name, mode?], ...]
+    swap_mode: str = "auto"
+    swap_files: Optional[NestedStrList] = None  # [[name, path, size, priority=N?], ...]
+    swap_devices: Optional[NestedStrList] = None  # [[name, source, priority=N?, discard=...?], ...]
+    swap_zram: Optional[NestedStrList] = None  # [[name, size, priority=N?, algorithm=...?], ...]
+    swappiness: Optional[int] = None
+    zswap: Optional[bool] = None
+    zswap_max_pool_percent: Optional[int] = None
+    swap_resume: MaybeStr = None
+    swap_initialize: Optional[StrList] = None  # One-shot destructive authorization
     container_cores: int = 1
     vm_cpu_type: str = "host"
     vm_disk_discard: bool = True
     vm_disk_ssd: bool = False
-    vm_disk_settings: Optional[NestedStrList] = None  # [[name, discard=on?, ssd=on?], ...]
+    vm_disk_backup: bool = True
+    vm_disk_settings: Optional[NestedStrList] = None  # [[name, discard=on?, ssd=on?, backup=on?], ...]
     container_base: str = "debian"
     vm_image: MaybeStr = None  # HTTPS URL or 'storage:import/file.qcow2'
     vm_image_sha512: MaybeStr = None  # Required for custom HTTPS VM images
@@ -610,6 +620,35 @@ class SetupConfig:
             self.samba_sources,
         )
 
+    def _swap_args(self, *, include_initialize: bool = False) -> StrList:
+        """Return the complete target-side swap policy as CLI fragments."""
+
+        args: StrList = [f"--swap-mode {shlex.quote(self.swap_mode)}"]
+        for flag, specs in (
+            ("--swap-file", self.swap_files),
+            ("--swap-device", self.swap_devices),
+            ("--swap-zram", self.swap_zram),
+        ):
+            for spec in _normalize_nested_specs(specs) or []:
+                args.append(
+                    f"{flag} "
+                    + " ".join(shlex.quote(str(part)) for part in spec)
+                )
+        if self.swappiness is not None:
+            args.append(f"--swappiness {self.swappiness}")
+        if self.zswap is not None:
+            args.append("--zswap" if self.zswap else "--no-zswap")
+        if self.zswap_max_pool_percent is not None:
+            args.append(
+                f"--zswap-max-pool-percent {self.zswap_max_pool_percent}"
+            )
+        if self.swap_resume:
+            args.append(f"--swap-resume {shlex.quote(self.swap_resume)}")
+        if include_initialize:
+            for name in self.swap_initialize or []:
+                args.append(f"--swap-initialize {shlex.quote(name)}")
+        return args
+
     def to_remote_args(self) -> StrList:
         """Generate command line arguments for remote execution."""
         args: StrList = []
@@ -631,6 +670,7 @@ class SetupConfig:
         for cache_spec in _normalize_nested_specs(self.storage_caches) or []:
             escaped_spec = " ".join(shlex.quote(str(part)) for part in cache_spec)
             args.append(f"--storage-cache {escaped_spec}")
+        args.extend(self._swap_args(include_initialize=True))
         if self.include_control_plane_tools:
             args.append("--control-plane")
         
@@ -984,6 +1024,8 @@ class SetupConfig:
                 cmd_parts.append("--no-disk-discard")
             if self.vm_disk_ssd:
                 cmd_parts.append("--disk-ssd")
+            if not self.vm_disk_backup:
+                cmd_parts.append("--no-disk-backup")
             cmd_parts.extend(_vm_disk_setting_args(self.vm_disk_settings))
             if self.container_base != "debian":
                 cmd_parts.append(f"--base {shlex.quote(self.container_base)}")
@@ -997,6 +1039,8 @@ class SetupConfig:
                 cmd_parts.append(
                     f"--image-storage {shlex.quote(self.vm_image_storage)}"
                 )
+
+        cmd_parts.extend(self._swap_args())
 
         if self.proxmox_balloon_target is not None:
             cmd_parts.append(
@@ -1423,6 +1467,7 @@ class SetupConfig:
             'device_pairing_auth_username',
             'device_pairing_auth_password',
             'device_pairing_payload',
+            'swap_initialize',
         ):
             data.pop(transient_field, None)
         for legacy_field in (
@@ -1474,6 +1519,9 @@ class SetupConfig:
         data['container_storage'] = _normalize_nested_specs(data.get('container_storage'))
         data['storage_mounts'] = _normalize_nested_specs(data.get('storage_mounts'))
         data['storage_caches'] = _normalize_nested_specs(data.get('storage_caches'))
+        data['swap_files'] = _normalize_nested_specs(data.get('swap_files'))
+        data['swap_devices'] = _normalize_nested_specs(data.get('swap_devices'))
+        data['swap_zram'] = _normalize_nested_specs(data.get('swap_zram'))
         data['vm_disk_settings'] = _normalize_nested_specs(data.get('vm_disk_settings'))
         system_defaults = get_system_type_definition(system_type)
         if not data.get('agent_tools') and not data.get('agent_tools_removed'):
@@ -1941,10 +1989,20 @@ class SetupConfig:
             container_storage=_normalize_nested_specs(getattr(args, 'container_storage', None)),
             storage_mounts=_normalize_nested_specs(getattr(args, 'storage_mounts', None)),
             storage_caches=_normalize_nested_specs(getattr(args, 'storage_caches', None)),
+            swap_mode=getattr(args, 'swap_mode', 'auto'),
+            swap_files=_normalize_nested_specs(getattr(args, 'swap_files', None)),
+            swap_devices=_normalize_nested_specs(getattr(args, 'swap_devices', None)),
+            swap_zram=_normalize_nested_specs(getattr(args, 'swap_zram', None)),
+            swappiness=_optional_int_arg(args, 'swappiness'),
+            zswap=_optional_bool_arg(args, 'zswap'),
+            zswap_max_pool_percent=_optional_int_arg(args, 'zswap_max_pool_percent'),
+            swap_resume=_optional_str_arg(args, 'swap_resume'),
+            swap_initialize=getattr(args, 'swap_initialize', None),
             container_cores=getattr(args, 'container_cores', 1),
             vm_cpu_type=getattr(args, 'vm_cpu_type', 'host'),
             vm_disk_discard=getattr(args, 'vm_disk_discard', True),
             vm_disk_ssd=getattr(args, 'vm_disk_ssd', False),
+            vm_disk_backup=getattr(args, 'vm_disk_backup', True),
             vm_disk_settings=_normalize_nested_specs(getattr(args, 'vm_disk_settings', None)),
             container_base=getattr(args, 'container_base', 'debian'),
             vm_image=getattr(args, 'vm_image', None),
