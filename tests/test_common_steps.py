@@ -17,6 +17,7 @@ from common.common_steps import (
     _ensure_vm_setup_user_sudoers,
     _run_as_login_user,
     check_debian_package_sources,
+    configure_time_sync,
     ensure_python_alias,
     install_cli_tools,
     install_data_analysis_tools,
@@ -87,6 +88,46 @@ class TestUpdateAndUpgradePackages(unittest.TestCase):
 
         mock_run.assert_not_called()
         mock_check_sources.assert_called_once()
+
+
+class TestTimeSynchronization(unittest.TestCase):
+    @patch("common.common_steps.install_package")
+    @patch(
+        "common.common_steps.is_package_installed",
+        side_effect=lambda package: package == "chrony",
+    )
+    @patch("common.common_steps.run")
+    @patch("common.common_steps.can_manage_time_sync", return_value=False)
+    def test_unprivileged_container_disables_guest_time_daemons(
+        self,
+        mock_can_manage,
+        mock_run,
+        _is_installed,
+        mock_install,
+    ):
+        configure_time_sync(
+            SetupConfig(
+                host="testhost",
+                username="testuser",
+                system_type="server_lite",
+                machine_type="unprivileged",
+                timezone="America/Chicago",
+            )
+        )
+
+        mock_can_manage.assert_called_once_with("unprivileged")
+        mock_run.assert_any_call("systemctl disable --now chrony", check=False)
+        mock_run.assert_any_call(
+            "timedatectl set-timezone America/Chicago",
+            check=False,
+        )
+        self.assertFalse(
+            any(
+                "systemd-timesyncd" in call.args[0]
+                for call in mock_run.call_args_list
+            )
+        )
+        mock_install.assert_not_called()
 
 
 class TestControlPlanePackages(unittest.TestCase):

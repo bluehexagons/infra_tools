@@ -164,8 +164,7 @@ class TestCleanupHelpers(unittest.TestCase):
         result = cleanup_maintenance.cleanup_unused_packages()
 
         self.assertEqual(result, [])
-        self.assertEqual(mock_cleanup.call_count, 2)
-        mock_cleanup.assert_any_call(
+        mock_cleanup.assert_called_once_with(
             [
                 "/usr/bin/apt-get",
                 "autoremove",
@@ -178,23 +177,23 @@ class TestCleanupHelpers(unittest.TestCase):
             "APT unused package cleanup",
             env=mock_cleanup.call_args.kwargs["env"],
         )
-        mock_cleanup.assert_any_call(
-            [
-                "/usr/bin/apt-get",
-                "purge",
-                "-y",
-                "-qq",
-                "~c",
-                "-o",
-                "DPkg::Lock::Timeout=300",
-            ],
-            "APT residual configuration cleanup",
-            env=mock_cleanup.call_args.kwargs["env"],
-        )
         self.assertEqual(
             mock_cleanup.call_args.kwargs["env"]["DEBIAN_FRONTEND"],
             "noninteractive",
         )
+
+    @patch("common.service_tools.cleanup_maintenance.run_cleanup_command", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.shutil.which", return_value="/usr/bin/apt-get")
+    def test_cleanup_unused_packages_retains_residual_configuration(
+        self,
+        _which,
+        mock_cleanup,
+    ):
+        cleanup_maintenance.cleanup_unused_packages()
+
+        command = mock_cleanup.call_args.args[0]
+        self.assertNotIn("~c", command)
+        self.assertNotEqual(command[1], "purge")
 
     @patch("common.service_tools.cleanup_maintenance.run_command")
     @patch(

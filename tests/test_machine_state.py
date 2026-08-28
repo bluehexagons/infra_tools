@@ -69,6 +69,10 @@ class TestMachineStateHelpers(unittest.TestCase):
              patch.object(ms, 'detect_machine_type', return_value='vm'):
             self.assertTrue(ms.is_vm())
 
+    def test_time_sync_can_use_current_type_instead_of_saved_state(self):
+        with self._patch_machine_type('hardware'):
+            self.assertFalse(ms.can_manage_time_sync('unprivileged'))
+
 
 class TestMachineTypeDetection(unittest.TestCase):
     def test_detects_lxc_as_unprivileged(self):

@@ -138,10 +138,13 @@ def cleanup_apt_cache() -> list[str]:
 
 
 def cleanup_unused_packages() -> list[str]:
-    """Purge packages APT marks unused and residual package configuration.
+    """Purge packages APT marks unused.
 
     APT's configured kernel-retention policy protects kernels it considers
-    required.
+    required. Residual configuration is deliberately retained: purging a
+    removed package can run maintainer hooks for unit names now owned by an
+    installed replacement (for example, ifupdown and ifupdown2 both use
+    networking.service).
     """
     apt_get = shutil.which("apt-get")
     if not apt_get:
@@ -150,21 +153,12 @@ def cleanup_unused_packages() -> list[str]:
 
     env = os.environ.copy()
     env["DEBIAN_FRONTEND"] = "noninteractive"
-    failures: list[str] = []
-    for command, action in (
-        (
-            [apt_get, "autoremove", "--purge", "-y", "-qq"] + APT_LOCK_OPTIONS,
-            "APT unused package cleanup",
-        ),
-        (
-            [apt_get, "purge", "-y", "-qq", "~c"] + APT_LOCK_OPTIONS,
-            "APT residual configuration cleanup",
-        ),
-    ):
-        failure = run_cleanup_command(command, action, env=env)
-        if failure:
-            failures.append(failure)
-    return failures
+    failure = run_cleanup_command(
+        [apt_get, "autoremove", "--purge", "-y", "-qq"] + APT_LOCK_OPTIONS,
+        "APT unused package cleanup",
+        env=env,
+    )
+    return [failure] if failure else []
 
 
 def audit_package_database() -> str | None:

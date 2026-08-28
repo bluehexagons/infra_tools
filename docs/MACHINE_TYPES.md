@@ -48,7 +48,9 @@ compatibility labels, but they are not part of the official support target.
 ## Behavior
 
 ### Unprivileged/OCI Containers
-- **Skipped**: Swap, kernel hardening (sysctl), time sync, fail2ban
+- **Skipped**: Swap, kernel hardening (sysctl), fail2ban
+- **Host-managed**: Time synchronization; installed guest NTP daemons are
+  disabled while the configured timezone is retained
 - **Attempted with graceful failure**: Firewall (UFW), auto-updates
 - **XRDP**: Managed glamor when a supported accessible render node exists;
   software fallback otherwise

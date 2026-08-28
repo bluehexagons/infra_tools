@@ -486,11 +486,22 @@ def copy_ssh_keys_to_user(config: SetupConfig) -> None:
 
 
 def configure_time_sync(config: SetupConfig) -> None:
-    if not can_manage_time_sync():
-        print("  ✓ Skipping time sync configuration (managed by container host)")
-        return
-    
     tz = config.timezone if config.timezone else "UTC"
+
+    if not can_manage_time_sync(config.machine_type):
+        for package, service in (
+            ("chrony", "chrony"),
+            ("systemd-timesyncd", "systemd-timesyncd"),
+        ):
+            if is_package_installed(package):
+                run(f"systemctl disable --now {service}", check=False)
+        run(f"timedatectl set-timezone {shlex.quote(tz)}", check=False)
+        print(
+            "  ✓ Time synchronization managed by container host "
+            f"(guest daemons disabled, timezone: {tz})"
+        )
+        return
+
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     
     if is_package_installed("systemd-timesyncd"):

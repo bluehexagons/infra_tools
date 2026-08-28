@@ -228,9 +228,19 @@ def can_manage_swap() -> bool:
     return get_machine_type() in ("vm", "privileged", "hardware")
 
 
-def can_manage_time_sync() -> bool:
-    """Check if time synchronization can be configured."""
-    return get_machine_type() in ("vm", "privileged", "hardware")
+def can_manage_time_sync(machine_type: Optional[str] = None) -> bool:
+    """Check if time synchronization can be configured.
+
+    Setup steps may pass the currently resolved machine type so their
+    capability decision does not depend on state saved by an older run.
+    Runtime callers continue to use the persisted machine state.
+    """
+    effective_type = (
+        get_machine_type()
+        if machine_type is None
+        else resolve_machine_type(machine_type)
+    )
+    return effective_type in ("vm", "privileged", "hardware")
 
 
 def can_manage_mdns() -> bool:

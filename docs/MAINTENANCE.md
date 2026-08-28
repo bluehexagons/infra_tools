@@ -138,13 +138,14 @@ than seven days in `/tmp` and `/var/tmp`.
 The cleanup job also runs noninteractive `apt-get autoremove --purge` wherever
 APT is available. This removes packages APT has marked as unused, including
 superseded kernel packages, while APT's configured kernel-retention policy
-protects kernels it considers required. It also purges configuration remnants
-for packages that were already removed, then audits `dpkg` state and reports
-incomplete or inconsistent packages without attempting an automatic repair. On
-physical machines, VMs, and Proxmox hosts, cleanup returns unused blocks to
-storage after deletion when discard is supported. It defers to an active native
-`fstrim.timer` instead of running a duplicate trim; containers skip this
-host-level operation.
+protects kernels it considers required. It deliberately retains configuration
+remnants for packages that were already removed: blanket residual purges can
+run maintainer hooks for service names now owned by installed replacement
+packages. It then audits `dpkg` state and reports incomplete or inconsistent
+packages without attempting an automatic repair. On physical machines, VMs,
+and Proxmox hosts, cleanup returns unused blocks to storage after deletion when
+discard is supported. It defers to an active native `fstrim.timer` instead of
+running a duplicate trim; containers skip this host-level operation.
 
 `user-cache-maintenance` runs as the configured non-root account instead of
 root, after the weekly runtime-update window. It inventories tool-reported
