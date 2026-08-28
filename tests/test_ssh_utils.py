@@ -114,8 +114,13 @@ class TestSshUtils(unittest.TestCase):
         self.assertIn("ControlPersist=60s", command)
         self.assertIn("ControlPath=/tmp/infra-tools.sock", command)
 
+    @patch("lib.ssh_utils.ssh_batch_mode", return_value=True)
     @patch("lib.ssh_utils.subprocess.run")
-    def test_remote_sudo_succeeds_without_prompt_when_nopasswd_is_available(self, mock_run):
+    def test_remote_sudo_succeeds_without_prompt_when_nopasswd_is_available(
+        self,
+        mock_run,
+        _mock_batch_mode,
+    ):
         mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
 
         with patch("lib.ssh_utils.build_ssh_command", return_value=["ssh"]):

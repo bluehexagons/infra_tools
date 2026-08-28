@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -149,7 +150,8 @@ class TestConfigCleanup(unittest.TestCase):
                 },
             )
 
-            result = run_cleanup("192.168.0.41", workspace=str(workspace))
+            with patch("lib.config_cleanup.sys.stdin.isatty", return_value=False):
+                result = run_cleanup("192.168.0.41", workspace=str(workspace))
 
             self.assertEqual(result, 1)
             self.assertTrue(stale_path.exists())

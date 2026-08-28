@@ -306,9 +306,12 @@ before updating the guest. Guest-shape options emitted by a saved reconstructed
 command are also accepted when they match that metadata. Changing any of
 `--machine`, `--bridge`, `--memory`, `--balloon-min`, `--balloon-shares`,
 `--allow-memory-overcommit`, `--storage`, `--cores`, `--cpu-type`,
-`--disk-discard`, `--disk-ssd`, `--base`, `--image`, or `--image-storage`
-requests a provisioning check instead. A target without saved provisioning
-metadata still requires `--memory` and root `--storage` on its first run.
+`--base`, `--image`, or `--image-storage` requests a provisioning check instead.
+Supplying any `--disk-discard`, `--disk-ssd`, or `--disk-backup` policy also
+requests a provider check even when it matches local metadata. This lets an
+explicit setup rerun repair disk-hardware drift or apply policy first recorded
+by an older infra-tools release. A target without saved provisioning metadata
+still requires `--memory` and root `--storage` on its first run.
 
 Use `--verify-provider` to check a cached provisioned guest against Proxmox even
 when its declaration matches saved local metadata. Setup reconciles and
@@ -328,7 +331,9 @@ automatically.
 
 Existing-guest setup does not replace, resize, attach, or detach root/data
 volumes, and does not mutate bridges, cache declarations, base images, or image
-staging storage. It may update the managed discard and SSD hints in place.
+staging storage. It may update the managed discard, SSD, I/O-thread, and backup
+hints in place while verifying that the volume reference, size, serial, and
+other unowned options remain intact.
 When saved metadata shows that another provisioning-only declaration changed,
 setup rejects the rerun instead of saving a value it did not apply. Use the
 explicit `vm` or `proxmox` management command for a supported lifecycle change,

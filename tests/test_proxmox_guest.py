@@ -226,10 +226,17 @@ class TestProvisionedGuestHostKeyEnrollment(unittest.TestCase):
 
 
 class TestGuestRouteRepair(unittest.TestCase):
+    @patch("lib.proxmox_guest.ssh_batch_mode", return_value=True)
     @patch("lib.proxmox_guest.ensure_remote_sudo", return_value=True)
     @patch("lib.proxmox_guest.build_ssh_command", return_value=["ssh"])
     @patch("lib.proxmox_guest.subprocess.run")
-    def test_existing_route_is_left_in_place(self, mock_run, mock_build, _mock_sudo):
+    def test_existing_route_is_left_in_place(
+        self,
+        mock_run,
+        mock_build,
+        _mock_sudo,
+        _mock_batch_mode,
+    ):
         mock_run.return_value = subprocess.CompletedProcess(
             ["ssh"], 0, stdout="already\n", stderr=""
         )
@@ -245,10 +252,7 @@ class TestGuestRouteRepair(unittest.TestCase):
         self.assertEqual(mock_build.call_args.args[1], "agent")
         self.assertIn("192.168.0.41", mock_build.call_args.kwargs["remote_command"])
         self.assertIn("192.168.0.1", mock_build.call_args.kwargs["remote_command"])
-        self.assertEqual(
-            mock_build.call_args.kwargs["batch_mode"],
-            not sys.stdin.isatty(),
-        )
+        self.assertTrue(mock_build.call_args.kwargs["batch_mode"])
         mock_run.assert_called_once_with(
             ["ssh"],
             capture_output=True,

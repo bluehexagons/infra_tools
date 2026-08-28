@@ -1217,8 +1217,11 @@ def _reuse_cached_provisioning_metadata(
     cached_config = cached_config or _load_cached_provisioning_metadata(config)
     if cached_config is None:
         return False
-    if _provisioning_changes_requested(config, cached_config, args):
-        return False
+    provisioning_changes_requested = _provisioning_changes_requested(
+        config,
+        cached_config,
+        args,
+    )
 
     requested_system_hostname = getattr(args, "system_hostname", None)
     requested_friendly_name = getattr(args, "friendly_name", None)
@@ -1249,6 +1252,11 @@ def _reuse_cached_provisioning_metadata(
     )
 
     for field in _CACHED_PROVISIONING_FIELDS:
+        if (
+            field in _PROVISIONING_CHANGE_ARGS
+            and getattr(args, field, None) is not None
+        ):
+            continue
         setattr(config, field, getattr(cached_config, field))
 
     if config.ssh_key is None:
@@ -1282,9 +1290,25 @@ def _reuse_cached_provisioning_metadata(
     ):
         return False
 
-    if vm_identity_changed or getattr(args, "verify_provider", False):
+    disk_policy_requested = any(
+        getattr(args, field, None) is not None
+        for field in (
+            "vm_disk_discard",
+            "vm_disk_ssd",
+            "vm_disk_backup",
+            "vm_disk_settings",
+        )
+    )
+    if (
+        provisioning_changes_requested
+        or vm_identity_changed
+        or getattr(args, "verify_provider", False)
+        or disk_policy_requested
+    ):
         # Provider-side names and explicit verification requests must be
         # checked against Proxmox instead of trusted from local metadata.
+        # Disk flags are also repair requests: an older cache can contain the
+        # desired defaults even when the provider never received those hints.
         return False
 
     return True
@@ -1516,14 +1540,25 @@ def run_setup_command(args: argparse.Namespace) -> int:
             print(f"Provisioning VM on {config.hosted_node}...")
             print(f"{'='*60}")
             try:
-                provision_vm(config, image=config.vm_image)
+                provision_vm(
+                    config,
+                    image=config.vm_image,
+                    allow_existing_data_disks=_is_same_cached_provisioned_guest(
+                        config,
+                        cached_provisioning,
+                    ),
+                )
             except VMAlreadyExists:
                 from lib.swap_config import swap_device_disk_names
 
-                if (
+                has_managed_data_disks = bool(
                     config.storage_mounts
                     or config.storage_caches
                     or swap_device_disk_names(config)
+                )
+                if has_managed_data_disks and not _is_same_cached_provisioned_guest(
+                    config,
+                    cached_provisioning,
                 ):
                     print(
                         "Error: named VM data disks, caches, and swap disks are "

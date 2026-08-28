@@ -23,6 +23,7 @@ The flow is:
 
 from __future__ import annotations
 
+from collections import Counter
 import ipaddress
 import json
 import os
@@ -128,16 +129,28 @@ def _disk_hardware_value(
 ) -> str:
     """Apply infra_tools-managed hardware hints to a Proxmox disk value."""
 
-    parts = [
-        part
-        for part in volume.split(",")
-        if not part.startswith(("discard=", "ssd=", "backup="))
-    ]
-    if not any(part == "iothread=1" for part in parts[1:]):
+    source_parts = volume.split(",")
+    parts = source_parts[:1]
+    has_iothread = False
+    has_serial = False
+    for part in source_parts[1:]:
+        key, separator, _option_value = part.partition("=")
+        if separator and key in {"discard", "ssd", "backup"}:
+            continue
+        if separator and key == "iothread":
+            if not has_iothread:
+                parts.append("iothread=1")
+                has_iothread = True
+            continue
+        if serial is not None and separator and key == "serial":
+            if not has_serial:
+                parts.append(f"serial={serial}")
+                has_serial = True
+            continue
+        parts.append(part)
+    if not has_iothread:
         parts.append("iothread=1")
-    if serial is not None and not any(
-        part.startswith("serial=") for part in parts[1:]
-    ):
+    if serial is not None and not has_serial:
         parts.append(f"serial={serial}")
     if discard:
         parts.append("discard=on")
@@ -164,6 +177,50 @@ def _disk_hardware_matches(
         and (options.get("ssd") == "1") == ssd
         and (options.get("backup", "1") == "1") == backup
         and options.get("iothread") == "1"
+    )
+
+
+_MANAGED_DISK_OPTIONS = {"discard", "ssd", "backup", "iothread"}
+
+
+def _disk_hardware_update_verified(
+    original: str,
+    observed: str,
+    *,
+    discard: bool,
+    ssd: bool,
+    backup: bool,
+) -> bool:
+    """Verify managed hints changed without losing provider disk metadata."""
+
+    original_parts = original.split(",")
+    observed_parts = observed.split(",")
+    if (
+        not original_parts
+        or not observed_parts
+        or original_parts[0] != observed_parts[0]
+    ):
+        return False
+
+    def unowned_options(parts: list[str]) -> Counter[str]:
+        return Counter(
+            part
+            for part in parts[1:]
+            if part.partition("=")[0] not in _MANAGED_DISK_OPTIONS
+        )
+
+    original_options = unowned_options(original_parts)
+    observed_options = unowned_options(observed_parts)
+    if any(
+        observed_options[option] < count
+        for option, count in original_options.items()
+    ):
+        return False
+    return _disk_hardware_matches(
+        observed,
+        discard=discard,
+        ssd=ssd,
+        backup=backup,
     )
 
 
@@ -624,6 +681,7 @@ def _reconcile_existing_vm(
     desired_balloon_shares: Optional[int] = None,
     desired_cpu_type: Optional[str] = None,
     desired_disk_hardware: Optional[dict[str, VMDiskHardware]] = None,
+    allow_managed_data_disks: bool = False,
     allow_memory_overcommit: bool = False,
     dry_run: bool = False,
 ) -> bool:
@@ -718,6 +776,16 @@ def _reconcile_existing_vm(
         raise ProvisionError(
             f"VM {matched.vmid} is configured with IP {target_ip} but is not "
             "reachable on SSH; remove or repair it before retrying provisioning"
+        )
+
+    if (
+        desired_disk_hardware is not None
+        and any(name != "root" for name in desired_disk_hardware)
+        and not allow_managed_data_disks
+    ):
+        raise ProvisionError(
+            "named VM data disks, caches, and swap disks are provisioning-only; "
+            "refusing to adopt disks on an existing unsaved VM"
         )
 
     name_changed = bool(
@@ -847,7 +915,8 @@ def _reconcile_existing_vm(
         observed_disks = dict(observed.scsi_disks)
         disks_verified = not disk_changes or all(
             disk_name in observed_disks
-            and _disk_hardware_matches(
+            and _disk_hardware_update_verified(
+                _disk_value,
                 observed_disks[disk_name],
                 discard=hardware.discard,
                 ssd=hardware.ssd,
@@ -1590,13 +1659,20 @@ def _wait_for_guest_agent(
     )
 
 
-def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
+def provision_vm(
+    config: SetupConfig,
+    *,
+    image: Optional[str] = None,
+    allow_existing_data_disks: bool = False,
+) -> None:
     """Orchestrate Proxmox VM provisioning.
 
     Args:
         config: SetupConfig with hosted_node, container_memory, container_storage, etc.
         image: Optional override; either an http(s) URL or a Proxmox storage
             reference like ``local:import/foo.qcow2``.
+        allow_existing_data_disks: Permit reconciliation of named disks only
+            when the caller has matched this guest to saved provisioning state.
 
     Raises:
         VMAlreadyExists: if a VM with the target IP already exists on the node.
@@ -1768,6 +1844,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         desired_balloon_shares=balloon_shares,
         desired_cpu_type=cpu_type,
         desired_disk_hardware=disk_hardware_settings,
+        allow_managed_data_disks=allow_existing_data_disks,
         allow_memory_overcommit=getattr(
             config,
             "allow_memory_overcommit",

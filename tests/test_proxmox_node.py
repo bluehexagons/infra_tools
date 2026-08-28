@@ -69,11 +69,12 @@ class TestBuildContainerHostname(unittest.TestCase):
 
 
 class TestSshOpts(unittest.TestCase):
+    @patch("lib.proxmox_guest.ssh_batch_mode", return_value=True)
     @patch(
         "lib.proxmox_guest.get_workspace_known_hosts_path",
         return_value="/tmp/workspace/known_hosts",
     )
-    def test_no_key(self, _mock_known_hosts):
+    def test_no_key(self, _mock_known_hosts, _mock_batch_mode):
         opts = _ssh_opts()
         self.assertIn("UserKnownHostsFile=/tmp/workspace/known_hosts", opts)
         self.assertIn("StrictHostKeyChecking=yes", opts)

@@ -8,11 +8,66 @@ from unittest.mock import MagicMock, patch
 
 import infra_tools
 from lib.config import SetupConfig
-from lib.proxmox_vm import ProvisionError, _reconcile_existing_vm
+from lib.proxmox_vm import (
+    ProvisionError,
+    _disk_hardware_update_verified,
+    _disk_hardware_value,
+    _reconcile_existing_vm,
+)
 from lib.vm_storage import VMDiskHardware
 
 
 class TestExistingVMMemoryReconciliation(unittest.TestCase):
+    def test_disk_hardware_value_replaces_conflicting_managed_options(self) -> None:
+        value = _disk_hardware_value(
+            "bulk:vm-112-disk-1,iothread=0,iothread=1,serial=old,size=64G",
+            discard=True,
+            ssd=False,
+            backup=False,
+            serial="it-data",
+        )
+
+        self.assertEqual(
+            value,
+            "bulk:vm-112-disk-1,iothread=1,serial=it-data,size=64G,"
+            "discard=on,backup=0",
+        )
+
+    def test_disk_hardware_verification_requires_unowned_options(self) -> None:
+        original = (
+            "bulk:vm-112-disk-1,iothread=0,serial=it-data,size=64G,cache=none"
+        )
+        self.assertTrue(
+            _disk_hardware_update_verified(
+                original,
+                "bulk:vm-112-disk-1,serial=it-data,size=64G,cache=none,"
+                "iothread=1,discard=on,ssd=1",
+                discard=True,
+                ssd=True,
+                backup=True,
+            )
+        )
+        self.assertFalse(
+            _disk_hardware_update_verified(
+                original,
+                "bulk:vm-112-disk-1,size=64G,cache=none,iothread=1,"
+                "discard=on,ssd=1",
+                discard=True,
+                ssd=True,
+                backup=True,
+            )
+        )
+        self.assertFalse(
+            _disk_hardware_update_verified(
+                original,
+                "other:vm-112-disk-1,serial=it-data,size=64G,cache=none,"
+                "iothread=1,discard=on,ssd=1",
+                discard=True,
+                ssd=True,
+                backup=True,
+            )
+        )
+
     @patch("lib.proxmox_vm._enforce_memory_floor")
     @patch("lib.proxmox_vm._report_memory_capacity", return_value=True)
     @patch("lib.proxmox_vm._ssh_run")
@@ -152,6 +207,7 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
                     "root": VMDiskHardware("root", True, True),
                     "data": VMDiskHardware("data", True, False),
                 },
+                allow_managed_data_disks=True,
             )
         )
 
@@ -168,6 +224,44 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
             commands,
         )
         self.assertFalse(any("--scsi2" in command for command in commands))
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_unsaved_named_disks_are_rejected_before_mutation(self, mock_run) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "scsi0: local-lvm:vm-112-disk-0,size=32G\n"
+                    "scsi1: bulk:vm-112-disk-1,serial=it-data,size=64G\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+        ]
+
+        with self.assertRaisesRegex(ProvisionError, "existing unsaved VM"):
+            _reconcile_existing_vm(
+                "10.0.0.1",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_disk_hardware={
+                    "root": VMDiskHardware("root", True, True),
+                    "data": VMDiskHardware("data", True, False),
+                },
+            )
+
+        self.assertEqual(len(mock_run.call_args_list), 4)
+        self.assertFalse(
+            any(
+                call.args[3].startswith("qm set")
+                for call in mock_run.call_args_list
+            )
+        )
 
 
 class TestCachedProvisioningChangeSafety(unittest.TestCase):

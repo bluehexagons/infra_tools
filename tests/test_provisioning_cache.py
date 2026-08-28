@@ -159,7 +159,18 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
 
     def test_explicit_guest_shape_change_requires_proxmox(self) -> None:
         current = _config(container_memory="8G")
-        cached = _config(container_memory="4G")
+        cached = _config(
+            hosted_node="10.0.0.10",
+            container_memory="4G",
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["agent-data", "bulk-lvm", "128G"],
+            ],
+            storage_mounts=[["agent-data", "/srv/agent-workspace"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
 
         with patch("infra_tools.load_setup_command", return_value=cached) as mock_load:
             reused = infra_tools._reuse_cached_provisioning_metadata(
@@ -169,6 +180,11 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
 
         self.assertFalse(reused)
         mock_load.assert_called_once_with("10.0.0.50")
+        self.assertEqual(current.container_memory, "8G")
+        self.assertEqual(current.hosted_node, "10.0.0.10")
+        self.assertEqual(current.container_storage, cached.container_storage)
+        self.assertEqual(current.storage_mounts, cached.storage_mounts)
+        self.assertEqual(current.network_gateway4, "10.0.0.1")
 
         self.assertTrue(
             infra_tools._provisioning_changes_requested(
@@ -264,6 +280,32 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
 
         self.assertFalse(reused)
         self.assertEqual(current.hosted_node, "10.0.0.10")
+
+    def test_explicit_matching_disk_policy_bypasses_cache(self) -> None:
+        for explicit_args in (
+            {"vm_disk_discard": True},
+            {"vm_disk_ssd": False},
+            {"vm_disk_backup": True},
+            {"vm_disk_settings": [["root", "ssd=on"]]},
+        ):
+            with self.subTest(explicit_args=explicit_args):
+                current = _config(**explicit_args)
+                cached = _config(
+                    hosted_node="10.0.0.10",
+                    static_ipv4="10.0.0.50/24",
+                    network_gateway4="10.0.0.1",
+                    network_dns=["1.1.1.1"],
+                    **explicit_args,
+                )
+
+                reused = infra_tools._reuse_cached_provisioning_metadata(
+                    current,
+                    _args(**explicit_args),
+                    cached,
+                )
+
+                self.assertFalse(reused)
+                self.assertEqual(current.hosted_node, "10.0.0.10")
 
     def test_missing_local_metadata_requires_proxmox(self) -> None:
         with patch("infra_tools.load_setup_command", return_value=None):
@@ -553,7 +595,11 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             hosted_user="root",
             hosted_key="/keys/proxmox",
             container_memory="8G",
-            container_storage=[["root", "local-lvm", "32G"]],
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["agent-data", "bulk-lvm", "128G"],
+            ],
+            storage_mounts=[["agent-data", "/srv/agent-workspace"]],
             static_ipv4="10.0.0.50/24",
             network_gateway4="10.0.0.1",
             network_dns=["1.1.1.1"],
@@ -563,7 +609,11 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             hosted_user="root",
             hosted_key="/keys/proxmox",
             container_memory="4G",
-            container_storage=[["root", "local-lvm", "32G"]],
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["agent-data", "bulk-lvm", "128G"],
+            ],
+            storage_mounts=[["agent-data", "/srv/agent-workspace"]],
             static_ipv4="10.0.0.50/24",
             network_gateway4="10.0.0.1",
             network_dns=["1.1.1.1"],
@@ -587,13 +637,18 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
              patch(
                  "lib.proxmox_vm.provision_vm",
                  side_effect=VMAlreadyExists(),
-             ), \
+             ) as mock_provision, \
              patch(
                  "infra_tools.refresh_managed_guest_host_keys",
              ) as mock_refresh:
             result = infra_tools.run_setup_command(args)
 
         self.assertEqual(result, 0)
+        mock_provision.assert_called_once_with(
+            current,
+            image=current.vm_image,
+            allow_existing_data_disks=True,
+        )
         mock_refresh.assert_called_once_with(
             "10.0.0.50",
             "10.0.0.10",
