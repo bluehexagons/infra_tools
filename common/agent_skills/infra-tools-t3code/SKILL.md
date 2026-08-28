@@ -17,12 +17,12 @@ Start with:
 infra-tools agent doctor --capability t3code --capability host --json
 ```
 
-Treat a healthy T3 service and host-pressure warnings as separate results. The
-host capability reports memory, swap, disk, agent-storage, service cgroup,
-maintenance, and pending-reboot state without reading prompts, credentials, or
-repository contents. Resolve critical disk pressure or failed maintenance
-before starting a long build; low capacity is advisory when the service itself
-is healthy.
+Treat a healthy, active, boot-enabled T3 service and host-pressure warnings as
+separate results. The host capability reports memory, swap, disk,
+agent-storage, service cgroup, maintenance, and pending-reboot state without
+reading prompts, credentials, or repository contents. Resolve critical disk
+pressure or failed maintenance before starting a long build; low capacity is
+advisory when the service itself is healthy.
 
 The server is the upstream-managed per-user service. Inspect it without sudo:
 

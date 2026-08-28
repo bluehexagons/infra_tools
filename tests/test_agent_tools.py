@@ -396,6 +396,7 @@ class TestAgentDoctor(unittest.TestCase):
 
         self.assertFalse(result['healthy'])
         self.assertIn('git_identity', result['checks'])
+        self.assertFalse(result['checks']['service_enabled'])
         self.assertNotIn('secret', str(result))
 
     def test_t3code_doctor_targets_current_user_systemd_bus(self):
@@ -421,6 +422,48 @@ class TestAgentDoctor(unittest.TestCase):
         self.assertEqual(
             environment['DBUS_SESSION_BUS_ADDRESS'],
             f'unix:path=/run/user/{os.getuid()}/bus',
+        )
+
+    def test_t3code_doctor_fix_enables_service_for_future_boots(self):
+        completed = type(
+            'Completed',
+            (),
+            {'returncode': 0, 'stdout': 'enabled\n', 'stderr': ''},
+        )
+        runtime_enabled = type(
+            'Completed',
+            (),
+            {'returncode': 0, 'stdout': 'enabled-runtime\n', 'stderr': ''},
+        )
+        commands: list[list[str]] = []
+        enabled = False
+
+        def run_check(command, **_kwargs):
+            nonlocal enabled
+            commands.append(command)
+            if command[:3] == ['systemctl', '--user', 'is-enabled']:
+                return completed if enabled else runtime_enabled
+            if command[:3] == ['systemctl', '--user', 'enable']:
+                enabled = True
+            return completed
+
+        with (
+            tempfile.TemporaryDirectory() as home,
+            patch('lib.agent_cli._t3_active_binary', return_value='/tmp/t3'),
+            patch('lib.agent_cli._t3_node_binary', return_value='/usr/bin/node'),
+            patch('lib.agent_cli._t3_native_runtime_healthy', return_value=True),
+            patch('lib.agent_cli._tool_path', return_value=None),
+            patch('lib.agent_cli._run_check', side_effect=run_check),
+            patch('lib.agent_cli._t3_endpoint_reachable', return_value=True),
+            patch('lib.agent_cli._tool_version', return_value='t3 v0.0.35'),
+        ):
+            result = inspect_t3code(home, fix=True)
+
+        self.assertTrue(result['checks']['service_enabled'])
+        self.assertIn('enabled T3 Code service at boot', result['fixes'])
+        self.assertIn(
+            ['systemctl', '--user', 'enable', 't3code.service'],
+            commands,
         )
 
     def test_t3code_doctor_fix_repairs_native_runtime_before_restart(self):
@@ -473,6 +516,12 @@ class TestAgentDoctor(unittest.TestCase):
                             'stdout': '',
                             'stderr': '',
                         },
+                    )()
+                if command[:3] == ['systemctl', '--user', 'is-enabled']:
+                    return type(
+                        'Completed',
+                        (),
+                        {'returncode': 0, 'stdout': 'enabled\n', 'stderr': ''},
                     )()
                 return type(
                     'Completed',

@@ -242,13 +242,14 @@ infra-tools agent support-bundle
 ```
 
 The doctor validates the upstream service-state protocol and selected immutable
-runtime, required native terminal module, user service, endpoint, pairing
-helper, Git identity, and managed agent skill. Add `--fix` to rebuild an
-incomplete native runtime, repair GitHub's credential helper, or restart an
-inactive user service. The separate host capability reports memory, swap,
-filesystem and agent-storage headroom, T3 cgroup usage, recurring maintenance
-state, and pending reboots. Capacity warnings do not make an otherwise healthy
-service fail; critical disk pressure and recorded maintenance failures do.
+runtime, required native terminal module, active and boot-enabled user service,
+endpoint, pairing helper, Git identity, and managed agent skill. Add `--fix` to
+rebuild an incomplete native runtime, repair GitHub's credential helper, enable
+the service for future boots, or restart an inactive user service. The separate
+host capability reports memory, swap, filesystem and agent-storage headroom,
+T3 cgroup usage, recurring maintenance state, and pending reboots. Capacity
+warnings do not make an otherwise healthy service fail; critical disk pressure
+and recorded maintenance failures do.
 
 ## Related documentation
 

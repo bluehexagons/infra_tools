@@ -1414,6 +1414,15 @@ def _t3_endpoint_reachable(port: int | None) -> bool:
         return False
 
 
+def _t3_service_enabled(environment: dict[str, str]) -> bool:
+    """Return whether the managed user unit is persistently enabled."""
+    result = _run_check(
+        ["systemctl", "--user", "is-enabled", _T3_SERVICE_NAME],
+        environment=environment,
+    )
+    return result.returncode == 0 and (result.stdout or "").strip() == "enabled"
+
+
 def _t3_skill_ready(path: str) -> bool:
     if os.path.islink(path) or not os.path.isfile(path):
         return False
@@ -1476,6 +1485,7 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
         ["systemctl", "--user", "is-active", "--quiet", _T3_SERVICE_NAME],
         environment=user_bus_environment,
     )
+    service_enabled = _t3_service_enabled(user_bus_environment)
     gh_auth = (
         _run_check(
             [gh_path, "auth", "status", "--hostname", "github.com"],
@@ -1531,6 +1541,13 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
         if native_runtime:
             fixes.append("rebuilt T3 Code native runtime")
         service = subprocess.CompletedProcess([], 1, "", "")
+    if fix and t3_binary and not service_enabled:
+        enabled = _run_check(
+            ["systemctl", "--user", "enable", _T3_SERVICE_NAME],
+            environment=user_bus_environment,
+        )
+        if enabled.returncode == 0:
+            fixes.append("enabled T3 Code service at boot")
     restarted_service = False
     if fix and t3_binary and service.returncode != 0:
         restart_command = ["systemctl", "--user", "restart", _T3_SERVICE_NAME]
@@ -1555,9 +1572,11 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
             break
         if attempt + 1 < attempts:
             time.sleep(1)
+    service_enabled = _t3_service_enabled(user_bus_environment)
 
     checks = {
         "service_active": service.returncode == 0,
+        "service_enabled": service_enabled,
         "runtime": bool(t3_binary),
         "native_runtime": native_runtime,
         "wrapper": os.path.isfile(wrapper) and os.access(wrapper, os.X_OK),
