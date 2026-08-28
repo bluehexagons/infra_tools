@@ -176,6 +176,10 @@ class T3CodeWebTest(unittest.TestCase):
                 patch("common.t3code_steps.install_package", return_value=True),
                 patch("common.t3code_steps._ensure_user_manager"),
                 patch(
+                    "common.t3code_steps.shutil.which",
+                    return_value="/bin/true",
+                ),
+                patch(
                     "common.t3code_steps._node_bin_directory",
                     return_value="/usr/bin",
                 ),
@@ -327,6 +331,10 @@ class T3CodeWebTest(unittest.TestCase):
                 patch("common.t3code_steps.install_package", return_value=True),
                 patch("common.t3code_steps._ensure_user_manager"),
                 patch(
+                    "common.t3code_steps.shutil.which",
+                    return_value="/bin/true",
+                ),
+                patch(
                     "common.t3code_steps._node_bin_directory",
                     return_value="/usr/bin",
                 ),
@@ -396,6 +404,10 @@ class T3CodeWebTest(unittest.TestCase):
             with (
                 patch("common.t3code_steps.install_package", return_value=True),
                 patch("common.t3code_steps._ensure_user_manager"),
+                patch(
+                    "common.t3code_steps.shutil.which",
+                    return_value="/bin/true",
+                ),
                 patch(
                     "common.t3code_steps._node_bin_directory",
                     return_value="/usr/bin",
