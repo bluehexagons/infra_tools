@@ -6,10 +6,8 @@ from __future__ import annotations
 import argparse
 import os
 import pwd
-import re
 import shlex
 import shutil
-import stat
 import subprocess
 import sys
 import time
@@ -18,6 +16,10 @@ from logging import INFO, WARNING
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../.."))
 
+from lib.agent_storage import (
+    cleanup_codex_standalone_releases as reconcile_codex_standalone_releases,
+    cleanup_t3_rotated_logs as reconcile_t3_rotated_logs,
+)
 from lib.logging_utils import get_service_logger, log_event
 from lib.maintenance_defaults import (
     CLEANUP_COMMAND_TIMEOUT_SECONDS,
@@ -59,20 +61,6 @@ class CacheUsage:
     newest_mtime: float | None
 
 
-@dataclass(frozen=True)
-class RotatedLog:
-    """One regular rotated log selected from the T3 log tree."""
-
-    path: str
-    size_bytes: int
-    mtime: float
-    device: int
-    inode: int
-
-
-_T3_ROTATED_LOG_PATTERN = re.compile(r".+\.(?:log|ndjson)\.[1-9][0-9]*$")
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse direct maintenance-script options."""
     parser = argparse.ArgumentParser(
@@ -82,6 +70,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Inventory caches and report cleanup actions without changing files",
+    )
+    parser.add_argument(
+        "--agent-storage-only",
+        action="store_true",
+        help="Reconcile only standalone agent releases and bounded log rotations",
     )
     return parser.parse_args(argv)
 
@@ -616,57 +609,6 @@ def cleanup_npm_cache(context: UserContext, *, dry_run: bool) -> list[str]:
     return failures
 
 
-def _t3_rotated_logs(
-    context: UserContext,
-    log_root: str,
-) -> tuple[list[RotatedLog], str | None]:
-    """Inventory regular T3 rotated logs without traversing symbolic links."""
-    if not is_safe_managed_path(context, log_root, "T3 rotated logs"):
-        return [], None
-    if not os.path.exists(log_root):
-        return [], None
-
-    logs: list[RotatedLog] = []
-    try:
-        for current_root, directories, filenames in os.walk(
-            log_root,
-            topdown=True,
-            followlinks=False,
-        ):
-            directories[:] = [
-                name
-                for name in directories
-                if not os.path.islink(os.path.join(current_root, name))
-            ]
-            for filename in filenames:
-                if not _T3_ROTATED_LOG_PATTERN.fullmatch(filename):
-                    continue
-                path = os.path.join(current_root, filename)
-                stat_result = os.lstat(path)
-                if not stat.S_ISREG(stat_result.st_mode):
-                    continue
-                logs.append(
-                    RotatedLog(
-                        path=path,
-                        size_bytes=stat_result.st_size,
-                        mtime=stat_result.st_mtime,
-                        device=stat_result.st_dev,
-                        inode=stat_result.st_ino,
-                    )
-                )
-    except OSError as exc:
-        details = str(exc)
-        log_event(
-            logger,
-            "Could not inspect T3 rotated logs",
-            level=WARNING,
-            path=log_root,
-            error=details,
-        )
-        return [], f"T3 rotated log inventory: {details}"
-    return logs, None
-
-
 def cleanup_t3_rotated_logs(
     context: UserContext,
     *,
@@ -676,88 +618,102 @@ def cleanup_t3_rotated_logs(
 ) -> list[str]:
     """Prune only numbered T3 log rotations by age and total retained size."""
     log_root = os.path.join(context.home, ".t3", "userdata", "logs")
-    logs, failure = _t3_rotated_logs(context, log_root)
-    if failure:
-        return [failure]
-    if not logs:
-        return []
-
-    cutoff = time.time() - (max_age_days * 24 * 60 * 60)
-    selected_paths = {entry.path for entry in logs if entry.mtime < cutoff}
-    retained_bytes = sum(
-        entry.size_bytes for entry in logs if entry.path not in selected_paths
+    result = reconcile_t3_rotated_logs(
+        context.home,
+        context.uid,
+        dry_run=dry_run,
+        max_bytes=max_bytes,
+        max_age_days=max_age_days,
     )
-    if retained_bytes > max_bytes:
-        for entry in sorted(logs, key=lambda candidate: candidate.mtime):
-            if entry.path in selected_paths:
-                continue
-            selected_paths.add(entry.path)
-            retained_bytes -= entry.size_bytes
-            if retained_bytes <= max_bytes:
-                break
+    for failure in result.errors:
+        log_event(
+            logger,
+            "Failed to reconcile T3 rotated logs",
+            level=WARNING,
+            path=log_root,
+            error=failure,
+        )
+    if not result.found_count:
+        return list(result.errors)
 
-    selected = [entry for entry in logs if entry.path in selected_paths]
     log_event(
         logger,
         "T3 rotated log inventory",
         path=log_root,
-        rotated_count=len(logs),
-        rotated_size_mb=round(sum(entry.size_bytes for entry in logs) / BYTES_PER_MB, 1),
-        selected_count=len(selected),
-        selected_size_mb=round(
-            sum(entry.size_bytes for entry in selected) / BYTES_PER_MB,
-            1,
-        ),
+        rotated_count=result.found_count,
+        rotated_size_mb=round(result.found_bytes / BYTES_PER_MB, 1),
+        selected_count=len(result.selected),
+        selected_size_mb=round(result.selected_bytes / BYTES_PER_MB, 1),
     )
     if dry_run:
-        if selected:
+        if result.selected:
             log_event(
                 logger,
                 "Would prune T3 rotated logs",
                 path=log_root,
-                removed_count=len(selected),
-                removed_size_mb=round(
-                    sum(entry.size_bytes for entry in selected) / BYTES_PER_MB,
-                    1,
-                ),
+                removed_count=len(result.selected),
+                removed_size_mb=round(result.selected_bytes / BYTES_PER_MB, 1),
             )
-        return []
+        return list(result.errors)
 
-    failures: list[str] = []
-    removed_count = 0
-    removed_bytes = 0
-    for entry in selected:
-        try:
-            current_stat = os.lstat(entry.path)
-            if (
-                not stat.S_ISREG(current_stat.st_mode)
-                or current_stat.st_dev != entry.device
-                or current_stat.st_ino != entry.inode
-            ):
-                raise OSError("rotated log changed during cleanup")
-            os.unlink(entry.path)
-            removed_count += 1
-            removed_bytes += entry.size_bytes
-        except OSError as exc:
-            details = str(exc)
-            log_event(
-                logger,
-                "Failed to prune T3 rotated log",
-                level=WARNING,
-                path=entry.path,
-                error=details,
-            )
-            failures.append(f"{entry.path}: {details}")
-
-    if removed_count:
+    if result.removed:
         log_event(
             logger,
             "Pruned T3 rotated logs",
             path=log_root,
-            removed_count=removed_count,
-            removed_size_mb=round(removed_bytes / BYTES_PER_MB, 1),
+            removed_count=len(result.removed),
+            removed_size_mb=round(result.removed_bytes / BYTES_PER_MB, 1),
         )
-    return failures
+    return list(result.errors)
+
+
+def cleanup_codex_standalone_releases(
+    context: UserContext,
+    *,
+    dry_run: bool,
+) -> list[str]:
+    """Prune excess validated Codex releases while retaining safe rollbacks."""
+    result = reconcile_codex_standalone_releases(
+        context.home,
+        context.uid,
+        dry_run=dry_run,
+    )
+    for failure in result.errors:
+        log_event(
+            logger,
+            "Failed to reconcile standalone Codex releases",
+            level=WARNING,
+            error=failure,
+        )
+    if result.skipped:
+        log_event(
+            logger,
+            "Skipped unfamiliar standalone Codex release entries",
+            level=WARNING,
+            skipped=", ".join(result.skipped),
+        )
+    if result.found:
+        log_event(
+            logger,
+            "Standalone Codex release inventory",
+            found_count=len(result.found),
+            retained_count=len(result.retained),
+            active_count=len(result.active),
+            selected_count=len(result.selected),
+        )
+    if dry_run and result.selected:
+        log_event(
+            logger,
+            "Would prune standalone Codex releases",
+            selected=", ".join(result.selected),
+        )
+    if result.removed:
+        log_event(
+            logger,
+            "Pruned standalone Codex releases",
+            removed=", ".join(result.removed),
+        )
+    return list(result.errors)
 
 
 def cleanup_pip_cache(context: UserContext, *, dry_run: bool) -> list[str]:
@@ -887,6 +843,13 @@ def cleanup_agent_caches(context: UserContext, *, dry_run: bool) -> list[str]:
     return failures
 
 
+def cleanup_agent_storage(context: UserContext, *, dry_run: bool) -> list[str]:
+    """Reconcile validated agent releases and numbered T3 log rotations."""
+    failures = cleanup_codex_standalone_releases(context, dry_run=dry_run)
+    failures.extend(cleanup_t3_rotated_logs(context, dry_run=dry_run))
+    return failures
+
+
 def run_user_cache_maintenance(context: UserContext, *, dry_run: bool) -> list[str]:
     """Run each independent user cache policy and collect failures."""
     failures = cleanup_npm_cache(context, dry_run=dry_run)
@@ -913,13 +876,18 @@ def run_user_cache_maintenance(context: UserContext, *, dry_run: bool) -> list[s
         )
     )
     failures.extend(cleanup_agent_caches(context, dry_run=dry_run))
-    failures.extend(cleanup_t3_rotated_logs(context, dry_run=dry_run))
+    failures.extend(cleanup_agent_storage(context, dry_run=dry_run))
     return failures
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run bounded user cache maintenance."""
     args = parse_args(argv)
+    operation = (
+        "agent storage reconciliation"
+        if args.agent_storage_only
+        else "user cache maintenance"
+    )
     try:
         context = resolve_user_context()
     except (KeyError, ValueError) as exc:
@@ -932,20 +900,23 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if context.uid == 0:
-        log_event(logger, "Skipping user cache maintenance for the root account")
+        log_event(logger, f"Skipping {operation} for the root account")
         return 0
 
     log_event(
         logger,
-        "Starting user cache maintenance",
+        f"Starting {operation}",
         username=context.username,
         dry_run=args.dry_run,
     )
-    failures = run_user_cache_maintenance(context, dry_run=args.dry_run)
+    if args.agent_storage_only:
+        failures = cleanup_agent_storage(context, dry_run=args.dry_run)
+    else:
+        failures = run_user_cache_maintenance(context, dry_run=args.dry_run)
     if failures:
         log_event(
             logger,
-            "User cache maintenance failed",
+            f"{operation.capitalize()} failed",
             level=WARNING,
             failure_count=len(failures),
             details="\n".join(failures),
@@ -954,7 +925,7 @@ def main(argv: list[str] | None = None) -> int:
 
     log_event(
         logger,
-        "User cache maintenance completed successfully",
+        f"{operation.capitalize()} completed successfully",
         username=context.username,
         dry_run=args.dry_run,
     )

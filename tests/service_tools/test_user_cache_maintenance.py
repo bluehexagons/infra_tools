@@ -488,12 +488,17 @@ class TestUserCachePolicies(unittest.TestCase):
             dry_run=False,
         )
 
+    @patch(
+        "common.service_tools.user_cache_maintenance.cleanup_codex_standalone_releases",
+        return_value=[],
+    )
     @patch("common.service_tools.user_cache_maintenance.cleanup_stale_children", return_value=[])
     @patch("common.service_tools.user_cache_maintenance.cleanup_managed_directory", return_value=[])
-    def test_agent_cache_policy_never_targets_persistent_state(
+    def test_agent_cache_policy_never_targets_unmanaged_persistent_state(
         self,
         mock_directory_cleanup,
         mock_stale_cleanup,
+        mock_release_cleanup,
     ):
         with patch.dict(
             os.environ,
@@ -514,6 +519,7 @@ class TestUserCachePolicies(unittest.TestCase):
             mock_stale_cleanup.call_args.kwargs["path"],
             "/home/agent/.codex/tmp",
         )
+        mock_release_cleanup.assert_not_called()
         self.assertFalse(any(".local/share/opencode" in path for path in managed_paths))
 
 

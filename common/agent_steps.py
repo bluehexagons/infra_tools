@@ -1000,3 +1000,45 @@ def clone_agent_repositories(config: SetupConfig) -> None:
             detail = (result.stderr or result.stdout or "clone failed").strip()
             raise RuntimeError(f"Failed to clone {git_url}: {detail}")
         print(f"  Cloned {git_url} to {destination}")
+
+
+def reconcile_agent_storage(config: SetupConfig) -> None:
+    """Apply conservative retention to existing coding-agent installations."""
+    user_home = _user_home(config)
+    maintenance_script = os.path.join(
+        os.path.dirname(__file__),
+        "service_tools",
+        "user_cache_maintenance.py",
+    )
+    validate_filesystem_path(maintenance_script, must_exist=True)
+    if os.path.islink(maintenance_script) or not os.path.isfile(maintenance_script):
+        raise RuntimeError(
+            f"Agent storage maintenance source is not a regular file: {maintenance_script}"
+        )
+
+    command = [
+        "/usr/bin/python3",
+        maintenance_script,
+        "--agent-storage-only",
+    ]
+    if is_dry_run():
+        command.append("--dry-run")
+    result = _run_as_login_user(
+        config.username,
+        user_home,
+        shlex.join(command),
+        check=False,
+        capture_output=True,
+    )
+    output_parts = (result.stdout,) if result.returncode == 0 else (
+        result.stdout,
+        result.stderr,
+    )
+    output = "\n".join(part.strip() for part in output_parts if part.strip())
+    if output:
+        for line in output.splitlines():
+            print(f"  {line}")
+    if result.returncode != 0:
+        print("  Warning: agent storage reconciliation reported a failure")
+        return
+    print("  ✓ Agent storage retention reconciled as the target user")

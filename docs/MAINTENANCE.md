@@ -163,17 +163,25 @@ bounded policies:
 - OpenCode and Codex cleanup is restricted to rebuildable cache directories.
   The OpenCode cache limit is 2 GiB and the Codex cache limit is 1 GiB; either
   cache may also be removed after 90 days without activity. Codex temporary
-  entries older than seven days are removed individually.
+  entries older than seven days are removed individually. Standalone Codex
+  installations retain the current release, the newest prior release for
+  rollback, and every release currently executing. Older releases are removed
+  only after their vendor manifest, entrypoint, ownership, and directory layout
+  have been validated; unfamiliar entries are left unchanged.
 - T3 Code numbered provider and trace log rotations are retained up to 256 MiB
   and 14 days. Current logs, terminal logs, non-numbered files, and symbolic
-  links are never selected by this policy.
+  links are never selected by this policy. Agent setup reruns apply both the
+  Codex release policy and T3 rotation policy immediately, in addition to the
+  weekly maintenance job. Setup invokes this reconciliation as the target
+  account rather than with its own root privileges.
 
 Agent cache cleanup is deferred while the matching tool is running. Symbolic
 links and paths outside the configured user's home are never followed or
 removed. OpenCode data under `.local/share/opencode` and Codex sessions,
-memories, credentials, packages, and plugins are persistent state and are not
-cleanup targets. Root-only setups retain system cleanup but intentionally skip
-the user-cache timer. Preview the user job without changing files with:
+memories, credentials, plugins, and unrecognized package layouts are persistent
+state and are not cleanup targets. Root-only setups retain system cleanup but
+intentionally skip the user-cache timer. Preview the user job without changing
+files with:
 
 ```bash
 sudo -u USER /usr/bin/python3 \

@@ -30,6 +30,7 @@ PLUGIN = PluginDefinition(
         "install_agent_cli_launcher",
         "install_agent_workflow_skills",
         "install_t3code_web",
+        "reconcile_agent_storage",
         "copy_agent_tooling_payload",
         "install_browser_automation",
         "install_git_for_agent_repositories",
@@ -218,6 +219,7 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         install_codex,
         install_github_cli,
         install_opencode,
+        reconcile_agent_storage,
     )
     from common.t3code_steps import install_t3code_web
 
@@ -260,6 +262,9 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
 
     if "t3code" in (config.web_interfaces or []):
         steps.append(("Installing T3 Code web interface", install_t3code_web))
+
+    if config.has_agent_features():
+        steps.append(("Reconciling agent storage", reconcile_agent_storage))
 
     if config.browser_automation:
         from common.browser_automation_steps import install_browser_automation
@@ -319,6 +324,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         install_codex,
         install_github_cli,
         install_opencode,
+        reconcile_agent_storage,
     )
     from common.t3code_steps import install_t3code_web
     from common.browser_automation_steps import install_browser_automation
@@ -342,6 +348,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_agent_cli_launcher": install_agent_cli_launcher,
         "install_agent_workflow_skills": install_agent_workflow_skills,
         "install_t3code_web": install_t3code_web,
+        "reconcile_agent_storage": reconcile_agent_storage,
         "copy_agent_tooling_payload": copy_agent_tooling_payload,
         "install_browser_automation": install_browser_automation,
         "clone_agent_repositories": clone_agent_repositories,
