@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -202,7 +204,19 @@ class T3CodeWebTest(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "npm_config_dangerously_allow_all_scripts=true" in command
+                    "npm_config_strict_allow_scripts=false" in command
+                    for command in commands
+                )
+            )
+            self.assertTrue(
+                all(
+                    "dangerously_allow_all_scripts=true" not in command
+                    for command in commands
+                )
+            )
+            self.assertTrue(
+                any(
+                    "export CC=gcc" in command and "export CXX=g++" in command
                     for command in commands
                 )
             )
@@ -219,6 +233,13 @@ class T3CodeWebTest(unittest.TestCase):
             self.assertIn(f"WorkingDirectory={workspace}", content)
             self.assertIn("Environment=T3CODE_HOST=0.0.0.0", content)
             self.assertIn("Environment=T3CODE_PORT=3773", content)
+            self.assertIn("Environment=CC=gcc", content)
+            self.assertIn("Environment=CXX=g++", content)
+            self.assertIn("Environment=npm_config_strict_allow_scripts=false", content)
+            self.assertIn(
+                "UnsetEnvironment=npm_config_allow_scripts NPM_CONFIG_ALLOW_SCRIPTS",
+                content,
+            )
 
     def test_healthy_service_is_not_silently_updated(self) -> None:
         with tempfile.TemporaryDirectory() as home:
@@ -505,7 +526,7 @@ class T3CodeWebTest(unittest.TestCase):
             self.assertIn("stop", actions)
             self.assertIn("restart", actions)
 
-    def test_native_rebuild_enables_npm_lifecycle_scripts(self) -> None:
+    def test_native_rebuild_uses_scoped_npm_script_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             binary = self._write_upstream_runtime(home)
             node_bin = os.path.join(home, "node-bin")
@@ -516,11 +537,24 @@ class T3CodeWebTest(unittest.TestCase):
                     file_obj.write("#!/bin/sh\n")
                 os.chmod(path, 0o755)
             completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+            observed: dict[str, str] = {}
+
+            def run_as_user(_username, _home, command, **_kwargs):
+                match = re.search(r"NPM_CONFIG_USERCONFIG=([^ ]+)", command)
+                self.assertIsNotNone(match)
+                assert match is not None
+                npm_config = shlex.split(match.group(1))[0]
+                with open(npm_config, encoding="utf-8") as file_obj:
+                    observed["content"] = file_obj.read()
+                observed["path"] = npm_config
+                observed["command"] = command
+                return completed
+
             with (
                 patch(
                     "common.t3code_steps._run_as_login_user",
-                    return_value=completed,
-                ) as run_as_user,
+                    side_effect=run_as_user,
+                ),
                 patch(
                     "common.t3code_steps._t3_native_runtime_healthy",
                     return_value=True,
@@ -528,9 +562,18 @@ class T3CodeWebTest(unittest.TestCase):
             ):
                 _rebuild_t3_native_runtime("agent", home, node_bin, binary)
 
-            command = run_as_user.call_args.args[2]
-            self.assertIn("npm_config_dangerously_allow_all_scripts=true", command)
-            self.assertIn("rebuild --dangerously-allow-all-scripts", command)
+            command = observed["command"]
+            self.assertEqual(
+                observed["content"],
+                "allow-scripts=node-pty,msgpackr-extract\n",
+            )
+            self.assertFalse(os.path.exists(observed["path"]))
+            self.assertIn("export CC=gcc", command)
+            self.assertIn("export CXX=g++", command)
+            self.assertIn("NPM_CONFIG_USERCONFIG=", command)
+            self.assertIn("unset npm_config_allow_scripts", command)
+            self.assertNotIn("dangerously_allow_all_scripts=true", command)
+            self.assertNotIn("--dangerously-allow-all-scripts", command)
             self.assertIn("--foreground-scripts --prefix", command)
             self.assertIn("node-pty msgpackr-extract", command)
 

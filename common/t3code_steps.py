@@ -14,7 +14,8 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from typing import Sequence
+from contextlib import contextmanager
+from typing import Iterator, Sequence
 
 from common.common_steps import _run_as_login_user
 from lib.atomic_io import write_text_atomic
@@ -349,16 +350,22 @@ def _rebuild_t3_native_runtime(
         raise RuntimeError("T3 Code native runtime repair requires npm")
     version_root = _t3_version_root(binary)
     packages = " ".join(shlex.quote(package) for package in _T3_NATIVE_PACKAGES)
-    result = _run_as_login_user(
-        username,
-        home,
-        "export npm_config_dangerously_allow_all_scripts=true && "
-        "export npm_config_foreground_scripts=true && "
-        f"{shlex.quote(npm)} rebuild --dangerously-allow-all-scripts "
-        f"--foreground-scripts --prefix {shlex.quote(version_root)} {packages}",
-        check=False,
-        capture_output=True,
-    )
+    with _temporary_t3_npm_config(home) as npm_config:
+        result = _run_as_login_user(
+            username,
+            home,
+            "unset npm_config_allow_scripts NPM_CONFIG_ALLOW_SCRIPTS "
+            "npm_config_dangerously_allow_all_scripts "
+            "NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS && "
+            "export CC=gcc && "
+            "export CXX=g++ && "
+            f"export NPM_CONFIG_USERCONFIG={shlex.quote(npm_config)} && "
+            "export npm_config_foreground_scripts=true && "
+            f"{shlex.quote(npm)} rebuild --foreground-scripts "
+            f"--prefix {shlex.quote(version_root)} {packages}",
+            check=False,
+            capture_output=True,
+        )
     if result.returncode != 0:
         detail = _t3_command_failure_detail(result)
         raise RuntimeError(f"T3 Code native runtime repair failed:\n{detail}")
@@ -366,6 +373,30 @@ def _rebuild_t3_native_runtime(
         raise RuntimeError(
             "T3 Code native runtime is incomplete after repair; node-pty did not load"
         )
+
+
+@contextmanager
+def _temporary_t3_npm_config(home: str) -> Iterator[str]:
+    """Yield a target-readable npm 12 allowlist for one native rebuild."""
+
+    if os.path.islink(home) or not os.path.isdir(home):
+        raise RuntimeError(f"Refusing unsafe T3 home directory: {home}")
+    owner = os.stat(home, follow_symlinks=False)
+    descriptor, path = tempfile.mkstemp(
+        prefix=".infra-tools-t3-npmrc-",
+        dir=home,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file_obj:
+            file_obj.write(f"allow-scripts={','.join(_T3_NATIVE_PACKAGES)}\n")
+        os.chmod(path, 0o600)
+        os.chown(path, owner.st_uid, owner.st_gid)
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
 
 
 def _t3_local_endpoint_reachable(host: str, port: int) -> bool:
@@ -529,6 +560,10 @@ Environment=T3CODE_HOST={host}
 Environment=T3CODE_PORT={port}
 Environment=T3CODE_NO_BROWSER=true
 Environment=GH_CONFIG_DIR={home}/.config/gh
+Environment=CC=gcc
+Environment=CXX=g++
+Environment=npm_config_strict_allow_scripts=false
+UnsetEnvironment=npm_config_allow_scripts NPM_CONFIG_ALLOW_SCRIPTS npm_config_dangerously_allow_all_scripts NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS
 Environment=PATH={environment_path}
 """
     changed = _write_text_if_changed(path, content, 0o644)
@@ -597,7 +632,12 @@ def _install_t3_service(
                 home,
                 'export NVM_DIR="$HOME/.nvm" && '
                 '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-                'export npm_config_dangerously_allow_all_scripts=true && '
+                'unset npm_config_dangerously_allow_all_scripts '
+                'NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS '
+                'npm_config_allow_scripts NPM_CONFIG_ALLOW_SCRIPTS && '
+                'export CC=gcc && '
+                'export CXX=g++ && '
+                'export npm_config_strict_allow_scripts=false && '
                 'export npm_config_foreground_scripts=true && '
                 f'export XDG_RUNTIME_DIR=/run/user/{uid} && '
                 f'export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus && '

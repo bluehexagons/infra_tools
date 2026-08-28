@@ -14,8 +14,9 @@ import sys
 import tempfile
 import time
 import urllib.request
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Iterator, Optional
 
 from lib.atomic_io import write_json_atomic
 from lib.agent_maintenance import (
@@ -1344,31 +1345,57 @@ def _repair_t3_native_runtime(
     ):
         return False
     repair_environment = environment.copy()
+    for key in list(repair_environment):
+        if key.lower() in {
+            "npm_config_allow_scripts",
+            "npm_config_dangerously_allow_all_scripts",
+        }:
+            repair_environment.pop(key, None)
     repair_environment.update(
         {
-            "npm_config_dangerously_allow_all_scripts": "true",
+            "CC": "gcc",
+            "CXX": "g++",
             "npm_config_foreground_scripts": "true",
+            "npm_config_strict_allow_scripts": "false",
         }
     )
-    result = _run_check(
-        [
-            npm,
-            "rebuild",
-            "--dangerously-allow-all-scripts",
-            "--foreground-scripts",
-            "--prefix",
-            version_root,
-            *_T3_NATIVE_PACKAGES,
-        ],
-        environment=repair_environment,
-        cwd=version_root,
-        timeout=300,
-    )
+    with _temporary_t3_npm_config() as npm_config:
+        repair_environment["NPM_CONFIG_USERCONFIG"] = npm_config
+        result = _run_check(
+            [
+                npm,
+                "rebuild",
+                "--foreground-scripts",
+                "--prefix",
+                version_root,
+                *_T3_NATIVE_PACKAGES,
+            ],
+            environment=repair_environment,
+            cwd=version_root,
+            timeout=300,
+        )
     return result.returncode == 0 and _t3_native_runtime_healthy(
         node,
         binary,
         environment,
     )
+
+
+@contextmanager
+def _temporary_t3_npm_config() -> Iterator[str]:
+    """Yield a private npm 12 allowlist without changing the user's npmrc."""
+
+    descriptor, path = tempfile.mkstemp(prefix=".infra-tools-t3-npmrc-")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file_obj:
+            file_obj.write(f"allow-scripts={','.join(_T3_NATIVE_PACKAGES)}\n")
+        os.chmod(path, 0o600)
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
 
 
 def _t3_endpoint_reachable(port: int | None) -> bool:

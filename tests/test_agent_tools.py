@@ -38,6 +38,7 @@ from lib.agent_auth import (
 )
 from lib.agent_credentials import inspect_codex_auth_payload
 from lib.agent_cli import (
+    _repair_t3_native_runtime,
     _t3_port,
     _tool_path,
     add_agent_subparser,
@@ -500,6 +501,72 @@ class TestAgentDoctor(unittest.TestCase):
         self.assertIn('rebuilt T3 Code native runtime', result['fixes'])
         self.assertIn('restarted inactive T3 Code service', result['fixes'])
         self.assertTrue(result['service_log'].endswith('boot-service.log'))
+
+    def test_t3code_doctor_repair_uses_temporary_npm_script_allowlist(self):
+        with tempfile.TemporaryDirectory() as home:
+            version_root = os.path.join(home, '.t3', 'runtime', 'versions', '0.0.35')
+            binary = os.path.join(
+                version_root,
+                'node_modules',
+                't3',
+                'dist',
+                'bin.mjs',
+            )
+            os.makedirs(os.path.dirname(binary))
+            with open(binary, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('#!/bin/sh\n')
+            node_bin = os.path.join(home, 'node-bin')
+            os.makedirs(node_bin)
+            for executable in ('node', 'npm'):
+                path = os.path.join(node_bin, executable)
+                with open(path, 'w', encoding='utf-8') as file_obj:
+                    file_obj.write('#!/bin/sh\n')
+                os.chmod(path, 0o755)
+            observed: dict[str, object] = {}
+            completed = type(
+                'Completed',
+                (),
+                {'returncode': 0, 'stdout': '', 'stderr': ''},
+            )()
+
+            def run_check(command, **kwargs):
+                if len(command) > 1 and command[1] == 'rebuild':
+                    environment = kwargs['environment']
+                    npm_config = environment['NPM_CONFIG_USERCONFIG']
+                    with open(npm_config, encoding='utf-8') as file_obj:
+                        observed['npm_config'] = file_obj.read()
+                    observed['command'] = command
+                    observed['environment'] = environment.copy()
+                return completed
+
+            environment = {
+                'npm_config_dangerously_allow_all_scripts': 'true',
+                'NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS': 'true',
+            }
+            with patch('lib.agent_cli._run_check', side_effect=run_check):
+                self.assertTrue(
+                    _repair_t3_native_runtime(
+                        os.path.join(node_bin, 'node'),
+                        binary,
+                        environment,
+                    )
+                )
+
+        command = observed['command']
+        repair_environment = observed['environment']
+        self.assertEqual(
+            observed['npm_config'],
+            'allow-scripts=node-pty,msgpackr-extract\n',
+        )
+        self.assertNotIn('--dangerously-allow-all-scripts', command)
+        self.assertNotIn('npm_config_allow_scripts', repair_environment)
+        self.assertNotIn('NPM_CONFIG_ALLOW_SCRIPTS', repair_environment)
+        self.assertNotIn('npm_config_dangerously_allow_all_scripts', repair_environment)
+        self.assertNotIn('NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS', repair_environment)
+        self.assertEqual(repair_environment['CC'], 'gcc')
+        self.assertEqual(repair_environment['CXX'], 'g++')
+        self.assertEqual(repair_environment['npm_config_strict_allow_scripts'], 'false')
+        self.assertFalse(os.path.exists(repair_environment['NPM_CONFIG_USERCONFIG']))
 
     def test_inspects_user_tool_and_credentials_without_contents(self):
         with tempfile.TemporaryDirectory() as home:

@@ -92,9 +92,16 @@ are also supported:
 
 ```bash
 # As the target user, using T3 Code's documented updater:
-npm_config_dangerously_allow_all_scripts=true \
+env -u npm_config_dangerously_allow_all_scripts \
+  -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
+  -u npm_config_allow_scripts \
+  -u NPM_CONFIG_ALLOW_SCRIPTS \
+  CC=gcc \
+  CXX=g++ \
+  npm_config_strict_allow_scripts=false \
   npm_config_foreground_scripts=true \
   npx t3@latest service update
+infra-tools agent doctor --capability t3code --fix
 
 # From infra-tools:
 infra-tools setup server_dev vm.example agent --refresh-packages ...
@@ -105,9 +112,16 @@ both commands operate on the same upstream-managed user service. If the
 desktop client and server differ, update the service to the client version:
 
 ```bash
-npm_config_dangerously_allow_all_scripts=true \
+env -u npm_config_dangerously_allow_all_scripts \
+  -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
+  -u npm_config_allow_scripts \
+  -u NPM_CONFIG_ALLOW_SCRIPTS \
+  CC=gcc \
+  CXX=g++ \
+  npm_config_strict_allow_scripts=false \
   npm_config_foreground_scripts=true \
   npx t3@CLIENT_VERSION service update
+infra-tools agent doctor --capability t3code --fix
 ```
 
 During a refresh, an upstream updater failure does not take down a previously
@@ -118,10 +132,20 @@ a damaged runtime, or a failed readiness check remains fatal. Updater failures
 include bounded diagnostics from both the beginning and end of npm's output so
 an earlier npm error is not hidden by a later successful native-build message.
 
-Keep the npm overrides scoped to the trusted T3 updater. npm 12's default
-lifecycle-script policy can otherwise omit T3's Linux `node-pty` build while
-the package installation still exits successfully. infra-tools validates the
-native module, rebuilds an incomplete active runtime, and waits for several
+Keep the npm settings scoped to the trusted T3 updater. npm 12 blocks native
+dependency scripts by default, but inherited `allow-scripts` or
+`dangerously-allow-all-scripts` settings cannot be used by T3's nested
+project-scoped install: npm rejects that combination with `EALLOWSCRIPTS`.
+infra-tools lets the upstream install stage an otherwise valid runtime, then
+uses a short-lived npm config that allowlists only `node-pty` and
+`msgpackr-extract` while rebuilding them. The target user's normal npm
+configuration remains unchanged.
+
+T3's published `node-pty` package has no Linux prebuild, so infra-tools also
+selects the `gcc` and `g++` provided by `build-essential` for setup-time and
+service-initiated updates. This prevents a stale inherited `CC` or `CXX` value
+from selecting a missing versioned compiler. infra-tools validates the native
+module, rebuilds an incomplete active runtime, and waits for several
 consecutive healthy service and HTTP checks before setup succeeds. The same
 repair is available after setup:
 
