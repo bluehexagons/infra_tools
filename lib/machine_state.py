@@ -247,9 +247,22 @@ def can_modify_kernel() -> bool:
     return get_machine_type() in ("vm", "privileged", "hardware")
 
 
-def can_manage_firewall() -> bool:
-    """Check if firewall can be managed."""
-    return get_machine_type() in ("vm", "privileged", "hardware")
+def _effective_machine_type(machine_type: Optional[str]) -> str:
+    """Return an explicit setup type or the active/persisted runtime type."""
+    return (
+        get_machine_type()
+        if machine_type is None
+        else resolve_machine_type(machine_type)
+    )
+
+
+def can_manage_firewall(machine_type: Optional[str] = None) -> bool:
+    """Check if firewall policy can be enforced by this machine."""
+    return _effective_machine_type(machine_type) in (
+        "vm",
+        "privileged",
+        "hardware",
+    )
 
 
 def can_manage_swap() -> bool:
@@ -264,11 +277,7 @@ def can_manage_time_sync(machine_type: Optional[str] = None) -> bool:
     capability decision does not depend on state saved by an older run.
     Runtime callers continue to use the persisted machine state.
     """
-    effective_type = (
-        get_machine_type()
-        if machine_type is None
-        else resolve_machine_type(machine_type)
-    )
+    effective_type = _effective_machine_type(machine_type)
     return effective_type in ("vm", "privileged", "hardware")
 
 

@@ -7,6 +7,7 @@ from typing import Any, Optional, cast
 
 from common.storage_steps import assert_declared_storage_mount
 from lib.config import SetupConfig
+from lib.machine_state import can_manage_firewall
 from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
 from lib.remote_utils import run, is_package_installed
 from lib.validation import validate_samba_share_specs
@@ -16,6 +17,9 @@ SMB_CONF_PATH = "/etc/samba/smb.conf"
 MANAGED_SHARES_BEGIN = "# BEGIN infra_tools managed Samba shares"
 MANAGED_SHARES_END = "# END infra_tools managed Samba shares"
 SAMBA_FIREWALL_COMMENT_PREFIX = "infra_tools Samba 445/tcp source"
+SAMBA_FAIL2BAN_JAIL_PATH = "/etc/fail2ban/jail.d/samba-auth.local"
+SAMBA_FAIL2BAN_FILTER_PATH = "/etc/fail2ban/filter.d/samba-auth.conf"
+SAMBA_REMOVED_GLOBAL_SETTINGS = ("null passwords",)
 
 
 def parse_share_credentials(
@@ -52,6 +56,10 @@ def install_samba(config: SetupConfig) -> None:
 
 
 def configure_samba_firewall(config: SetupConfig) -> None:
+    if not can_manage_firewall(config.machine_type):
+        print("  ✓ Skipping Samba guest firewall (container host must enforce access)")
+        return
+
     # Modern SMB only needs 445/tcp. NetBIOS (137/138/139) is disabled in the
     # global Samba config (`disable netbios = yes`), so opening 139/tcp would
     # only widen the attack surface for no benefit. Remove any pre-existing
@@ -61,7 +69,7 @@ def configure_samba_firewall(config: SetupConfig) -> None:
         "ufw delete allow 139",
     ]
     for rule in cleanup_rules:
-        run(rule, check=False)
+        run(rule, check=False, capture_output=True)
 
     sources = config.effective_samba_sources()
     desired_comments: set[str] = set()
@@ -74,16 +82,21 @@ def configure_samba_firewall(config: SetupConfig) -> None:
                 f"{shlex.quote(source)} to any port 445 proto tcp "
                 f"comment {shlex.quote(comment)}",
                 check=False,
+                capture_output=True,
             )
             if result.returncode != 0:
                 raise RuntimeError(
                     f"Failed to restrict Samba to access source {source}"
                 )
-        run("ufw delete allow 445/tcp", check=False)
+        run("ufw delete allow 445/tcp", check=False, capture_output=True)
     else:
-        result = run("ufw allow 445/tcp comment 'Samba SMB'", check=False)
+        result = run(
+            "ufw allow 445/tcp comment 'Samba SMB'",
+            check=False,
+            capture_output=True,
+        )
         if result.returncode != 0:
-            print("  Warning: Failed to add firewall rule for SMB (445/tcp)")
+            raise RuntimeError("Failed to add Samba firewall rule for TCP 445")
 
     status = run("ufw status numbered", check=False, capture_output=True)
     stale_numbers: list[int] = []
@@ -99,9 +112,11 @@ def configure_samba_firewall(config: SetupConfig) -> None:
             ):
                 stale_numbers.append(int(match.group(1)))
     for number in sorted(stale_numbers, reverse=True):
-        run(f"ufw --force delete {number}", check=False)
+        run(f"ufw --force delete {number}", check=False, capture_output=True)
 
-    run("ufw reload", check=False)
+    reload_result = run("ufw reload", check=False, capture_output=True)
+    if reload_result.returncode != 0:
+        raise RuntimeError("Failed to reload UFW after Samba rule reconciliation")
     if sources:
         print(
             "  ✓ Firewall restricts Samba (445/tcp) to "
@@ -553,7 +568,10 @@ def _render_hardened_global_settings(
         return "[global]\n" + hardened_lines + "\n" + content
 
     body = match.group("body")
-    for key in desired_settings:
+    # Samba 4.21 warns for the old `null passwords` setting even when it is
+    # set to `no`. Authentication is already fail-closed through `map to
+    # guest = Never`, so remove the obsolete option from managed globals.
+    for key in (*desired_settings, *SAMBA_REMOVED_GLOBAL_SETTINGS):
         setting_pattern = re.compile(
             r"(?im)^[ \t]*" + re.escape(key) + r"[ \t]*=[^\r\n]*(?:\r?\n|$)"
         )
@@ -594,8 +612,30 @@ def configure_samba_global_settings(config: SetupConfig) -> None:
 
 
 def configure_samba_fail2ban(config: SetupConfig) -> None:
-    jail_path = "/etc/fail2ban/jail.d/samba-auth.local"
-    filter_path = "/etc/fail2ban/filter.d/samba-auth.conf"
+    jail_path = SAMBA_FAIL2BAN_JAIL_PATH
+    filter_path = SAMBA_FAIL2BAN_FILTER_PATH
+
+    if not can_manage_firewall(config.machine_type):
+        removed_managed_config = False
+        for path in (jail_path, filter_path):
+            if not os.path.exists(path):
+                continue
+            try:
+                os.remove(path)
+                removed_managed_config = True
+            except OSError as exc:
+                print(f"  ⚠ Could not remove container-inapplicable {path}: {exc}")
+
+        if removed_managed_config and is_package_installed("fail2ban"):
+            result = run(
+                "systemctl try-restart fail2ban",
+                check=False,
+                capture_output=True,
+            )
+            if result.returncode != 0:
+                print("  ⚠ Could not unload the old Samba fail2ban jail")
+        print("  ✓ Samba fail2ban skipped (container cannot enforce firewall bans)")
+        return
 
     # Older versions of this tool wrote /etc/fail2ban/jail.d/samba.local and
     # /etc/fail2ban/filter.d/samba.conf. The latter clobbered the distro

@@ -73,6 +73,10 @@ class TestMachineStateHelpers(unittest.TestCase):
         with self._patch_machine_type('hardware'):
             self.assertFalse(ms.can_manage_time_sync('unprivileged'))
 
+    def test_firewall_can_use_current_type_instead_of_saved_state(self):
+        with self._patch_machine_type('hardware'):
+            self.assertFalse(ms.can_manage_firewall('unprivileged'))
+
     def test_machine_type_context_overrides_and_restores_saved_state(self):
         with self._patch_machine_type('hardware'):
             self.assertTrue(ms.is_hardware())

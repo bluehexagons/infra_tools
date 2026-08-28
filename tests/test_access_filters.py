@@ -275,6 +275,7 @@ class TestGenericUfwFiltering(unittest.TestCase):
                 host="host.example.test",
                 username="admin",
                 system_type="server_lite",
+                machine_type="vm",
                 access_sources=["192.168.1.0/24"],
             )
         )
@@ -295,6 +296,7 @@ class TestGenericUfwFiltering(unittest.TestCase):
             host="host.example.test",
             username="admin",
             system_type="server_lite",
+            machine_type="vm",
             enable_samba=True,
             samba_sources=["192.168.20.0/24"],
         )

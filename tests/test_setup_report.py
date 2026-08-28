@@ -36,6 +36,13 @@ class SetupReportTest(unittest.TestCase):
         self.assertEqual(len(report.notes), 1)
         self.assertIn("first half of warning", report.notes[0].message)
 
+    def test_success_line_containing_failure_language_is_not_an_error(self) -> None:
+        report = SetupReport()
+
+        report.observe("  ✓ fail2ban configured for Samba (5 failed attempts = 1 hour ban)")
+
+        self.assertEqual(report.notes, ())
+
     def test_render_groups_notes_for_skimming(self) -> None:
         report = SetupReport()
         report.error("service failed", step="Web")

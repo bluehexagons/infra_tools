@@ -124,6 +124,8 @@ class SetupReport:
 
         del channel  # Reserved for future structured stream filtering.
         message = _ANSI_ESCAPE.sub("", line).strip()
+        if message.startswith("✓"):
+            return
         lowered = message.lower()
         if any(marker in lowered for marker in self._ERROR_MARKERS):
             self.error(message)

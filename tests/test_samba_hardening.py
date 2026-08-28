@@ -21,7 +21,12 @@ from smb import samba_steps
 
 
 def _make_config(**kwargs) -> SetupConfig:
-    defaults = dict(host='testhost', username='testuser', system_type='server_lite')
+    defaults = dict(
+        host='testhost',
+        username='testuser',
+        system_type='server_lite',
+        machine_type='vm',
+    )
     defaults.update(kwargs)
     return SetupConfig(**defaults)
 
@@ -59,6 +64,7 @@ class TestConfigureSambaGlobalSettings(unittest.TestCase):
             smb_conf = os.path.join(tmpdir, "smb.conf")
             original = """[GLOBAL]
    server min protocol = SMB2
+   null passwords = no
    workgroup = LEGACY
 
 [archive]
@@ -83,6 +89,7 @@ class TestConfigureSambaGlobalSettings(unittest.TestCase):
         global_section, archive_section = configured.split("[archive]", 1)
         self.assertIn("server min protocol = SMB3", global_section)
         self.assertEqual(global_section.count("server min protocol"), 1)
+        self.assertNotIn("null passwords", global_section)
         self.assertIn("server min protocol = NT1", archive_section)
         self.assertTrue(any(command.startswith("testparm -s ") for command in commands))
         self.assertIn("systemctl reload smbd", commands)
@@ -213,11 +220,77 @@ class TestConfigureSambaFirewall(unittest.TestCase):
         self.assertFalse(any("ufw allow 139" in c for c in commands))
         self.assertIn("ufw reload", joined)
 
+    def test_captures_expected_ufw_reconciliation_output(self) -> None:
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def fake_run(command: str, **kwargs: object) -> MagicMock:
+            calls.append((command, kwargs))
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch.object(samba_steps, "run", side_effect=fake_run):
+            samba_steps.configure_samba_firewall(_make_config())
+
+        for command, kwargs in calls:
+            if command.startswith("ufw "):
+                self.assertTrue(kwargs.get("capture_output"), command)
+
+    def test_container_defers_firewall_to_host(self) -> None:
+        with patch.object(samba_steps, "run") as mock_run:
+            samba_steps.configure_samba_firewall(
+                _make_config(machine_type="unprivileged")
+            )
+
+        mock_run.assert_not_called()
+
+    def test_required_samba_rule_failure_stops_setup(self) -> None:
+        def fake_run(command: str, **_kwargs: object) -> MagicMock:
+            return MagicMock(
+                returncode=1 if command.startswith("ufw allow 445/tcp") else 0,
+                stdout="",
+                stderr="permission denied",
+            )
+
+        with patch.object(samba_steps, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(RuntimeError, "Samba firewall rule"):
+                samba_steps.configure_samba_firewall(_make_config())
+
 
 class TestConfigureSambaFail2banLegacyCleanup(unittest.TestCase):
     """The old code wrote /etc/fail2ban/filter.d/samba.conf, clobbering the
     distro-shipped conffile. The new code uses samba-auth.* and removes the
     legacy paths if present."""
+
+    def test_container_removes_managed_jail_without_installing_fail2ban(self) -> None:
+        expected_paths = {
+            samba_steps.SAMBA_FAIL2BAN_JAIL_PATH,
+            samba_steps.SAMBA_FAIL2BAN_FILTER_PATH,
+        }
+        existing_paths = set(expected_paths)
+        removed: list[str] = []
+
+        def remove(path: str) -> None:
+            removed.append(path)
+            existing_paths.remove(path)
+
+        with patch.object(
+            samba_steps.os.path,
+            "exists",
+            side_effect=existing_paths.__contains__,
+        ), patch.object(
+            samba_steps.os,
+            "remove",
+            side_effect=remove,
+        ), patch.object(
+            samba_steps,
+            "is_package_installed",
+            return_value=False,
+        ), patch.object(samba_steps, "run") as mock_run:
+            samba_steps.configure_samba_fail2ban(
+                _make_config(machine_type="unprivileged")
+            )
+
+        self.assertCountEqual(removed, expected_paths)
+        mock_run.assert_not_called()
 
     def test_legacy_files_are_removed_when_present(self) -> None:
         existing_paths = {

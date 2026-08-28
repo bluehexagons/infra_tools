@@ -26,7 +26,8 @@ well as add them.
 ## Initial setup
 
 The full setup installs and hardens Samba, configures the firewall and
-fail2ban, and creates the requested shares:
+fail2ban on machines that can enforce their own firewall policy, and creates
+the requested shares:
 
 ```bash
 infra-tools setup server_lite fileserver admin \
@@ -204,12 +205,18 @@ The generated global Samba configuration:
 - requires SMB3 or newer;
 - requires signing and encryption;
 - disables NetBIOS and exposes TCP 445 only;
-- disables guest access and anonymous enumeration; and
+- disables guest access and anonymous enumeration;
+- removes the deprecated `null passwords` setting from the managed global
+  section; and
 - validates candidate `smb.conf` content with `testparm` before reload.
 
-The setup also configures a fail2ban jail for failed Samba authentication. A
-share's internal directories identified by configured scrub jobs are hidden
-from SMB clients with `veto files`.
+On machines that enforce their own firewall, setup also configures a fail2ban
+jail for failed Samba authentication. A share's internal directories
+identified by configured scrub jobs are hidden from SMB clients with `veto
+files`.
+
+Unprivileged and OCI containers defer firewall enforcement to their host and
+do not retain the infra_tools-managed Samba fail2ban jail.
 
 ## Git and Git LFS storage
 
