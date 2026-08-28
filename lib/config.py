@@ -642,7 +642,9 @@ class SetupConfig:
             args.append(
                 f"--zswap-max-pool-percent {self.zswap_max_pool_percent}"
             )
-        if self.swap_resume:
+        if self.swap_resume == "":
+            args.append("--no-swap-resume")
+        elif self.swap_resume:
             args.append(f"--swap-resume {shlex.quote(self.swap_resume)}")
         if include_initialize:
             for name in self.swap_initialize or []:

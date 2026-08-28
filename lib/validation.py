@@ -1811,6 +1811,8 @@ def validate_swap_settings(config: Any) -> None:
         raise ValueError("Explicit swap areas require --swap-mode auto")
 
     names: set[str] = set()
+    file_paths: set[str] = set()
+    device_sources: set[str] = set()
 
     def add_name(name: str) -> None:
         if not _SWAP_AREA_NAME_PATTERN.fullmatch(name):
@@ -1853,8 +1855,14 @@ def validate_swap_settings(config: Any) -> None:
         if not os.path.isabs(path) or os.path.normpath(path) != path or path == "/":
             raise ValueError("--swap-file PATH must be an absolute normalized file path")
         validate_no_control_characters(path, "--swap-file PATH")
-        if _memory_string_kib(spec[2], "--swap-file SIZE") < 64 * 1024:
+        size_kib = _memory_string_kib(spec[2], "--swap-file SIZE")
+        if size_kib < 64 * 1024:
             raise ValueError("--swap-file SIZE must be at least 64M")
+        if size_kib % 1024:
+            raise ValueError("--swap-file SIZE must resolve to a whole MiB")
+        if path in file_paths:
+            raise ValueError(f"Duplicate --swap-file PATH '{path}'")
+        file_paths.add(path)
         parse_options(spec, 3, {"priority"}, "--swap-file")
 
     device_names: set[str] = set()
@@ -1885,6 +1893,9 @@ def validate_swap_settings(config: Any) -> None:
                 "--swap-device SOURCE must name a declared VM data disk, use "
                 "UUID=..., or use /dev/disk/by-id/..."
             )
+        if source in device_sources:
+            raise ValueError(f"Duplicate --swap-device SOURCE '{source}'")
+        device_sources.add(source)
         options = parse_options(
             spec, 2, {"discard", "priority"}, "--swap-device"
         )
@@ -1899,8 +1910,11 @@ def validate_swap_settings(config: Any) -> None:
                 "--swap-zram requires NAME SIZE [priority=N] [algorithm=TOKEN]"
             )
         add_name(spec[0])
-        if _memory_string_kib(spec[1], "--swap-zram SIZE") < 64 * 1024:
+        size_kib = _memory_string_kib(spec[1], "--swap-zram SIZE")
+        if size_kib < 64 * 1024:
             raise ValueError("--swap-zram SIZE must be at least 64M")
+        if size_kib % 1024:
+            raise ValueError("--swap-zram SIZE must resolve to a whole MiB")
         options = parse_options(
             spec, 2, {"algorithm", "priority"}, "--swap-zram"
         )
@@ -1909,6 +1923,8 @@ def validate_swap_settings(config: Any) -> None:
             raise ValueError("--swap-zram algorithm contains unsupported characters")
 
     initialize = getattr(config, "swap_initialize", None) or []
+    if len(initialize) != len(set(initialize)):
+        raise ValueError("--swap-initialize cannot repeat the same NAME")
     unknown_initialize = set(initialize) - device_names
     if unknown_initialize:
         raise ValueError(

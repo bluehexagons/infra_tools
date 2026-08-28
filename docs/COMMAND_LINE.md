@@ -819,6 +819,7 @@ Notes:
 | `--zswap` / `--no-zswap` | Enable or disable the kernel's compressed zswap cache; managed zram and enabled zswap are mutually exclusive |
 | `--zswap-max-pool-percent N` | Limit zswap to 1-50% of RAM; requires `--zswap` |
 | `--swap-resume NAME` | Configure a declared swap device for hibernation resume |
+| `--no-swap-resume` | Remove the managed hibernation resume-device configuration |
 | `--swap-initialize NAME` | One-shot authorization to initialize a blank direct device; newly provisioned named VM swap disks are already tool-owned |
 
 Linux uses the highest-priority swap first and shares I/O across areas with
@@ -843,7 +844,9 @@ declaration never wipes its block-device signature.
 
 Infra-tools records owned areas in `/opt/infra_tools/state/swap.json` and
 edits only a marked block in `/etc/fstab`. Existing unmanaged swap is
-preserved. Btrfs swap files are rejected because their creation is
+preserved. Managed fstab entries use `nofail`, and ownership is journaled
+before creating files or zram so interrupted setup can be retried safely.
+Btrfs swap files are rejected because their creation is
 filesystem-specific. ZFS swap files, zvol-like devices, and Proxmox guest
 swap disks allocated on a `zfspool` produce warnings because those layouts
 have not yet been qualified by this project.

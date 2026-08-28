@@ -975,6 +975,15 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
         "zswap_max_pool_percent",
         "swap_resume",
     ):
+        if explicit_swap_mode == "none":
+            continue
+        if field == "swap_resume" and explicit_swap_mode is not None:
+            continue
+        if (
+            field == "zswap_max_pool_percent"
+            and getattr(args, "zswap", None) is False
+        ):
+            continue
         if getattr(args, field, None) is None:
             preserve_keys.add(field)
     if getattr(args, "proxmox_balloon_target", None) is None:
@@ -1131,7 +1140,7 @@ _PROVISIONING_FIELD_FLAGS = {
     "vm_disk_discard": "--disk-discard",
     "vm_disk_ssd": "--disk-ssd",
     "vm_disk_backup": "--disk-backup",
-    "vm_disk_settings": "--disk-ssd/--disk-discard NAME",
+    "vm_disk_settings": "--disk-ssd/--disk-discard/--disk-backup NAME",
     "container_base": "--base",
     "vm_image": "--image",
     "vm_image_storage": "--image-storage",

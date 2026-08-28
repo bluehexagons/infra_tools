@@ -367,11 +367,20 @@ def add_setup_arguments(
         metavar="N",
         help="Maximum percentage of RAM used by zswap (1-50)",
     )
-    parser.add_argument(
+    resume_group = parser.add_mutually_exclusive_group()
+    resume_group.add_argument(
         "--swap-resume",
         default=argparse.SUPPRESS,
         metavar="NAME",
         help="Use one managed swap device as the hibernation resume device",
+    )
+    resume_group.add_argument(
+        "--no-swap-resume",
+        dest="swap_resume",
+        action="store_const",
+        const="",
+        default=argparse.SUPPRESS,
+        help="Remove the managed hibernation resume-device configuration",
     )
     parser.add_argument(
         "--swap-initialize",

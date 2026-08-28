@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import sys
 import unittest
@@ -198,6 +200,23 @@ class TestHostedFlagParsing(unittest.TestCase):
         )
         self.assertEqual(args.swappiness, 120)
         self.assertEqual(args.swap_resume, "bulk")
+
+    def test_swap_resume_can_be_cleared(self):
+        args = self.parser.parse_args(["10.0.0.50", "--no-swap-resume"])
+
+        self.assertEqual(args.swap_resume, "")
+
+    def test_swap_resume_set_and_clear_are_mutually_exclusive(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.parser.parse_args(
+                    [
+                        "10.0.0.50",
+                        "--swap-resume",
+                        "bulk",
+                        "--no-swap-resume",
+                    ]
+                )
 
     def test_base_default_is_deferred_to_setup_config(self):
         args = self.parser.parse_args(["10.0.0.50"])

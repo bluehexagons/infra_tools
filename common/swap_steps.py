@@ -7,6 +7,8 @@ import os
 import re
 import shlex
 import stat
+import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +19,12 @@ from common.storage_steps import (
     _has_mountpoint,
     _wipefs_signatures,
 )
-from lib.atomic_io import remove_file_durable, write_json_atomic, write_text_atomic
+from lib.atomic_io import (
+    _fsync_directory,
+    remove_file_durable,
+    write_json_atomic,
+    write_text_atomic,
+)
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_swap
 from lib.remote_utils import is_dry_run, run
@@ -42,6 +49,9 @@ RESUME_PATH = "/etc/initramfs-tools/conf.d/99-infra-tools-resume"
 SWAP_SCHEMA_VERSION = 1
 FSTAB_BEGIN = "# BEGIN infra-tools managed swap"
 FSTAB_END = "# END infra-tools managed swap"
+_STATE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+_STATE_SIZE_PATTERN = re.compile(r"^[1-9][0-9]*[KMGT]$", re.IGNORECASE)
+_STATE_UUID_PATTERN = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 
 
 def _capture(command: str, *, check: bool = True):
@@ -70,18 +80,202 @@ def _load_state() -> dict[str, Any]:
         return {"schema": SWAP_SCHEMA_VERSION, "areas": []}
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError("Could not read the managed swap state") from exc
-    if state.get("schema") != SWAP_SCHEMA_VERSION or not isinstance(
-        state.get("areas"), list
-    ):
+    if not isinstance(state, dict) or state.get("schema") != SWAP_SCHEMA_VERSION:
         raise RuntimeError("Managed swap state has an unsupported schema")
+    state["areas"] = _validate_state_areas(state.get("areas"))
     return state
 
 
+def _validate_state_areas(raw_areas: object) -> list[dict[str, Any]]:
+    if not isinstance(raw_areas, list):
+        raise RuntimeError("Managed swap state has an invalid area list")
+    areas: list[dict[str, Any]] = []
+    resources: set[tuple[str, str]] = set()
+    for raw_area in raw_areas:
+        area = _validate_state_area(raw_area)
+        area_resources = _state_resources(area)
+        if resources & area_resources:
+            raise RuntimeError("Managed swap state contains a duplicate resource")
+        resources.update(area_resources)
+        areas.append(area)
+    return areas
+
+
+def _validate_state_area(raw_area: object) -> dict[str, Any]:
+    if not isinstance(raw_area, dict):
+        raise RuntimeError("Managed swap state contains a non-object area")
+    area = dict(raw_area)
+    name = area.get("name")
+    area_type = area.get("type")
+    source = area.get("source")
+    priority = area.get("priority")
+    if not isinstance(name, str) or not _STATE_NAME_PATTERN.fullmatch(name):
+        raise RuntimeError("Managed swap state contains an invalid area name")
+    if area_type not in {"file", "device", "zram"}:
+        raise RuntimeError(f"Managed swap state area '{name}' has an invalid type")
+    if not isinstance(source, str) or not source:
+        raise RuntimeError(f"Managed swap state area '{name}' has no source")
+    if (
+        isinstance(priority, bool)
+        or not isinstance(priority, int)
+        or not 0 <= priority <= 32767
+    ):
+        raise RuntimeError(f"Managed swap state area '{name}' has an invalid priority")
+    if area_type in {"file", "zram"}:
+        size = area.get("size")
+        if not isinstance(size, str) or not _STATE_SIZE_PATTERN.fullmatch(size):
+            raise RuntimeError(f"Managed swap state area '{name}' has an invalid size")
+        if size[-1].upper() == "K" and int(size[:-1]) % 1024:
+            raise RuntimeError(
+                f"Managed swap state area '{name}' size is not a whole MiB"
+            )
+    if area_type == "file":
+        if (
+            not os.path.isabs(source)
+            or os.path.normpath(source) != source
+            or source == "/"
+        ):
+            raise RuntimeError(f"Managed swap state area '{name}' has an invalid path")
+        if area.get("pending") not in {None, True, False}:
+            raise RuntimeError(
+                f"Managed swap state area '{name}' has an invalid pending marker"
+            )
+    elif area_type == "device":
+        path = area.get("path")
+        uuid = area.get("uuid")
+        discard = area.get("discard", "off")
+        if (
+            not isinstance(path, str)
+            or not path.startswith("/dev/")
+            or os.path.normpath(path) != path
+        ):
+            raise RuntimeError(
+                f"Managed swap state area '{name}' has an invalid device path"
+            )
+        if not isinstance(uuid, str) or not _STATE_UUID_PATTERN.fullmatch(uuid):
+            raise RuntimeError(f"Managed swap state area '{name}' has an invalid UUID")
+        if discard not in {"off", "once", "pages", "both"}:
+            raise RuntimeError(
+                f"Managed swap state area '{name}' has an invalid discard policy"
+            )
+        if not isinstance(area.get("provider_owned", False), bool):
+            raise RuntimeError(
+                f"Managed swap state area '{name}' has invalid ownership metadata"
+            )
+        if area.get("provider_owned") is True:
+            serial = area.get("serial")
+            size = area.get("size")
+            # States written before provider identity metadata was introduced
+            # have neither field. Accept that pair so they can be upgraded on
+            # the next successful reconciliation, but never accept half of it.
+            legacy_metadata = serial is None and size is None
+            valid_metadata = (
+                isinstance(serial, str)
+                and re.fullmatch(r"it-[a-z][a-z0-9-]{0,16}", serial) is not None
+                and isinstance(size, str)
+                and _STATE_SIZE_PATTERN.fullmatch(size) is not None
+            )
+            if not legacy_metadata and not valid_metadata:
+                raise RuntimeError(
+                    f"Managed swap state area '{name}' has invalid provider metadata"
+                )
+    else:
+        if not re.fullmatch(r"/dev/zram(?:0|[1-9][0-9]*)", source):
+            raise RuntimeError(
+                f"Managed swap state area '{name}' has an invalid zram source"
+            )
+        algorithm = area.get("algorithm", "auto")
+        if not isinstance(algorithm, str) or not re.fullmatch(
+            r"(?:auto|[a-z0-9_-]{1,32})", algorithm
+        ):
+            raise RuntimeError(
+                f"Managed swap state area '{name}' has an invalid algorithm"
+            )
+    return area
+
+
+def _state_resources(area: dict[str, Any]) -> set[tuple[str, str]]:
+    area_type = str(area["type"])
+    if area_type == "device":
+        return {
+            (area_type, str(area[key]))
+            for key in ("source", "path", "uuid")
+            if area.get(key)
+        }
+    return {(area_type, str(area["source"]))}
+
+
+def _same_resource(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    if left.get("type") != right.get("type"):
+        return False
+    if left.get("type") != "device":
+        return left.get("source") == right.get("source")
+    return any(
+        bool(left.get(key)) and left.get(key) == right.get(key)
+        for key in ("source", "path", "uuid")
+    )
+
+
+def _write_state(areas: list[dict[str, Any]]) -> None:
+    validated_areas = _validate_state_areas(areas)
+    write_json_atomic(
+        SWAP_STATE_FILE,
+        {"schema": SWAP_SCHEMA_VERSION, "areas": validated_areas},
+        mode=0o600,
+        sort_keys=True,
+    )
+
+
+def _ownership_union(
+    current: list[dict[str, Any]], previous: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Retain old ownership until its resource is replaced or removed."""
+
+    return [
+        *current,
+        *[
+            area
+            for area in previous
+            if not any(_same_resource(area, item) for item in current)
+        ],
+    ]
+
+
+def _prior_resource(
+    areas: list[dict[str, Any]], area_type: str, source: str
+) -> dict[str, Any] | None:
+    return next(
+        (
+            area
+            for area in areas
+            if area.get("type") == area_type and area.get("source") == source
+        ),
+        None,
+    )
+
+
 def _active_swap() -> set[str]:
-    result = _capture("swapon --show=NAME --noheadings --raw", check=False)
+    return set(_active_swap_inventory())
+
+
+def _active_swap_inventory() -> dict[str, int | None]:
+    result = _capture(
+        "swapon --show=NAME,PRIO --noheadings --raw",
+        check=False,
+    )
     if result.returncode not in {0, 1}:
         raise RuntimeError("Could not inspect active swap areas")
-    return {line.strip() for line in (result.stdout or "").splitlines() if line.strip()}
+    inventory: dict[str, int | None] = {}
+    for line in (result.stdout or "").splitlines():
+        fields = line.rsplit(maxsplit=1)
+        if len(fields) != 2:
+            raise RuntimeError("swapon returned an invalid swap priority")
+        try:
+            priority = int(fields[1])
+        except ValueError as exc:
+            raise RuntimeError("swapon returned an invalid swap priority") from exc
+        inventory[fields[0]] = priority
+    return inventory
 
 
 def _replace_fstab(entries: list[str]) -> None:
@@ -158,8 +352,8 @@ def _warn_swap_file_filesystem(path: str) -> None:
 
 
 def _size_mib(value: str) -> int:
-    units = {"K": 1 / 1024, "M": 1, "G": 1024, "T": 1024 * 1024}
-    return int(int(value[:-1]) * units[value[-1].upper()])
+    units_kib = {"K": 1, "M": 1024, "G": 1024 * 1024, "T": 1024 * 1024 * 1024}
+    return int(value[:-1]) * units_kib[value[-1].upper()] // 1024
 
 
 def _swap_label(name: str) -> str:
@@ -180,6 +374,36 @@ def _assert_safe_swap_parent(path: str) -> None:
         )
 
 
+def _stage_swap_file(area: SwapFile, parent: str, size_mib: int) -> str:
+    """Create and validate a complete same-filesystem replacement file."""
+
+    descriptor, staged_path = tempfile.mkstemp(
+        dir=parent,
+        prefix=f".{os.path.basename(area.path)}.infra-tools-",
+    )
+    os.close(descriptor)
+    try:
+        run(f"fallocate --length {size_mib}M {shlex.quote(staged_path)}")
+        run(f"chmod 600 {shlex.quote(staged_path)}")
+        run(
+            f"mkswap --label {shlex.quote(_swap_label(area.name))} "
+            f"{shlex.quote(staged_path)}"
+        )
+        if _swap_type(staged_path) != "swap":
+            raise RuntimeError(
+                f"Staged swap file did not acquire a swap signature: {area.path}"
+            )
+        staged_descriptor = os.open(staged_path, os.O_RDONLY)
+        try:
+            os.fsync(staged_descriptor)
+        finally:
+            os.close(staged_descriptor)
+        return staged_path
+    except Exception:
+        remove_file_durable(staged_path)
+        raise
+
+
 def _ensure_swap_file(area: SwapFile, prior: dict[str, Any] | None) -> dict[str, Any]:
     path = area.path
     parent = os.path.dirname(path)
@@ -194,8 +418,10 @@ def _ensure_swap_file(area: SwapFile, prior: dict[str, Any] | None) -> dict[str,
     os.makedirs(parent, mode=0o755, exist_ok=True)
     _warn_swap_file_filesystem(path)
     size_mib = _size_mib(area.size)
-    restart = bool(prior and prior.get("priority") != area.priority)
-    if os.path.exists(path):
+    existed = os.path.exists(path)
+    was_active = False
+    replace = not existed
+    if existed:
         file_info = os.stat(path, follow_symlinks=False)
         if (
             not stat.S_ISREG(file_info.st_mode)
@@ -213,31 +439,46 @@ def _ensure_swap_file(area: SwapFile, prior: dict[str, Any] | None) -> dict[str,
                 f"Managed swap file {path} no longer has a swap signature; "
                 "refusing to overwrite or remove it"
             )
-        if os.path.getsize(path) != size_mib * 1024 * 1024:
-            if path in _active_swap():
-                run(f"swapoff {shlex.quote(path)}")
-            run(f"fallocate --length {size_mib}M {shlex.quote(path)}")
-            run(f"chmod 600 {shlex.quote(path)}")
-            run(
-                f"mkswap --force --label {shlex.quote(_swap_label(area.name))} "
-                f"{shlex.quote(path)}"
-            )
-            restart = False
-    else:
-        run(f"fallocate --length {size_mib}M {shlex.quote(path)}")
-        run(f"chmod 600 {shlex.quote(path)}")
-        run(
-            f"mkswap --label {shlex.quote(_swap_label(area.name))} "
-            f"{shlex.quote(path)}"
-        )
-    if _swap_type(path) != "swap":
-        raise RuntimeError(f"Managed swap file did not acquire a swap signature: {path}")
-    active = _active_swap()
-    if restart and path in active:
-        run(f"swapoff {shlex.quote(path)}")
-        active.remove(path)
-    if path not in active:
-        _swapon(path, area.priority)
+        replace = os.path.getsize(path) != size_mib * 1024 * 1024
+
+    inventory = _active_swap_inventory()
+    active = set(inventory)
+    was_active = path in active
+    priority_changed = bool(
+        (prior and prior.get("priority") != area.priority)
+        or (was_active and inventory.get(path) != area.priority)
+    )
+    previous_priority = inventory.get(path)
+    if previous_priority is None:
+        previous_priority = int(prior.get("priority", 100)) if prior else 100
+    staged_path: str | None = None
+    if replace:
+        staged_path = _stage_swap_file(area, parent, size_mib)
+    try:
+        if was_active and (replace or priority_changed):
+            run(f"swapoff {shlex.quote(path)}")
+            active.remove(path)
+        if staged_path is not None:
+            os.replace(staged_path, path)
+            _fsync_directory(parent)
+        if path not in active:
+            _swapon(path, area.priority)
+    except Exception:
+        if existed and was_active and (staged_path is None or os.path.exists(path)):
+            try:
+                # A resized replacement is still a complete, validated swap
+                # file. Restoring the old live priority keeps memory headroom
+                # until the next rerun can apply the desired policy.
+                _swapon(path, previous_priority)
+            except Exception:
+                pass
+        raise
+    finally:
+        if staged_path is not None:
+            try:
+                remove_file_durable(staged_path)
+            except FileNotFoundError:
+                pass
     return {
         "name": area.name,
         "type": "file",
@@ -264,12 +505,30 @@ def _ensure_swap_device(
     config: SetupConfig,
     area: SwapDevice,
     prior: dict[str, Any] | None,
+    known_areas: list[dict[str, Any]] | None = None,
+    claimed_areas: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     disks = {disk.name: disk for disk in data_disks(config)}
     provider_owned = area.source in disks
+    provider_serial: str | None = None
+    provider_size: str | None = None
     if provider_owned:
         declared = disks[area.source]
         record = _find_declared_disk(declared.serial, declared.size)
+        path = _device_path(record)
+        provider_serial = declared.serial
+        provider_size = declared.size
+    elif (
+        prior
+        and prior.get("provider_owned") is True
+        and prior.get("source") == area.source
+        and isinstance(prior.get("serial"), str)
+        and isinstance(prior.get("size"), str)
+    ):
+        provider_owned = True
+        provider_serial = str(prior["serial"])
+        provider_size = str(prior["size"])
+        record = _find_declared_disk(provider_serial, provider_size)
         path = _device_path(record)
     else:
         path = _resolve_direct_device(area.source)
@@ -306,7 +565,45 @@ def _ensure_swap_device(
         )
         run("udevadm settle")
     uuid = _swap_uuid(path)
-    active = _active_swap()
+    identity = {
+        "name": area.name,
+        "type": "device",
+        "source": area.source,
+        "path": path,
+        "uuid": uuid,
+    }
+    duplicate = next(
+        (
+            item
+            for item in claimed_areas or []
+            if _same_resource(item, identity)
+        ),
+        None,
+    )
+    if duplicate is not None:
+        raise RuntimeError(
+            f"Swap areas '{duplicate['name']}' and '{area.name}' resolve to "
+            f"the same block device {path}"
+        )
+    if prior is None:
+        prior = next(
+            (
+                item
+                for item in known_areas or []
+                if _same_resource(item, identity)
+            ),
+            None,
+        )
+    inventory = _active_swap_inventory()
+    active = set(inventory)
+    active_name = next(
+        (
+            candidate
+            for candidate in (path, f"/dev/disk/by-uuid/{uuid}")
+            if candidate in active
+        ),
+        None,
+    )
     prior_policy_changed = bool(
         prior
         and (
@@ -314,15 +611,32 @@ def _ensure_swap_device(
             or prior.get("discard", "off") != area.discard
         )
     )
-    if prior_policy_changed and (
-        path in active or f"/dev/disk/by-uuid/{uuid}" in active
-    ):
+    priority_drifted = bool(
+        active_name is not None and inventory.get(active_name) != area.priority
+    )
+    was_active = active_name is not None
+    previous_priority = inventory.get(active_name or "")
+    if previous_priority is None:
+        previous_priority = int(prior.get("priority", 100)) if prior else 100
+    if (prior_policy_changed or priority_drifted) and was_active:
         run(f"swapoff {shlex.quote(path)}")
         active.discard(path)
         active.discard(f"/dev/disk/by-uuid/{uuid}")
     if path not in active and f"/dev/disk/by-uuid/{uuid}" not in active:
-        _swapon(path, area.priority, area.discard)
-    return {
+        try:
+            _swapon(path, area.priority, area.discard)
+        except Exception:
+            if (prior_policy_changed or priority_drifted) and was_active:
+                try:
+                    _swapon(
+                        path,
+                        previous_priority,
+                        str(prior.get("discard", "off") if prior else "off"),
+                    )
+                except Exception:
+                    pass
+            raise
+    result = {
         "name": area.name,
         "type": "device",
         "source": area.source,
@@ -332,6 +646,10 @@ def _ensure_swap_device(
         "discard": area.discard,
         "provider_owned": provider_owned,
     }
+    if provider_owned:
+        result["serial"] = provider_serial
+        result["size"] = provider_size
+    return result
 
 
 def _zram_configuration(areas: list[SwapZram]) -> str:
@@ -348,8 +666,26 @@ def _zram_configuration(areas: list[SwapZram]) -> str:
     return "\n\n".join(sections) + ("\n" if sections else "")
 
 
+def _zram_device_busy(index: int, active: set[str]) -> bool:
+    source = f"/dev/zram{index}"
+    if source in active:
+        return True
+    try:
+        size = int(
+            Path(f"/sys/block/zram{index}/disksize")
+            .read_text(encoding="utf-8")
+            .strip()
+        )
+    except (FileNotFoundError, OSError, ValueError):
+        return False
+    return size > 0
+
+
 def _reconcile_zram(
-    areas: list[SwapZram], old_areas: list[dict[str, Any]]
+    areas: list[SwapZram],
+    old_areas: list[dict[str, Any]],
+    *,
+    journal_ownership: Callable[[list[dict[str, Any]]], None] | None = None,
 ) -> list[dict[str, Any]]:
     records = [
         {
@@ -362,7 +698,54 @@ def _reconcile_zram(
         }
         for index, area in enumerate(areas)
     ]
-    if records == old_areas and (not records or os.path.exists(ZRAM_PATH)):
+    desired_content = _zram_configuration(areas)
+    try:
+        previous_content = Path(ZRAM_PATH).read_text(encoding="utf-8")
+        previous_exists = True
+    except FileNotFoundError:
+        previous_content = ""
+        previous_exists = False
+    old_sources = {str(area.get("source")) for area in old_areas}
+    inventory = _active_swap_inventory()
+    active = set(inventory)
+    for index in range(len(areas)):
+        source = f"/dev/zram{index}"
+        if source not in old_sources and _zram_device_busy(index, active):
+            raise RuntimeError(
+                f"Refusing to adopt unmanaged zram device {source}; disable its "
+                "existing configuration before declaring managed zram"
+            )
+    if journal_ownership is not None:
+        journal_ownership(records)
+    if records == old_areas and previous_content == desired_content:
+        restart = [
+            index
+            for index, area in enumerate(areas)
+            if (
+                f"/dev/zram{index}" not in active
+                or inventory.get(f"/dev/zram{index}") != area.priority
+            )
+        ]
+        if restart:
+            run("systemctl daemon-reload")
+            for index in restart:
+                if f"/dev/zram{index}" in active:
+                    run(
+                        f"systemctl stop systemd-zram-setup@zram{index}.service",
+                        check=False,
+                    )
+                run(f"systemctl start systemd-zram-setup@zram{index}.service")
+            observed = _active_swap_inventory()
+            still_incorrect = [
+                f"/dev/zram{index}"
+                for index in restart
+                if observed.get(f"/dev/zram{index}") != areas[index].priority
+            ]
+            if still_incorrect:
+                raise RuntimeError(
+                    "Managed zram did not acquire its configured priority: "
+                    + ", ".join(still_incorrect)
+                )
         return records
     if not areas and not old_areas:
         return []
@@ -371,11 +754,40 @@ def _reconcile_zram(
         write_text_atomic(ZRAM_PATH, _zram_configuration(areas), mode=0o644)
     else:
         remove_file_durable(ZRAM_PATH)
-    for index in range(max(len(old_areas), len(areas))):
-        run(f"systemctl stop systemd-zram-setup@zram{index}.service", check=False)
-    run("systemctl daemon-reload")
-    for index in range(len(areas)):
-        run(f"systemctl start systemd-zram-setup@zram{index}.service")
+    try:
+        for index in range(max(len(old_areas), len(areas))):
+            run(f"systemctl stop systemd-zram-setup@zram{index}.service", check=False)
+        run("systemctl daemon-reload")
+        for index in range(len(areas)):
+            run(f"systemctl start systemd-zram-setup@zram{index}.service")
+        observed = _active_swap_inventory()
+        incorrect_sources = [
+            record["source"]
+            for record in records
+            if observed.get(record["source"]) != record["priority"]
+        ]
+        if incorrect_sources:
+            raise RuntimeError(
+                "Managed zram did not acquire its configured priority: "
+                + ", ".join(incorrect_sources)
+            )
+    except Exception:
+        for index in range(max(len(old_areas), len(areas))):
+            run(
+                f"systemctl stop systemd-zram-setup@zram{index}.service",
+                check=False,
+            )
+        if previous_exists:
+            write_text_atomic(ZRAM_PATH, previous_content, mode=0o644)
+        else:
+            remove_file_durable(ZRAM_PATH)
+        run("systemctl daemon-reload", check=False)
+        for index in range(len(old_areas)):
+            run(
+                f"systemctl start systemd-zram-setup@zram{index}.service",
+                check=False,
+            )
+        raise
     return records
 
 
@@ -488,10 +900,10 @@ def _fstab_entry(area: dict[str, Any]) -> str | None:
     if area["type"] == "file":
         return (
             f"{_fstab_field(str(area['source']))} none swap "
-            f"sw,pri={area['priority']} 0 0"
+            f"sw,nofail,pri={area['priority']} 0 0"
         )
     if area["type"] == "device":
-        options = ["sw", f"pri={area['priority']}"]
+        options = ["sw", "nofail", f"pri={area['priority']}"]
         discard = area.get("discard", "off")
         if discard != "off":
             options.append(
@@ -503,7 +915,7 @@ def _fstab_entry(area: dict[str, Any]) -> str | None:
 
 def _configure_resume(name: str | None, areas: list[dict[str, Any]]) -> None:
     previous = os.path.exists(RESUME_PATH)
-    if name is None:
+    if not name:
         if previous:
             remove_file_durable(RESUME_PATH)
             run("update-initramfs -u")
@@ -552,6 +964,8 @@ def configure_swap(config: SetupConfig) -> None:
     ):
         _configure_swappiness(config.swappiness)
         _configure_zswap(config.zswap, config.zswap_max_pool_percent)
+        if config.swap_resume == "":
+            _configure_resume(None, [])
         print("  ✓ Preserving Proxmox host swap layout")
         return
     if not can_manage_swap():
@@ -560,12 +974,13 @@ def configure_swap(config: SetupConfig) -> None:
 
     state = _load_state()
     old_areas = [item for item in state["areas"] if isinstance(item, dict)]
-    old_by_name = {str(item.get("name")): item for item in old_areas}
     active = _active_swap()
 
     if config.swap_mode == "preserve":
         _configure_swappiness(config.swappiness)
         _configure_zswap(config.zswap, config.zswap_max_pool_percent)
+        if config.swap_resume == "":
+            _configure_resume(None, [])
         print("  ✓ Preserving existing swap areas")
         return
     if config.swap_mode == "none":
@@ -622,9 +1037,15 @@ def configure_swap(config: SetupConfig) -> None:
             print("  ✓ Existing swap is already configured; leaving it unmanaged")
             _configure_swappiness(config.swappiness)
             _configure_zswap(config.zswap, config.zswap_max_pool_percent)
+            if config.swap_resume == "":
+                _configure_resume(None, [])
             return
         if not old_areas and os.path.exists("/swapfile"):
             print("  ✓ Existing /swapfile is not owned by infra-tools; leaving it unchanged")
+            _configure_swappiness(config.swappiness)
+            _configure_zswap(config.zswap, config.zswap_max_pool_percent)
+            if config.swap_resume == "":
+                _configure_resume(None, [])
             return
         if not old_areas:
             automatic = _automatic_swap_file()
@@ -632,29 +1053,59 @@ def configure_swap(config: SetupConfig) -> None:
                 return
             desired_files = [automatic]
 
-    desired_names = {
-        area.name for area in [*desired_files, *desired_devices, *desired_zram]
-    }
     new_areas: list[dict[str, Any]] = []
     for area in desired_files:
-        new_areas.append(_ensure_swap_file(area, old_by_name.get(area.name)))
+        prior = _prior_resource(old_areas, "file", area.path)
+        if prior is None and not os.path.exists(area.path):
+            pending = {
+                "name": area.name,
+                "type": "file",
+                "source": area.path,
+                "priority": area.priority,
+                "size": area.size,
+                "pending": True,
+            }
+            _write_state(_ownership_union([*new_areas, pending], old_areas))
+            prior = pending
+        reconciled = _ensure_swap_file(area, prior)
+        new_areas.append(reconciled)
+        _write_state(_ownership_union(new_areas, old_areas))
     for area in desired_devices:
-        new_areas.append(_ensure_swap_device(config, area, old_by_name.get(area.name)))
+        prior = _prior_resource(old_areas, "device", area.source)
+        reconciled = _ensure_swap_device(
+            config,
+            area,
+            prior,
+            old_areas,
+            list(new_areas),
+        )
+        new_areas.append(reconciled)
+        _write_state(_ownership_union(new_areas, old_areas))
+    remaining_old = list(old_areas)
     for area in old_areas:
-        if area.get("name") not in desired_names and area.get("type") != "zram":
-            _remove_area(area, active)
+        if area.get("type") == "zram" or any(
+            _same_resource(area, item) for item in new_areas
+        ):
+            continue
+        _remove_area(area, active)
+        remaining_old.remove(area)
+        _write_state(_ownership_union(new_areas, remaining_old))
     old_zram_areas = [area for area in old_areas if area.get("type") == "zram"]
-    new_areas.extend(_reconcile_zram(desired_zram, old_zram_areas))
+    new_areas.extend(
+        _reconcile_zram(
+            desired_zram,
+            old_zram_areas,
+            journal_ownership=lambda records: _write_state(
+                _ownership_union([*new_areas, *records], remaining_old)
+            ),
+        )
+    )
+    _write_state(new_areas)
     _replace_fstab(
         [entry for area in new_areas if (entry := _fstab_entry(area)) is not None]
     )
     _configure_swappiness(config.swappiness if config.swappiness is not None else 10)
     _configure_zswap(config.zswap, config.zswap_max_pool_percent)
     _configure_resume(config.swap_resume, new_areas)
-    write_json_atomic(
-        SWAP_STATE_FILE,
-        {"schema": SWAP_SCHEMA_VERSION, "areas": new_areas},
-        mode=0o600,
-        sort_keys=True,
-    )
+    _write_state(new_areas)
     print(f"  ✓ Reconciled {len(new_areas)} managed swap area(s)")

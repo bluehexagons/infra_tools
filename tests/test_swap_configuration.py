@@ -11,6 +11,8 @@ from unittest.mock import MagicMock, patch
 from common.swap_steps import (
     FSTAB_BEGIN,
     FSTAB_END,
+    _configure_resume,
+    _fstab_entry,
     _replace_fstab,
     _zram_configuration,
 )
@@ -115,6 +117,64 @@ class TestSwapConfiguration(unittest.TestCase):
         self.assertIn("swap_devices", preserved)
         self.assertNotIn("swappiness", preserved)
 
+    def test_disabling_zswap_does_not_preserve_pool_limit(self):
+        preserved = infra_tools._patch_preserve_keys(Namespace(zswap=False))
+
+        self.assertNotIn("zswap", preserved)
+        self.assertNotIn("zswap_max_pool_percent", preserved)
+
+    def test_none_mode_clears_all_managed_swap_policy(self):
+        preserved = infra_tools._patch_preserve_keys(Namespace(swap_mode="none"))
+
+        for field in (
+            "swap_files",
+            "swap_devices",
+            "swap_zram",
+            "swappiness",
+            "zswap",
+            "zswap_max_pool_percent",
+            "swap_resume",
+        ):
+            self.assertNotIn(field, preserved)
+
+    def test_explicit_auto_mode_does_not_preserve_stale_resume_device(self):
+        preserved = infra_tools._patch_preserve_keys(Namespace(swap_mode="auto"))
+
+        self.assertNotIn("swap_resume", preserved)
+
+    def test_resume_removal_round_trips_and_removes_managed_file(self):
+        config = self._config(swap_resume="")
+        self.assertIn("--no-swap-resume", config.to_remote_args())
+        self.assertIn("--no-swap-resume", config.to_setup_command())
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "resume")
+            with open(path, "w", encoding="utf-8") as resume_file:
+                resume_file.write("RESUME=UUID=old\n")
+            with (
+                patch("common.swap_steps.RESUME_PATH", path),
+                patch("common.swap_steps.run") as mock_run,
+            ):
+                _configure_resume("", [])
+
+            self.assertFalse(os.path.exists(path))
+            mock_run.assert_called_once_with("update-initramfs -u")
+
+    def test_duplicate_resources_and_fractional_mebibytes_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Duplicate --swap-file PATH"):
+            validate_swap_settings(
+                self._config(
+                    swap_files=[
+                        ["one", "/swapfile", "1G"],
+                        ["two", "/swapfile", "2G"],
+                    ]
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "whole MiB"):
+            validate_swap_settings(
+                self._config(swap_zram=[["fast", "65537K"]])
+            )
+
     def test_proxmox_disk_backup_option_is_explicit_only_when_excluded(self):
         included = _disk_hardware_value(
             "pool:volume", discard=True, ssd=False, backup=True
@@ -141,6 +201,32 @@ class TestSwapConfiguration(unittest.TestCase):
         self.assertNotIn("/swapfile", content)
         self.assertEqual(content.count(FSTAB_BEGIN), 1)
         self.assertEqual(content.count(FSTAB_END), 1)
+
+    def test_managed_swap_fstab_entries_do_not_block_boot_when_missing(self):
+        file_entry = _fstab_entry(
+            {
+                "name": "root",
+                "type": "file",
+                "source": "/swapfile",
+                "priority": 100,
+                "size": "1G",
+            }
+        )
+        device_entry = _fstab_entry(
+            {
+                "name": "bulk",
+                "type": "device",
+                "source": "/dev/vdb",
+                "path": "/dev/vdb",
+                "uuid": "11111111-1111",
+                "priority": 10,
+                "discard": "off",
+                "provider_owned": False,
+            }
+        )
+
+        self.assertIn("sw,nofail,pri=100", file_entry or "")
+        self.assertIn("sw,nofail,pri=10", device_entry or "")
 
     @patch("lib.proxmox_vm._ssh_run")
     def test_zfs_provider_swap_disk_warns(self, mock_run):
