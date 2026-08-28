@@ -28,6 +28,7 @@ PLUGIN = PluginDefinition(
         "install_claude",
         "install_opencode",
         "install_agent_cli_launcher",
+        "install_agent_workflow_skills",
         "install_t3code_web",
         "copy_agent_tooling_payload",
         "install_browser_automation",
@@ -210,6 +211,7 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         copy_agent_tooling_payload,
         clone_agent_repositories,
         install_agent_cli_launcher,
+        install_agent_workflow_skills,
         install_git_for_agent_repositories,
         install_git_lfs_for_agent_repositories,
         install_claude,
@@ -223,6 +225,13 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         steps.append(
             ("Installing agent VM management command", install_agent_cli_launcher)
         )
+        if {"codex", "opencode"}.intersection(config.selected_agent_tools()):
+            steps.append(
+                (
+                    "Installing managed agent workflow skills",
+                    install_agent_workflow_skills,
+                )
+            )
 
     if config.install_gh:
         steps.append(("Installing GitHub CLI", install_github_cli))
@@ -303,6 +312,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         copy_agent_tooling_payload,
         clone_agent_repositories,
         install_agent_cli_launcher,
+        install_agent_workflow_skills,
         install_git_for_agent_repositories,
         install_git_lfs_for_agent_repositories,
         install_claude,
@@ -330,6 +340,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_claude": install_claude,
         "install_opencode": install_opencode,
         "install_agent_cli_launcher": install_agent_cli_launcher,
+        "install_agent_workflow_skills": install_agent_workflow_skills,
         "install_t3code_web": install_t3code_web,
         "copy_agent_tooling_payload": copy_agent_tooling_payload,
         "install_browser_automation": install_browser_automation,

@@ -21,6 +21,7 @@ references and may describe future work separately from this live contract.
 | [Command-line reference](COMMAND_LINE.md) | Setup, patch, targeted updates, and utility flags |
 | [SSH authentication](SSH.md) | Passphrase-protected keys, terminal prompts, SSH agents, and troubleshooting |
 | [Credentials and agent configuration](CREDENTIALS.md) | Workspace passwords, GitHub/Git access, agent auth, non-secret config, sharing, and rotation |
+| [Managed agent workflow skills](AGENT_SKILLS.md) | Installed Codex/OpenCode skills, capability routing, reconciliation, and maintenance |
 | [Authentication hardening](AUTHENTICATION_HARDENING.md) | Reachability, rate limits, failure bans, and verification for login surfaces |
 | [Agent browser automation](BROWSER_AUTOMATION.md) | Playwright provisioning, Codex/OpenCode registration, verification, and security boundaries |
 | [Internal HTTPS sites and previews](INTERNAL_WEB.md) | Static-site publishing, supervised live previews, managed forwards, TLS trust, and cleanup |

@@ -7,9 +7,10 @@ metadata:
 
 # Managed HTTPS gateway
 
-Use `infra-web` for HTTPS URLs on this VM. Never bind a development service to
-`0.0.0.0`, open UFW directly, write Nginx configuration, or disable TLS
-verification.
+Use this workflow only when `command -v infra-web` succeeds. If it is absent,
+report that the managed gateway was not provisioned; do not replace it with
+ad hoc Nginx or firewall changes. Never bind a development service to
+`0.0.0.0` or disable TLS verification.
 
 ## Choose the hosting mode
 

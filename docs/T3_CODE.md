@@ -40,9 +40,10 @@ infra-tools setup agent_code_vm vm.example agent \
   --browser-automation playwright
 ```
 
-Agent-enabled T3 setups install managed workflow skills for T3 operation,
-isolated Git worktrees, deployment smoke checks, VM triage, and the HTTPS
-gateway. The workspace skill uses the safe local lifecycle command:
+Agent-enabled T3 setups install the base Codex/OpenCode workflow skills plus
+focused T3 Code and HTTPS-gateway guidance. See
+[Managed agent workflow skills](AGENT_SKILLS.md) for the installation matrix.
+The workspace skill uses the safe local lifecycle command:
 
 ```bash
 infra-tools agent workspace create ~/repos/PROJECT TASK --json
@@ -264,5 +265,6 @@ and recorded maintenance failures do.
 ## Related documentation
 
 - [Device pairing](DEVICE_PAIRING.md)
+- [Managed agent workflow skills](AGENT_SKILLS.md)
 - [Command-line reference](COMMAND_LINE.md)
 - [Workstation and agent profiles](WORKSTATIONS.md)

@@ -36,6 +36,10 @@ For an explicit `--steps` setup, include `install_browser_automation` after
 installing the selected compatible agent; it is available as a registered
 custom step as well.
 
+Compatible agent setups also install the `infra-tools-browser-testing` skill.
+It routes between T3's collaborative preview and this optional VM-local
+fallback; see [Managed agent workflow skills](AGENT_SKILLS.md).
+
 ## Installed components and agent configuration
 
 Setup installs the exact Playwright MCP version declared by infra-tools under

@@ -192,13 +192,14 @@ when exported games need browser smoke tests. The origin and publisher are
 system-wide, so browser-capable agents can test the same URL shown after
 publishing without a separate server process.
 
-When Codex or OpenCode is selected on the target, the web bundle also installs
-the `infra-tools-godot-web` and `infra-tools-web-gateway` skills under
-`~/.agents/skills`. Both agents discover that shared standard location. The
-skills teach agents to publish and diagnose the managed origin, use loopback
-for live servers, and avoid direct Nginx/UFW edits or TLS verification bypasses.
-They contain no credentials and are not installed for a profile that selects
-neither agent.
+When Codex or OpenCode is selected on the target, the web bundle adds the
+`infra-tools-godot-web` and `infra-tools-web-gateway` capability skills under
+`~/.agents/skills`, alongside the base workflow set. Both agents discover that
+shared standard location. The skills teach agents to publish and diagnose the
+managed origin, use loopback for live servers, and avoid direct Nginx/UFW edits
+or TLS verification bypasses. They contain no credentials and are not installed
+for a profile that selects neither agent. See
+[Managed agent workflow skills](AGENT_SKILLS.md) for the full catalog.
 
 ## Release and integrity policy
 

@@ -15,6 +15,8 @@ Related pages:
 - [`MACHINE_TYPES.md`](./MACHINE_TYPES.md) for machine type behavior
 - [`CREDENTIALS.md`](./CREDENTIALS.md) for workspace passwords, Git access,
   agent auth/config sources, sharing, and credential rotation
+- [`AGENT_SKILLS.md`](./AGENT_SKILLS.md) for managed Codex/OpenCode workflow
+  skills and capability routing
 - [`README.md`](./README.md) for the full documentation map
 
 ## Commands
@@ -455,6 +457,11 @@ work directly from an SSH, desktop, or T3 Code terminal without a separate
 infra-tools installation on the VM. An existing executable with that name is
 retained; setup never overwrites an unmanaged user launcher.
 
+When Codex or OpenCode is selected, setup also installs the shared base
+workflow skills under `~/.agents/skills`. T3 Code and Godot web setup add their
+capability-specific skills. See [Managed agent workflow
+skills](AGENT_SKILLS.md) for the catalog and reconciliation rules.
+
 T3 Code is selected with `--web-interface t3code`; it is not an `--agent-tool`
 provider, and infra-tools no longer installs the desktop AppImage. The server
 path installs Node and T3 Code's upstream per-user background service; see
@@ -492,9 +499,9 @@ Credential seeding and config copy are intentionally tool-scoped and transient:
 - `--git-auth`/`--git-auth-file` seed only a missing selected GitHub host entry, preserve target-managed credentials on rerun, and run `gh auth setup-git`.
 - `--agent-auth`/`--agent-auth-file` seed missing Codex, Claude Code, or OpenCode credentials without requiring those tools on the controller; active `gh` requires controller `gh` only when its token is keyring-backed.
 - `--agent-config active` copies known non-secret configuration from the active controller user.
-- T3 Code receives only managed launchers and non-secret T3, workspace,
-  deployment-smoke, VM-triage, and HTTPS-gateway skills; infra-tools does not
-  copy T3 Code credentials.
+- Codex and OpenCode receive only non-secret managed workflow skills; T3 Code
+  adds its focused service and HTTPS-gateway guidance. infra-tools does not copy
+  T3 Code credentials.
 
 The root-only upload payload is removed after selected config is applied and
 missing credentials are seeded. Repositories are never cloned or cached on the

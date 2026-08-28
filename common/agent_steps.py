@@ -10,14 +10,16 @@ import shutil
 import tempfile
 
 from lib.agent_credentials import codex_auth_warning, inspect_codex_auth_file
+from lib.atomic_io import write_text_atomic
 from lib.config import SetupConfig
 from lib.remote_utils import install_package, is_dry_run, run
+from lib.types import StrList
 from lib.validation import (
     validate_filesystem_path,
     validate_git_author_email,
     validate_git_author_name,
 )
-from lib.validators import validate_github_login
+from lib.validators import validate_github_login, validate_username
 
 from .common_steps import _ensure_user_tool_shell_environment, _run_as_login_user
 
@@ -26,6 +28,16 @@ REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
 AGENT_CLI_SOURCE = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "infra_tools.py")
 )
+AGENT_SKILLS_ROOT = os.path.join(os.path.dirname(__file__), "agent_skills")
+BASE_AGENT_SKILL_NAMES = (
+    "infra-tools-agent-operations",
+    "infra-tools-agent-workspace",
+    "infra-tools-browser-testing",
+    "infra-tools-deploy-smoke",
+    "infra-tools-shared-assets",
+    "infra-tools-vm-triage",
+)
+_SKILL_COMPATIBLE_AGENT_TOOLS = frozenset({"codex", "opencode"})
 _AGENT_CLI_MARKER = "# Managed by infra_tools agent setup"
 _GIT_IDENTITY_PAYLOAD_PATH = os.path.join("config", "git", "identity.json")
 _MAX_GIT_IDENTITY_PAYLOAD_BYTES = 16 * 1024
@@ -96,6 +108,117 @@ def _chown_user_directory_chain(
                 result.stderr or result.stdout or "ownership change failed"
             ).strip()
             raise RuntimeError(f"Could not set ownership for {current}: {detail}")
+
+
+def _ensure_agent_skill_directory(path: str, uid: int, gid: int) -> bool:
+    """Create one user-owned skill directory without accepting a symlink."""
+
+    if os.path.lexists(path):
+        if os.path.islink(path) or not os.path.isdir(path):
+            raise RuntimeError(f"Refusing unsafe agent skill directory: {path}")
+        if os.stat(path).st_uid != uid:
+            raise RuntimeError(
+                f"Refusing agent skill directory owned by another user: {path}"
+            )
+        return False
+    os.mkdir(path, mode=0o755)
+    os.chown(path, uid, gid)
+    return True
+
+
+def install_managed_agent_skills(
+    username: str,
+    agent_tools: StrList,
+    skill_names: tuple[str, ...] = BASE_AGENT_SKILL_NAMES,
+    *,
+    source_root: str = AGENT_SKILLS_ROOT,
+) -> bool:
+    """Install shared managed workflow skills for compatible coding agents."""
+
+    if not _SKILL_COMPATIBLE_AGENT_TOOLS.intersection(agent_tools):
+        return False
+    if not validate_username(username):
+        raise ValueError(f"Invalid agent-skill username: {username}")
+    account = pwd.getpwnam(username)
+    home = account.pw_dir
+    validate_filesystem_path(home, must_exist=True)
+    validate_filesystem_path(source_root, must_exist=True)
+    if os.path.islink(source_root) or not os.path.isdir(source_root):
+        raise RuntimeError(f"Managed agent skill root is unsafe: {source_root}")
+
+    agents_dir = os.path.join(home, ".agents")
+    skills_root = os.path.join(agents_dir, "skills")
+    changed = _ensure_agent_skill_directory(
+        agents_dir,
+        account.pw_uid,
+        account.pw_gid,
+    )
+    changed = (
+        _ensure_agent_skill_directory(
+            skills_root,
+            account.pw_uid,
+            account.pw_gid,
+        )
+        or changed
+    )
+    for skill_name in skill_names:
+        if not skill_name or any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789-"
+            for character in skill_name
+        ):
+            raise ValueError(f"Invalid managed agent skill name: {skill_name}")
+        source = os.path.join(source_root, skill_name, "SKILL.md")
+        validate_filesystem_path(source, must_exist=True)
+        if os.path.islink(source) or not os.path.isfile(source):
+            raise RuntimeError(f"Managed agent skill is missing: {source}")
+
+        skill_dir = os.path.join(skills_root, skill_name)
+        changed = (
+            _ensure_agent_skill_directory(
+                skill_dir,
+                account.pw_uid,
+                account.pw_gid,
+            )
+            or changed
+        )
+        destination = os.path.join(skill_dir, "SKILL.md")
+        if os.path.lexists(destination) and (
+            os.path.islink(destination) or not os.path.isfile(destination)
+        ):
+            raise RuntimeError(f"Refusing unsafe managed agent skill: {destination}")
+        with open(source, encoding="utf-8") as file_obj:
+            content = file_obj.read()
+        try:
+            with open(destination, encoding="utf-8") as file_obj:
+                previous = file_obj.read()
+        except FileNotFoundError:
+            previous = None
+        if previous is not None and "managed-by: infra_tools" not in previous:
+            raise RuntimeError(
+                f"Refusing to replace unmanaged agent skill: {destination}"
+            )
+        if previous != content:
+            write_text_atomic(destination, content, mode=0o644)
+            changed = True
+        os.chmod(destination, 0o644)
+        os.chown(destination, account.pw_uid, account.pw_gid)
+    return changed
+
+
+def install_agent_workflow_skills(config: SetupConfig) -> None:
+    """Install or refresh the base workflow skills selected for an agent VM."""
+
+    selected_tools = config.selected_agent_tools()
+    if not _SKILL_COMPATIBLE_AGENT_TOOLS.intersection(selected_tools):
+        return
+    if is_dry_run():
+        print("  [DRY-RUN] Would install managed agent workflow skills")
+        return
+    changed = install_managed_agent_skills(config.username, selected_tools)
+    if changed:
+        print("  Installed managed agent workflow skills")
+    else:
+        print("  Managed agent workflow skills already installed")
 
 
 def install_agent_cli_launcher(config: SetupConfig) -> None:
