@@ -59,16 +59,24 @@ SYSTEM_NODE = "/usr/bin/node"
 SYSTEM_TIMEOUT = "/usr/bin/timeout"
 PLAYWRIGHT_SMOKE_ACTION_TIMEOUT_MS = 120_000
 PLAYWRIGHT_SMOKE_PROCESS_TIMEOUT_SECONDS = 180
+PLAYWRIGHT_MCP_OUTPUT_MAX_BYTES = 256 * 1024 * 1024
 PLAYWRIGHT_DEPS_MARKER = (
     f"/var/lib/infra_tools/state/playwright-deps-{PLAYWRIGHT_VERSION}"
 )
 
 
-_MCP_WRAPPER_CONTENT = f"""#!/bin/sh
-set -eu
-export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"
-exec {SYSTEM_NODE} {PLAYWRIGHT_MCP_CLI} --headless --isolated "$@"
-"""
+_MCP_WRAPPER_CONTENT = (
+    "#!/bin/sh\n"
+    "set -eu\n"
+    "umask 077\n"
+    'export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"\n'
+    'output_dir="$HOME/.local/state/infra_tools/playwright-mcp"\n'
+    'mkdir -p "$output_dir"\n'
+    'chmod 0700 "$output_dir"\n'
+    f"exec {SYSTEM_NODE} {PLAYWRIGHT_MCP_CLI} --headless --isolated \\\n"
+    '  --output-dir "$output_dir" \\\n'
+    f'  --output-max-size {PLAYWRIGHT_MCP_OUTPUT_MAX_BYTES} "$@"\n'
+)
 
 _DOCTOR_WRAPPER_CONTENT = (
     "#!/bin/sh\n"

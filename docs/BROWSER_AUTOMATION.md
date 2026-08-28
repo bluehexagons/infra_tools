@@ -69,6 +69,14 @@ agents and prevents one task from silently inheriting another task's browser
 session. Use the normal desktop browser over RDP when a durable, human-managed
 browser profile is required.
 
+Generated snapshots, console captures, screenshots, and other MCP evidence
+default to the private
+`~/.local/state/infra_tools/playwright-mcp` directory instead of the current
+project. The launcher applies a 256 MiB output ceiling so older evidence is
+evicted without dirtying or filling active Git worktrees. An agent may still
+name an explicit output file when the evidence belongs in a requested
+deliverable.
+
 ## What agents can do
 
 Once provisioned, Codex or OpenCode can ask the `infra-tools-playwright` MCP server to open

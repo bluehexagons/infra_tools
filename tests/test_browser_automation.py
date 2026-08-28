@@ -278,6 +278,16 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
 
         self.assertIn("--headless", content)
         self.assertIn("--isolated", content)
+        self.assertIn('umask 077', content)
+        self.assertIn(
+            'output_dir="$HOME/.local/state/infra_tools/playwright-mcp"',
+            content,
+        )
+        self.assertIn('--output-dir "$output_dir"', content)
+        self.assertIn(
+            f"--output-max-size {browser_automation_steps.PLAYWRIGHT_MCP_OUTPUT_MAX_BYTES}",
+            content,
+        )
         self.assertNotIn("--no-sandbox", content)
         self.assertIn('PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"', content)
 

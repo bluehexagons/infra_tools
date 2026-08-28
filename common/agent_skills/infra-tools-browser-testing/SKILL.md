@@ -36,6 +36,11 @@ Capture a small set of user-visible interactions, console failures, and a
 screenshot when it helps the handoff. Avoid recording passwords, tokens,
 private response bodies, or unrelated user data.
 
+The managed Playwright fallback keeps generated evidence in the private,
+bounded `~/.local/state/infra_tools/playwright-mcp` directory rather than the
+current repository. Name an explicit output file only when the user requested
+an artifact that belongs with the task deliverables.
+
 ## HTTPS trust
 
 Never bypass TLS verification. VM-local Playwright and Chromium use the CA
