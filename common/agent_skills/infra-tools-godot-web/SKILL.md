@@ -40,11 +40,11 @@ using `infra-web remove GAME --yes`.
 
 Setup enrolls the VM-local CA in the managed user's system and VM-local
 Chromium trust stores. A collaborative T3 preview may run on the connected
-client and therefore does not necessarily share that trust store. If VM-local
-browser automation reports a certificate error, use `infra-web ca` and rerun
-setup to repair trust. If only the collaborative preview fails, use
-`infra-web ca` to obtain the enrollment URL and fingerprint for that client.
-Never suppress HTTPS errors.
+client and therefore does not necessarily share that trust store. If only the
+collaborative preview fails, use `infra-web ca` to obtain the enrollment URL
+and fingerprint for that client. If VM-local automation fails trust, report
+the failed capability; rerun the saved setup only when the task includes
+repairing managed trust. Never suppress HTTPS errors.
 
 ## Live previews
 

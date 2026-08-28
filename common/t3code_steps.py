@@ -17,6 +17,7 @@ import urllib.request
 from contextlib import contextmanager
 from typing import Iterator, Sequence
 
+from common.agent_steps import BASE_AGENT_SKILL_NAMES, install_managed_agent_skills
 from common.common_steps import _run_as_login_user
 from lib.atomic_io import write_text_atomic
 from lib.auth_failure_bans import (
@@ -60,10 +61,8 @@ T3_AGENT_SKILLS_ROOT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "agent_skills"
 )
 T3_AGENT_SKILL_NAMES = (
-    "infra-tools-agent-workspace",
-    "infra-tools-deploy-smoke",
+    *BASE_AGENT_SKILL_NAMES,
     "infra-tools-t3code",
-    "infra-tools-vm-triage",
     "infra-tools-web-gateway",
 )
 DEVICE_PAIRING_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-device-pairing"
@@ -922,66 +921,12 @@ def _write_text_if_changed(path: str, content: str, mode: int) -> bool:
 def _ensure_t3_agent_skill(username: str, agent_tools: Sequence[str]) -> bool:
     """Install managed agent-VM workflow skills for compatible agents."""
 
-    if not {"codex", "opencode"}.intersection(agent_tools):
-        return False
-    if not validate_username(username):
-        raise ValueError(f"Invalid T3 Code agent-skill username: {username}")
-    account = pwd.getpwnam(username)
-    home = account.pw_dir
-    validate_filesystem_path(home, must_exist=True)
-    skills_root = os.path.join(home, ".agents", "skills")
-    for directory in (os.path.dirname(skills_root), skills_root):
-        if os.path.lexists(directory):
-            if os.path.islink(directory) or not os.path.isdir(directory):
-                raise RuntimeError(f"Refusing unsafe T3 Code skill directory: {directory}")
-            if os.stat(directory).st_uid != account.pw_uid:
-                raise RuntimeError(
-                    f"Refusing T3 Code skill directory owned by another user: {directory}"
-                )
-        else:
-            os.mkdir(directory, mode=0o755)
-            os.chown(directory, account.pw_uid, account.pw_gid)
-    changed = False
-    for skill_name in T3_AGENT_SKILL_NAMES:
-        source = os.path.join(T3_AGENT_SKILLS_ROOT, skill_name, "SKILL.md")
-        if os.path.islink(source) or not os.path.isfile(source):
-            raise RuntimeError(f"Managed T3 Code agent skill is missing: {source}")
-        skills_dir = os.path.join(skills_root, skill_name)
-        if os.path.lexists(skills_dir):
-            if os.path.islink(skills_dir) or not os.path.isdir(skills_dir):
-                raise RuntimeError(
-                    f"Refusing unsafe T3 Code skill directory: {skills_dir}"
-                )
-            if os.stat(skills_dir).st_uid != account.pw_uid:
-                raise RuntimeError(
-                    "Refusing T3 Code skill directory owned by another user: "
-                    f"{skills_dir}"
-                )
-        else:
-            os.mkdir(skills_dir, mode=0o755)
-            os.chown(skills_dir, account.pw_uid, account.pw_gid)
-        destination = os.path.join(skills_dir, "SKILL.md")
-        if os.path.islink(destination):
-            raise RuntimeError(
-                f"Refusing symlinked managed T3 Code skill: {destination}"
-            )
-        with open(source, encoding="utf-8") as file_obj:
-            content = file_obj.read()
-        if os.path.exists(destination):
-            with open(destination, encoding="utf-8") as file_obj:
-                previous = file_obj.read()
-            if "managed-by: infra_tools" not in previous:
-                raise RuntimeError(
-                    f"Refusing to replace unmanaged T3 Code skill: {destination}"
-                )
-        else:
-            previous = None
-        if previous != content:
-            write_text_atomic(destination, content, mode=0o644)
-            changed = True
-        os.chmod(destination, 0o644)
-        os.chown(destination, account.pw_uid, account.pw_gid)
-    return changed
+    return install_managed_agent_skills(
+        username,
+        list(agent_tools),
+        T3_AGENT_SKILL_NAMES,
+        source_root=T3_AGENT_SKILLS_ROOT,
+    )
 
 
 def _validate_htpasswd_file(path: str) -> None:

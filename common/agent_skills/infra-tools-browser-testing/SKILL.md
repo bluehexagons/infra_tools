@@ -40,8 +40,9 @@ private response bodies, or unrelated user data.
 
 Never bypass TLS verification. VM-local Playwright and Chromium use the CA
 trust enrolled by setup. A collaborative preview may run on the connected
-client and therefore use a different trust store. If only that client reports a
-certificate error, run:
+client and therefore use a different trust store. For a URL published by the
+managed `infra-web` gateway, if only that client reports a certificate error,
+run:
 
 ```bash
 infra-web ca
@@ -50,3 +51,4 @@ infra-web ca
 Use its enrollment URL and fingerprint on the client. If VM-local automation
 fails trust instead, report the failed capability. Rerun the saved setup to
 repair the managed VM trust store only when the task includes that repair.
+For any other HTTPS origin, follow that origin's documented trust process.

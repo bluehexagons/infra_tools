@@ -14,6 +14,7 @@ import socket
 import tempfile
 from collections.abc import Sequence
 
+from common.agent_steps import BASE_AGENT_SKILL_NAMES, install_managed_agent_skills
 from lib.atomic_io import write_text_atomic
 from lib.config import GODOT_WEB_HTTPS_PORT
 from lib.remote_utils import install_package, is_package_installed, is_service_active, run
@@ -45,6 +46,7 @@ GODOT_WEB_FORWARD_PORT_MIN = 8444
 GODOT_WEB_FORWARD_PORT_MAX = 8999
 GODOT_AGENT_SKILLS_ROOT = "/opt/infra_tools/common/agent_skills"
 GODOT_AGENT_SKILLS = (
+    *BASE_AGENT_SKILL_NAMES,
     "infra-tools-godot-web",
     "infra-tools-web-gateway",
 )
@@ -727,66 +729,15 @@ def _configure_web_policy(
     return changed
 
 
-def _ensure_user_skill_directory(path: str, uid: int, gid: int) -> bool:
-    if os.path.lexists(path):
-        if os.path.islink(path) or not os.path.isdir(path):
-            raise RuntimeError(f"Refusing unsafe agent skill directory: {path}")
-        if os.stat(path).st_uid != uid:
-            raise RuntimeError(f"Refusing agent skill directory owned by another user: {path}")
-        return False
-    os.mkdir(path, mode=0o755)
-    os.chown(path, uid, gid)
-    return True
-
-
 def configure_godot_agent_skills(username: str, agent_tools: Sequence[str]) -> bool:
     """Install shared Godot workflow skills for selected Codex/OpenCode users."""
 
-    if not {"codex", "opencode"}.intersection(agent_tools):
-        return False
-    if not validate_username(username):
-        raise ValueError(f"Invalid Godot agent-skill username: {username}")
-    account = pwd.getpwnam(username)
-    home = account.pw_dir
-    validate_filesystem_path(home, must_exist=True)
-    agents_dir = os.path.join(home, ".agents")
-    skills_dir = os.path.join(agents_dir, "skills")
-    changed = _ensure_user_skill_directory(agents_dir, account.pw_uid, account.pw_gid)
-    changed = (
-        _ensure_user_skill_directory(skills_dir, account.pw_uid, account.pw_gid)
-        or changed
+    return install_managed_agent_skills(
+        username,
+        list(agent_tools),
+        GODOT_AGENT_SKILLS,
+        source_root=GODOT_AGENT_SKILLS_ROOT,
     )
-    for skill_name in GODOT_AGENT_SKILLS:
-        source = os.path.join(GODOT_AGENT_SKILLS_ROOT, skill_name, "SKILL.md")
-        if not os.path.isfile(source):
-            raise RuntimeError(f"Managed Godot agent skill is missing: {source}")
-        destination_dir = os.path.join(skills_dir, skill_name)
-        changed = (
-            _ensure_user_skill_directory(
-                destination_dir,
-                account.pw_uid,
-                account.pw_gid,
-            )
-            or changed
-        )
-        destination = os.path.join(destination_dir, "SKILL.md")
-        if os.path.islink(destination):
-            raise RuntimeError(f"Refusing symlinked managed agent skill: {destination}")
-        with open(source, encoding="utf-8") as file_obj:
-            content = file_obj.read()
-        previous = None
-        try:
-            with open(destination, encoding="utf-8") as file_obj:
-                previous = file_obj.read()
-        except FileNotFoundError:
-            pass
-        if previous is not None and "managed-by: infra_tools" not in previous:
-            raise RuntimeError(f"Refusing to replace unmanaged agent skill: {destination}")
-        if previous != content:
-            write_text_atomic(destination, content, mode=0o644)
-            os.chown(destination, account.pw_uid, account.pw_gid)
-            changed = True
-    return changed
 
 
 def _configure_nginx_site(content: str, *, reload_required: bool = False) -> bool:

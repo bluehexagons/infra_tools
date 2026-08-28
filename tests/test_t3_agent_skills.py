@@ -8,6 +8,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from common.agent_steps import BASE_AGENT_SKILL_NAMES
 from common.t3code_steps import T3_AGENT_SKILL_NAMES, _ensure_t3_agent_skill
 from lib.agent_cli import _t3_agent_skills_ready
 
@@ -21,18 +22,16 @@ class ManagedT3AgentSkillTests(unittest.TestCase):
                 pw_gid=os.getgid(),
             )
             with (
-                patch("common.t3code_steps.pwd.getpwnam", return_value=account),
-                patch("common.t3code_steps.os.chown"),
+                patch("common.agent_steps.pwd.getpwnam", return_value=account),
+                patch("common.agent_steps.os.chown"),
             ):
                 self.assertTrue(_ensure_t3_agent_skill("agent", ["codex"]))
 
             self.assertEqual(
                 set(T3_AGENT_SKILL_NAMES),
                 {
-                    "infra-tools-agent-workspace",
-                    "infra-tools-deploy-smoke",
+                    *BASE_AGENT_SKILL_NAMES,
                     "infra-tools-t3code",
-                    "infra-tools-vm-triage",
                     "infra-tools-web-gateway",
                 },
             )
@@ -44,7 +43,7 @@ class ManagedT3AgentSkillTests(unittest.TestCase):
                 self.assertIn("managed-by: infra_tools", content)
 
     def test_skips_skill_install_without_a_supported_agent(self) -> None:
-        with patch("common.t3code_steps.pwd.getpwnam") as account:
+        with patch("common.agent_steps.pwd.getpwnam") as account:
             self.assertFalse(_ensure_t3_agent_skill("agent", ["gh"]))
         account.assert_not_called()
 

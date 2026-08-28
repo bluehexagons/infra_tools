@@ -13,6 +13,8 @@ from common.agent_steps import (
     BASE_AGENT_SKILL_NAMES,
     install_managed_agent_skills,
 )
+from common.godot_web_steps import GODOT_AGENT_SKILLS
+from common.t3code_steps import T3_AGENT_SKILL_NAMES
 from lib.config import SetupConfig
 from lib.types import StepFunc
 from plugins.common import extend_agent_steps
@@ -72,6 +74,20 @@ class ManagedAgentSkillTests(unittest.TestCase):
                     content = file_obj.read()
                 self.assertIn(f"name: {skill_name}", content)
                 self.assertIn("managed-by: infra_tools", content)
+
+    def test_every_managed_skill_belongs_to_an_installer_catalog(self) -> None:
+        source_names = {
+            entry.name
+            for entry in os.scandir(AGENT_SKILLS_ROOT)
+            if entry.is_dir(follow_symlinks=False)
+        }
+        installed_names = {
+            *BASE_AGENT_SKILL_NAMES,
+            *T3_AGENT_SKILL_NAMES,
+            *GODOT_AGENT_SKILLS,
+        }
+
+        self.assertEqual(source_names, installed_names)
 
     def test_skips_shared_skills_for_an_unsupported_agent(self) -> None:
         with patch("common.agent_steps.pwd.getpwnam") as getpwnam:

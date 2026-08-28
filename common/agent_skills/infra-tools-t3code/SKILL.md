@@ -17,12 +17,8 @@ Start with:
 infra-tools agent doctor --capability t3code --capability host --json
 ```
 
-Treat a healthy, active, boot-enabled T3 service and host-pressure warnings as
-separate results. The host capability reports memory, swap, disk,
-agent-storage, service cgroup, maintenance, and pending-reboot state without
-reading prompts, credentials, or repository contents. Resolve critical disk
-pressure or failed maintenance before starting a long build; low capacity is
-advisory when the service itself is healthy.
+Treat T3 service readiness and host-pressure warnings as separate results. Use
+the `infra-tools-vm-triage` skill for host pressure or a support snapshot.
 
 The server is the upstream-managed per-user service. Inspect it without sudo:
 
@@ -70,41 +66,13 @@ second foreground T3 server on the managed port.
 
 ## Long-running work
 
-For a long agent or build session that must cross the host's normal restart
-window, create a bounded hold as the agent account:
-
-```bash
-infra-tools agent maintenance hold --hours 8
-infra-tools agent maintenance status
-```
-
-Release it promptly when the protected work is complete:
-
-```bash
-infra-tools agent maintenance release
-```
-
-The hold expires after at most 72 hours and does not override the host's forced
-restart deadline. After a deliberate T3 update or host reboot, persist the
-composite result and confirm it belongs to the current boot:
-
-```bash
-infra-tools agent doctor --capability t3code --capability host --record
-infra-tools agent doctor --last-record --json
-```
-
-The record is private and redacted. A healthy prior-boot record still exits
-nonzero.
+Use the `infra-tools-agent-operations` skill for bounded maintenance holds and
+redacted readiness records. Release a hold promptly after protected work.
 
 ## Browser previews
 
-Prefer T3 Code's collaborative preview tools when they are available in the
-current session. They keep navigation and evidence visible to the connected
-user and do not require a second VM-local browser runtime.
-
-For an SSH-only fallback, first run `infra-tools agent doctor --capability
-browser`. A missing Playwright capability is expected unless setup explicitly
-requested `--browser-automation playwright`.
+Use the `infra-tools-browser-testing` skill. Prefer T3 Code's collaborative
+preview when attached; the optional VM-local browser is only an SSH fallback.
 
 ## Pairing
 

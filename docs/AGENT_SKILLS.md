@@ -49,15 +49,17 @@ Claude Code, or OpenCode executables; it does not refresh infra-tools or these
 skills.
 
 For an explicit `--steps` setup, `install_agent_workflow_skills` installs the
-base set. Capability setup functions continue to install their own focused
-skills.
+base set. The T3 Code and Godot capability steps reconcile that same base set
+alongside their focused skills, so capability-only and custom-step runs still
+produce a complete catalog.
 
 ## Maintaining the catalog
 
 Skill sources live in `common/agent_skills`. Keep each entrypoint short and
 self-contained, with a precise discovery description and only non-obvious VM
 behavior. Add a base skill to `BASE_AGENT_SKILL_NAMES` in
-`common/agent_steps.py`; capability skills belong with the owning setup module.
+`common/agent_steps.py`; capability skill tuples should extend that constant so
+standalone capability setup remains complete.
 
 Validate changes with the repository tests and the Codex skill validator when
 it is available:

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from common import godot_web_steps
+from common.agent_steps import BASE_AGENT_SKILL_NAMES
 from common.service_tools import godot_web_publish
 
 
@@ -241,7 +242,8 @@ class TestGodotWebHost(unittest.TestCase):
             )
             with (
                 patch.object(godot_web_steps, "GODOT_AGENT_SKILLS_ROOT", source_root),
-                patch.object(godot_web_steps.pwd, "getpwnam", return_value=account),
+                patch("common.agent_steps.pwd.getpwnam", return_value=account),
+                patch("common.agent_steps.os.chown"),
             ):
                 changed = godot_web_steps.configure_godot_agent_skills(
                     "agent",
@@ -249,6 +251,14 @@ class TestGodotWebHost(unittest.TestCase):
                 )
 
             self.assertTrue(changed)
+            self.assertEqual(
+                set(godot_web_steps.GODOT_AGENT_SKILLS),
+                {
+                    *BASE_AGENT_SKILL_NAMES,
+                    "infra-tools-godot-web",
+                    "infra-tools-web-gateway",
+                },
+            )
             for skill_name in godot_web_steps.GODOT_AGENT_SKILLS:
                 skill_path = os.path.join(
                     home,
@@ -262,7 +272,7 @@ class TestGodotWebHost(unittest.TestCase):
                     self.assertIn("managed-by: infra_tools", file_obj.read())
 
     def test_does_not_install_agent_skills_without_supported_agent(self) -> None:
-        with patch.object(godot_web_steps.pwd, "getpwnam") as getpwnam:
+        with patch("common.agent_steps.pwd.getpwnam") as getpwnam:
             changed = godot_web_steps.configure_godot_agent_skills("agent", ["gh"])
 
         self.assertFalse(changed)
