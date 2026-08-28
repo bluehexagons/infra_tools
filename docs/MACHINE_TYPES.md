@@ -71,6 +71,9 @@ compatibility labels, but they are not part of the official support target.
 
 - Direct setup and patch flows default to `auto` and resolve the machine type
   on the target before setup steps run.
+- Step planning and execution use that current resolved type immediately, even
+  though durable state is not finalized until setup succeeds. Runtime services
+  outside setup continue to use the last successfully saved type.
 - `auto` resolves to `hardware`, `vm`, or `unprivileged` for the officially
   supported configurations, and to `oci` when an OCI runtime is detected.
 - Proxmox provisioning defaults to a VM because the guest does not exist

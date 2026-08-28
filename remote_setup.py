@@ -15,7 +15,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.display import print_setup_summary
-from lib.machine_state import STATE_DIR, resolve_machine_type, save_machine_state, save_setup_config
+from lib.machine_state import (
+    STATE_DIR,
+    machine_type_context,
+    resolve_machine_type,
+    save_machine_state,
+    save_setup_config,
+)
 from lib.notifications import send_setup_notification
 from lib.operation_state import OperationRecord, OperationStateStore
 from lib.remote_utils import detect_os, is_dry_run, set_dry_run
@@ -402,7 +408,8 @@ def _run_main() -> int:
     print(f"Machine type: {config.machine_type}")
     sys.stdout.flush()
     
-    steps = get_steps_for_system_type(config)
+    with machine_type_context(config.machine_type):
+        steps = get_steps_for_system_type(config)
 
     if args.dry_run:
         _print_dry_run_plan(steps)
@@ -436,7 +443,8 @@ def _run_main() -> int:
         sys.stdout.flush()
         step_started = time.monotonic()
         try:
-            func(config)
+            with machine_type_context(config.machine_type):
+                func(config)
         except Exception as e:
             error_msg = f"Step '{name}' failed: {e}"
             elapsed = time.monotonic() - step_started

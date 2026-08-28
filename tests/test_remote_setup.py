@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import remote_setup
 from lib.config import SetupConfig
+from lib.machine_state import get_machine_type
 from lib.operation_state import OperationStateError, OperationStateStore
 from lib.remote_utils import set_dry_run
 
@@ -46,13 +47,19 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
             host="localhost",
             username="root",
             system_type="server_lite",
+            machine_type="unprivileged",
         )
         save_machine = MagicMock()
         save_config = MagicMock()
 
         def step(_config):
+            self.assertEqual(get_machine_type(), "unprivileged")
             save_machine.assert_not_called()
             save_config.assert_not_called()
+
+        def get_steps(_config):
+            self.assertEqual(get_machine_type(), "unprivileged")
+            return [("Apply", step)]
 
         with tempfile.TemporaryDirectory() as tmpdir, patch.object(
             remote_setup,
@@ -67,15 +74,23 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
         ), patch.object(
             remote_setup, "print_setup_summary"
         ), patch.object(
-            remote_setup, "get_steps_for_system_type", return_value=[("Apply", step)]
+            remote_setup, "get_steps_for_system_type", side_effect=get_steps
         ), patch.object(
             remote_setup, "save_machine_state", save_machine
         ), patch.object(
             remote_setup, "save_setup_config", save_config
+        ), patch(
+            "lib.machine_state.load_machine_state",
+            return_value={
+                "machine_type": "hardware",
+                "system_type": "server_lite",
+                "username": "root",
+            },
         ):
             create_parser.return_value.parse_args.return_value = args
             self.assertEqual(remote_setup._run_main(), 0)
             self.assertIsNone(OperationStateStore(remote_setup.SETUP_OPERATION_FILE).load())
+            self.assertEqual(get_machine_type(), "hardware")
 
         save_machine.assert_called_once()
         save_config.assert_called_once()

@@ -73,6 +73,23 @@ class TestMachineStateHelpers(unittest.TestCase):
         with self._patch_machine_type('hardware'):
             self.assertFalse(ms.can_manage_time_sync('unprivileged'))
 
+    def test_machine_type_context_overrides_and_restores_saved_state(self):
+        with self._patch_machine_type('hardware'):
+            self.assertTrue(ms.is_hardware())
+            with ms.machine_type_context('unprivileged'):
+                self.assertTrue(ms.is_unprivileged())
+                with ms.machine_type_context('vm'):
+                    self.assertTrue(ms.is_vm())
+                self.assertTrue(ms.is_unprivileged())
+            self.assertTrue(ms.is_hardware())
+
+    def test_machine_type_context_restores_state_after_failure(self):
+        with self._patch_machine_type('hardware'):
+            with self.assertRaisesRegex(RuntimeError, 'setup failed'):
+                with ms.machine_type_context('unprivileged'):
+                    raise RuntimeError('setup failed')
+            self.assertTrue(ms.is_hardware())
+
 
 class TestMachineTypeDetection(unittest.TestCase):
     def test_detects_lxc_as_unprivileged(self):

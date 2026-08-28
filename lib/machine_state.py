@@ -7,7 +7,9 @@ import json
 import os
 import shutil
 import subprocess
-from typing import Optional, Any
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Iterator, Optional
 
 from lib.atomic_io import write_json_atomic
 from lib.config import AUTO_MACHINE_TYPE, DEFAULT_MACHINE_TYPE, MACHINE_TYPES
@@ -25,6 +27,10 @@ SETUP_CONFIG_FILE = os.path.join(STATE_DIR, "setup.json")
 
 _LXC_VIRTUALIZATIONS = {"lxc", "lxc-libvirt", "openvz", "systemd-nspawn"}
 _OCI_VIRTUALIZATIONS = {"docker", "podman", "rkt", "oci"}
+_ACTIVE_MACHINE_TYPE: ContextVar[Optional[str]] = ContextVar(
+    "infra_tools_active_machine_type",
+    default=None,
+)
 
 
 def _systemd_detect_virt() -> Optional[str]:
@@ -108,6 +114,25 @@ def resolve_machine_type(machine_type: Optional[str]) -> str:
     return machine_type
 
 
+@contextmanager
+def machine_type_context(machine_type: Optional[str]) -> Iterator[None]:
+    """Temporarily expose the current setup's resolved machine type.
+
+    Setup state is committed only after every mutation succeeds. Capability
+    helpers still need the current run's type while those mutations execute,
+    rather than the type saved by a previous successful run.
+    """
+    resolved_type = resolve_machine_type(machine_type)
+    if resolved_type == AUTO_MACHINE_TYPE or resolved_type not in MACHINE_TYPES:
+        raise ValueError(f"Unknown machine type: {resolved_type!r}")
+
+    token = _ACTIVE_MACHINE_TYPE.set(resolved_type)
+    try:
+        yield
+    finally:
+        _ACTIVE_MACHINE_TYPE.reset(token)
+
+
 def save_machine_state(
     machine_type: str,
     system_type: str,
@@ -178,7 +203,11 @@ def load_machine_state() -> dict[str, Any]:
 
 
 def get_machine_type() -> str:
-    """Get the machine type from stored state."""
+    """Get the active setup type, falling back to stored machine state."""
+    active_type = _ACTIVE_MACHINE_TYPE.get()
+    if active_type is not None:
+        return active_type
+
     state = load_machine_state()
     return resolve_machine_type(state.get("machine_type", DEFAULT_MACHINE_TYPE))
 
