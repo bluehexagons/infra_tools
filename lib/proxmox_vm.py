@@ -87,6 +87,9 @@ class _ExistingVM:
     name: str
     ipv4_addresses: tuple[str, ...]
     cores: Optional[int]
+    memory_mib: Optional[int]
+    balloon_min_mib: Optional[int]
+    balloon_shares: Optional[int]
 
 
 _UNIT_TO_KIB = {"K": 1, "M": 1024, "G": 1024 * 1024, "T": 1024 * 1024 * 1024}
@@ -206,8 +209,9 @@ def _report_memory_capacity(
     ssh_opts: StrList,
     proposed_minimum_mib: int,
     proposed_maximum_mib: int,
+    replacing_vmid: Optional[int] = None,
 ) -> bool:
-    """Print advisory host-capacity comparisons before creating a VM."""
+    """Print advisory host-capacity comparisons for a VM allocation."""
     try:
         hostname = _ssh_run(
             node_ip,
@@ -252,6 +256,12 @@ def _report_memory_capacity(
             ssh_opts,
             node_name,
         )
+        if replacing_vmid is not None:
+            allocations = [
+                allocation
+                for allocation in allocations
+                if allocation.vmid != replacing_vmid
+            ]
     except (ProvisionError, TypeError, ValueError) as exc:
         print(f"  ⚠ Could not calculate Proxmox memory capacity: {exc}")
         return True
@@ -275,8 +285,13 @@ def _report_memory_capacity(
         f"floors {format_gib(current_minimum_mib)}, "
         f"burst maxima {format_gib(current_maximum_mib)}"
     )
+    proposed_label = (
+        f"updated VM {replacing_vmid}"
+        if replacing_vmid is not None
+        else "proposed VM"
+    )
     print(
-        "    After proposed VM: "
+        f"    After {proposed_label}: "
         f"floors {format_gib(after_minimum_mib)} "
         f"({target_ratio(after_minimum_mib)}% of target), "
         f"burst maxima {format_gib(after_maximum_mib)} "
@@ -289,7 +304,7 @@ def _report_memory_capacity(
         )
     if after_minimum_mib > target_mib:
         print(
-            "  ⚠ Running guest floors plus this VM exceed the balloon target by "
+            "  ⚠ Running guest floors plus this allocation exceed the balloon target by "
             f"{format_gib(after_minimum_mib - target_mib)}; ballooning cannot "
             "reclaim below those floors"
         )
@@ -383,6 +398,9 @@ def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
     name = ""
     addresses: list[str] = []
     cores: Optional[int] = None
+    memory_mib: Optional[int] = None
+    balloon_min_mib: Optional[int] = None
+    balloon_shares: Optional[int] = None
     for line in config_text.splitlines():
         key, separator, value = line.partition(":")
         if not separator:
@@ -397,6 +415,18 @@ def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
             except ValueError:
                 continue
             cores = parsed_cores if parsed_cores > 0 else None
+            continue
+        if normalized_key in {"memory", "balloon", "shares"}:
+            try:
+                parsed_value = int(value.strip())
+            except ValueError:
+                continue
+            if normalized_key == "memory" and parsed_value > 0:
+                memory_mib = parsed_value
+            elif normalized_key == "balloon" and parsed_value >= 0:
+                balloon_min_mib = parsed_value
+            elif normalized_key == "shares" and parsed_value > 0:
+                balloon_shares = parsed_value
             continue
         if not normalized_key.startswith("ipconfig"):
             continue
@@ -415,6 +445,9 @@ def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
         name=name,
         ipv4_addresses=tuple(addresses),
         cores=cores,
+        memory_mib=memory_mib,
+        balloon_min_mib=balloon_min_mib,
+        balloon_shares=balloon_shares,
     )
 
 
@@ -456,6 +489,10 @@ def _reconcile_existing_vm(
     ssh_opts: StrList,
     *,
     desired_cores: Optional[int] = None,
+    desired_memory_mib: Optional[int] = None,
+    desired_balloon_min_mib: Optional[int] = None,
+    desired_balloon_shares: Optional[int] = None,
+    allow_memory_overcommit: bool = False,
     dry_run: bool = False,
 ) -> bool:
     """Reuse the VM at ``target_ip`` and reconcile safe provider settings.
@@ -468,6 +505,24 @@ def _reconcile_existing_vm(
         return False
     if desired_cores is not None and desired_cores < 1:
         raise ProvisionError("VM cores must be at least 1")
+    if (desired_memory_mib is None) != (desired_balloon_min_mib is None):
+        raise ProvisionError(
+            "VM memory reconciliation requires both a maximum and balloon minimum"
+        )
+    if (
+        desired_memory_mib is not None
+        and desired_balloon_min_mib is not None
+        and (
+            desired_memory_mib < 1
+            or desired_balloon_min_mib < 0
+            or desired_balloon_min_mib > desired_memory_mib
+        )
+    ):
+        raise ProvisionError("Invalid VM memory reconciliation values")
+    if desired_balloon_shares is not None and not (
+        1 <= desired_balloon_shares <= 50000
+    ):
+        raise ProvisionError("VM balloon shares must be between 1 and 50000")
     existing = _list_existing_vms(node_ip, user, ssh_opts)
     ip_matches = [vm for vm in existing if target_ip in vm.ipv4_addresses]
     if len(ip_matches) > 1:
@@ -527,11 +582,46 @@ def _reconcile_existing_vm(
     cores_changed = bool(
         desired_cores is not None and matched.cores != desired_cores
     )
+    memory_changed = bool(
+        desired_memory_mib is not None
+        and desired_balloon_min_mib is not None
+        and (
+            matched.memory_mib != desired_memory_mib
+            or matched.balloon_min_mib != desired_balloon_min_mib
+        )
+    )
+    shares_changed = bool(
+        desired_balloon_shares is not None
+        and (matched.balloon_shares or 1000) != desired_balloon_shares
+    )
+    if memory_changed:
+        assert desired_memory_mib is not None
+        assert desired_balloon_min_mib is not None
+        memory_floor_safe = _report_memory_capacity(
+            node_ip=node_ip,
+            user=user,
+            ssh_opts=ssh_opts,
+            proposed_minimum_mib=desired_balloon_min_mib,
+            proposed_maximum_mib=desired_memory_mib,
+            replacing_vmid=matched.vmid,
+        )
+        _enforce_memory_floor(memory_floor_safe, allow_memory_overcommit)
     set_options: list[str] = []
     if name_changed:
         set_options.extend(["--name", shlex.quote(cast(str, desired_name))])
     if cores_changed:
         set_options.extend(["--cores", str(desired_cores)])
+    if memory_changed:
+        set_options.extend(
+            [
+                "--memory",
+                str(desired_memory_mib),
+                "--balloon",
+                str(desired_balloon_min_mib),
+            ]
+        )
+    if shares_changed:
+        set_options.extend(["--shares", str(desired_balloon_shares)])
 
     if set_options:
         update = _ssh_run(
@@ -559,7 +649,20 @@ def _reconcile_existing_vm(
             or observed.name.lower() == cast(str, desired_name).lower()
         )
         cores_verified = not cores_changed or observed.cores == desired_cores
-        if verify.returncode != 0 or not name_verified or not cores_verified:
+        memory_verified = not memory_changed or (
+            observed.memory_mib == desired_memory_mib
+            and observed.balloon_min_mib == desired_balloon_min_mib
+        )
+        shares_verified = not shares_changed or (
+            (observed.balloon_shares or 1000) == desired_balloon_shares
+        )
+        if (
+            verify.returncode != 0
+            or not name_verified
+            or not cores_verified
+            or not memory_verified
+            or not shares_verified
+        ):
             raise ProvisionError(
                 f"Proxmox did not preserve the requested provider settings "
                 f"for VM {matched.vmid}"
@@ -578,6 +681,28 @@ def _reconcile_existing_vm(
         print(
             f"  ⚠ VM {matched.vmid} is running; restart it for the vCPU "
             "change to take effect in the guest"
+        )
+    if memory_changed:
+        previous_maximum = matched.memory_mib or "an unspecified maximum"
+        previous_minimum = (
+            matched.balloon_min_mib
+            if matched.balloon_min_mib is not None
+            else "an unspecified floor"
+        )
+        print(
+            f"  ✓ Reconfigured existing VM {matched.vmid} memory from "
+            f"{previous_maximum}/{previous_minimum} MiB max/floor to "
+            f"{desired_memory_mib}/{desired_balloon_min_mib} MiB"
+        )
+        if matched.memory_mib != desired_memory_mib:
+            print(
+                f"  ⚠ VM {matched.vmid} is running; restart it if the guest "
+                "does not observe the new memory maximum"
+            )
+    if shares_changed:
+        print(
+            f"  ✓ Reconfigured existing VM {matched.vmid} balloon shares from "
+            f"{matched.balloon_shares or 1000} to {desired_balloon_shares}"
         )
 
     print(
@@ -1325,6 +1450,14 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         user,
         ssh_opts,
         desired_cores=config.container_cores,
+        desired_memory_mib=memory_mb,
+        desired_balloon_min_mib=balloon_min_mb,
+        desired_balloon_shares=balloon_shares,
+        allow_memory_overcommit=getattr(
+            config,
+            "allow_memory_overcommit",
+            False,
+        ),
     ):
         raise VMAlreadyExists(
             f"VM with IP {target_ip} already exists on {node_ip}"

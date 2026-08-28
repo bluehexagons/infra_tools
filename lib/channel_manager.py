@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from lib.atomic_io import write_json_atomic
+from lib.installation_info import read_installation_metadata
 from lib.types import JSONDict
 from lib.validation import validate_channel, validate_filesystem_path
 
@@ -43,9 +44,11 @@ def managed_repository_path(script_path: str | None = None) -> str:
     validate_filesystem_path(candidate, must_exist=True)
     result = _run_git(candidate, ["rev-parse", "--show-toplevel"])
     if result.returncode != 0:
+        if read_installation_metadata(candidate) is not None:
+            return os.path.realpath(candidate)
         raise ChannelError(
-            "This installation is not backed by a Git worktree; run the installer "
-            "before using channel or upgrade."
+            "This installation is neither a managed Git worktree nor an "
+            "identified setup snapshot."
         )
     return os.path.realpath(result.stdout.strip())
 
@@ -58,6 +61,19 @@ def channel_state_path(repo_path: str) -> str:
 
 def get_channel_info(repo_path: str) -> JSONDict:
     """Return the selected channel and current worktree commit."""
+
+    snapshot = _setup_snapshot(repo_path)
+    if snapshot is not None:
+        commit = snapshot.get("commit")
+        return {
+            "channel": "setup-snapshot",
+            "branch": snapshot.get("branch"),
+            "commit": commit if isinstance(commit, str) else "unknown",
+            "version": snapshot["version"],
+            "dirty": snapshot.get("dirty"),
+            "managed": True,
+            "installation_type": "setup-snapshot",
+        }
 
     repo_path = _validate_repository(repo_path)
     commit = _current_commit(repo_path)
@@ -81,6 +97,11 @@ def switch_channel(repo_path: str, channel: str) -> JSONDict:
     """Fetch and switch a managed worktree to ``channel``."""
 
     validate_channel(channel)
+    if _setup_snapshot(repo_path) is not None:
+        raise ChannelError(
+            "Setup snapshots cannot switch channels; rerun setup from the "
+            "controller source you want to deploy."
+        )
     repo_path = _validate_repository(repo_path)
     _require_clean_worktree(repo_path)
     _fetch_origin(repo_path)
@@ -93,6 +114,10 @@ def switch_channel(repo_path: str, channel: str) -> JSONDict:
 def upgrade_channel(repo_path: str) -> JSONDict:
     """Install the newest commit currently available on the selected channel."""
 
+    if _setup_snapshot(repo_path) is not None:
+        raise ChannelError(
+            "Setup snapshots are upgraded by rerunning setup from the controller."
+        )
     repo_path = _validate_repository(repo_path)
     state = _load_state(repo_path)
     if state is None:
@@ -122,6 +147,15 @@ def _validate_repository(repo_path: str) -> str:
     if result.returncode != 0:
         raise ChannelError(f"Not a Git worktree: {repo_path}")
     return os.path.realpath(result.stdout.strip())
+
+
+def _setup_snapshot(repo_path: str) -> JSONDict | None:
+    """Return metadata only when ``repo_path`` is not itself a Git worktree."""
+
+    validate_filesystem_path(repo_path, must_exist=True)
+    if _run_git(repo_path, ["rev-parse", "--show-toplevel"]).returncode == 0:
+        return None
+    return read_installation_metadata(repo_path)
 
 
 def _run_git(repo_path: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:

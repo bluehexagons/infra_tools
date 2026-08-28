@@ -280,10 +280,21 @@ saved provisioning metadata still requires `--memory` and root `--storage` on
 its first run.
 
 Use `--verify-provider` to check a cached provisioned guest against Proxmox even
-when its declaration matches saved local metadata. If the provider-side vCPU
-count differs, setup applies and verifies `--cores`. A running VM may need to
-be restarted before the guest observes the change; setup reports that
+when its declaration matches saved local metadata. Setup reconciles and
+verifies the provider-side VM name, vCPU count, memory maximum, balloon
+minimum, and balloon shares. Before changing memory, it repeats the host
+capacity check while replacing the existing VM's allocation rather than
+counting it twice. An unsafe balloon floor remains blocked unless
+`--allow-memory-overcommit` is explicit. A running VM may need to be restarted
+before the guest observes a vCPU or memory-maximum change; setup reports that
 requirement without interrupting the guest automatically.
+
+Existing-guest setup does not mutate bridges, root or data disks, cache media,
+base images, or image staging storage. When saved metadata shows that one of
+those provisioning-only declarations changed, setup now rejects the rerun
+instead of saving a value it did not apply. Use the explicit `vm` or `proxmox`
+management command for a supported lifecycle change, or provision a
+replacement guest.
 
 During a provisioning check, the configured IPv4 address is the stable guest
 identity. If that VM already exists and the corrected declaration changes its

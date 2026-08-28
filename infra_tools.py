@@ -222,6 +222,10 @@ def run_channel_command(args: argparse.Namespace) -> int:
             print(f"Commit: {str(info['commit'])[:12]}")
             if info.get("branch"):
                 print(f"Branch: {info['branch']}")
+            if info.get("version"):
+                print(f"Version: {info['version']}")
+            if info.get("dirty") is True:
+                print("Source state: dirty when deployed")
             return 0
 
         info = switch_channel(repository, args.channel_name)
@@ -1069,6 +1073,30 @@ _CACHED_PROVISIONING_FIELDS = (
     "vm_image_storage",
 )
 
+_RECONCILABLE_VM_PROVISIONING_CHANGES = {
+    "container_memory",
+    "vm_balloon_min",
+    "vm_balloon_shares",
+    "allow_memory_overcommit",
+    "container_cores",
+}
+
+_PROVISIONING_FIELD_FLAGS = {
+    "machine_type": "--machine",
+    "hosted_bridge": "--bridge",
+    "container_memory": "--memory",
+    "vm_balloon_min": "--balloon-min",
+    "vm_balloon_shares": "--balloon-shares",
+    "allow_memory_overcommit": "--allow-memory-overcommit",
+    "container_storage": "--storage",
+    "storage_mounts": "--storage-mount",
+    "storage_caches": "--storage-cache",
+    "container_cores": "--cores",
+    "container_base": "--base",
+    "vm_image": "--image",
+    "vm_image_storage": "--image-storage",
+}
+
 
 def _provisioning_changes_requested(
     config: SetupConfig,
@@ -1081,6 +1109,28 @@ def _provisioning_changes_requested(
         and getattr(config, field) != getattr(cached_config, field)
         for field in _PROVISIONING_CHANGE_ARGS
     )
+
+
+def _unsupported_cached_provisioning_changes(
+    config: SetupConfig,
+    cached_config: SetupConfig,
+    args: argparse.Namespace,
+) -> list[str]:
+    """Return explicit existing-guest changes setup cannot safely reconcile."""
+
+    changed_fields = [
+        field
+        for field in _PROVISIONING_CHANGE_ARGS
+        if getattr(args, field, None) is not None
+        and getattr(config, field) != getattr(cached_config, field)
+    ]
+    if cached_config.machine_type == "vm":
+        changed_fields = [
+            field
+            for field in changed_fields
+            if field not in _RECONCILABLE_VM_PROVISIONING_CHANGES
+        ]
+    return [_PROVISIONING_FIELD_FLAGS[field] for field in changed_fields]
 
 
 def _provisioning_cache_target(host: str) -> str:
@@ -1363,6 +1413,20 @@ def run_setup_command(args: argparse.Namespace) -> int:
         return 1
 
     cached_provisioning = _load_cached_provisioning_metadata(config)
+    if cached_provisioning is not None:
+        unsupported_changes = _unsupported_cached_provisioning_changes(
+            config,
+            cached_provisioning,
+            args,
+        )
+        if unsupported_changes:
+            print(
+                "Error: setup cannot reconcile these provisioning-only changes "
+                f"on an existing guest: {', '.join(unsupported_changes)}. "
+                "Use the explicit vm/proxmox modification commands or provision "
+                "a replacement guest."
+            )
+            return 1
     reuse_cached_provisioning = _reuse_cached_provisioning_metadata(
         config,
         args,

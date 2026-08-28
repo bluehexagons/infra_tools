@@ -192,6 +192,33 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             )
         )
 
+    def test_unsupported_existing_vm_change_stops_before_cache_update(self) -> None:
+        current = _config(
+            container_storage=[["root", "fast-lvm", "64G"]],
+        )
+        cached = _config(
+            container_storage=[["root", "local-lvm", "32G"]],
+        )
+        args = _args(
+            container_storage=[["root", "fast-lvm", "64G"]],
+        )
+
+        with (
+            patch("infra_tools.prompt_for_missing_passwords"),
+            patch("infra_tools.SetupConfig.from_args", return_value=current),
+            patch("infra_tools.load_setup_command", return_value=cached),
+            patch("infra_tools.save_setup_command") as mock_save,
+            patch("builtins.print") as mock_print,
+        ):
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 1)
+        mock_save.assert_not_called()
+        self.assertIn(
+            "--storage",
+            "\n".join(str(call.args[0]) for call in mock_print.call_args_list),
+        )
+
     def test_reuses_metadata_when_explicit_guest_shape_matches(self) -> None:
         current = _config(
             container_memory="4G",

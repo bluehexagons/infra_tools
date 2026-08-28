@@ -328,6 +328,65 @@ class TestGuestMemoryCapacity(unittest.TestCase):
         self.assertIn("Guest burst maxima exceed", output)
         self.assertTrue(safe)
 
+    @patch("builtins.print")
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_capacity_report_replaces_existing_vm_allocation(
+        self,
+        mock_run,
+        mock_print,
+    ):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="pve1\n", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"memory": {"total": 8589934592, "used": 4294967296}}',
+                stderr="",
+            ),
+            MagicMock(
+                returncode=0,
+                stdout='{"ballooning-target": 75}',
+                stderr="",
+            ),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    '[{"node": "pve1", "status": "running", '
+                    '"type": "qemu", "vmid": 100}, '
+                    '{"node": "pve1", "status": "running", '
+                    '"type": "qemu", "vmid": 101}]'
+                ),
+                stderr="",
+            ),
+            MagicMock(
+                returncode=0,
+                stdout="memory: 4096\nballoon: 2048\n",
+                stderr="",
+            ),
+            MagicMock(
+                returncode=0,
+                stdout="memory: 2048\nballoon: 1024\n",
+                stderr="",
+            ),
+        ]
+
+        safe = _report_memory_capacity(
+            node_ip="192.0.2.10",
+            user="root",
+            ssh_opts=[],
+            proposed_minimum_mib=2048,
+            proposed_maximum_mib=4096,
+            replacing_vmid=100,
+        )
+
+        output = "\n".join(
+            " ".join(str(arg) for arg in printed.args)
+            for printed in mock_print.call_args_list
+        )
+        self.assertIn("Running guests (1)", output)
+        self.assertIn("floors 3.0 GiB (50% of target)", output)
+        self.assertIn("burst maxima 6.0 GiB (100% of target)", output)
+        self.assertTrue(safe)
+
     def test_floor_over_target_requires_explicit_override(self):
         with self.assertRaisesRegex(ProvisionError, "allow-memory-overcommit"):
             _enforce_memory_floor(False, False)

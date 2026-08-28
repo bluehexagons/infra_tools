@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from lib.agent_cli import (
     _directory_size_bytes,
+    _read_memory_capacity_bytes,
     _read_meminfo,
     inspect_host_readiness,
 )
@@ -56,6 +57,115 @@ class TestAgentHostReadiness(unittest.TestCase):
             os.symlink(outside, os.path.join(root, "linked"))
 
             self.assertEqual(_directory_size_bytes(root), 4)
+
+    def test_memory_capacity_includes_ballooned_sysfs_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with open(
+                os.path.join(temp_dir, "block_size_bytes"),
+                "w",
+                encoding="utf-8",
+            ) as file_obj:
+                file_obj.write("8000000\n")
+            for index in range(32):
+                os.mkdir(os.path.join(temp_dir, f"memory{index}"))
+
+            capacity = _read_memory_capacity_bytes(temp_dir)
+
+        self.assertEqual(capacity, 4 * BYTES_PER_GB)
+
+    def test_ballooned_guest_uses_capacity_for_memory_recommendation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            meminfo_path = os.path.join(temp_dir, "meminfo")
+            memory_path = os.path.join(temp_dir, "memory")
+            os.mkdir(memory_path)
+            with open(meminfo_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write(
+                    "MemTotal:       2097152 kB\n"
+                    "MemAvailable:   1048576 kB\n"
+                )
+            with open(
+                os.path.join(memory_path, "block_size_bytes"),
+                "w",
+                encoding="utf-8",
+            ) as file_obj:
+                file_obj.write("8000000\n")
+            for index in range(32):
+                os.mkdir(os.path.join(memory_path, f"memory{index}"))
+
+            with (
+                patch("lib.agent_cli._agent_storage_inventory") as storage,
+                patch("lib.agent_cli._systemd_properties", return_value={}),
+                patch("lib.agent_cli.shutil.disk_usage") as disk_usage,
+                patch("lib.agent_cli.inspect_agent_maintenance") as maintenance,
+            ):
+                storage.return_value = {
+                    "paths": {},
+                    "size_bytes": {},
+                    "codex_release_count": 0,
+                }
+                disk_usage.return_value = _DiskUsage(
+                    32 * BYTES_PER_GB,
+                    8 * BYTES_PER_GB,
+                    24 * BYTES_PER_GB,
+                )
+                maintenance.return_value = {"status": "inactive"}
+                result = inspect_host_readiness(
+                    temp_dir,
+                    meminfo_path=meminfo_path,
+                    memory_sysfs_path=memory_path,
+                )
+
+        self.assertEqual(result["memory"]["total_bytes"], 2 * BYTES_PER_GB)
+        self.assertEqual(result["memory"]["capacity_bytes"], 4 * BYTES_PER_GB)
+        self.assertTrue(result["memory"]["ballooned"])
+        self.assertNotIn(
+            "memory is below the 4 GiB recommendation for T3 Code with browser or build workloads",
+            result["warnings"],
+        )
+
+    def test_kernel_reserved_memory_is_not_reported_as_ballooning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            meminfo_path = os.path.join(temp_dir, "meminfo")
+            memory_path = os.path.join(temp_dir, "memory")
+            os.mkdir(memory_path)
+            with open(meminfo_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write(
+                    "MemTotal:       4050000 kB\n"
+                    "MemAvailable:   3000000 kB\n"
+                )
+            with open(
+                os.path.join(memory_path, "block_size_bytes"),
+                "w",
+                encoding="utf-8",
+            ) as file_obj:
+                file_obj.write("8000000\n")
+            for index in range(32):
+                os.mkdir(os.path.join(memory_path, f"memory{index}"))
+
+            with (
+                patch("lib.agent_cli._agent_storage_inventory") as storage,
+                patch("lib.agent_cli._systemd_properties", return_value={}),
+                patch("lib.agent_cli.shutil.disk_usage") as disk_usage,
+                patch("lib.agent_cli.inspect_agent_maintenance") as maintenance,
+            ):
+                storage.return_value = {
+                    "paths": {},
+                    "size_bytes": {},
+                    "codex_release_count": 0,
+                }
+                disk_usage.return_value = _DiskUsage(
+                    32 * BYTES_PER_GB,
+                    8 * BYTES_PER_GB,
+                    24 * BYTES_PER_GB,
+                )
+                maintenance.return_value = {"status": "inactive"}
+                result = inspect_host_readiness(
+                    temp_dir,
+                    meminfo_path=meminfo_path,
+                    memory_sysfs_path=memory_path,
+                )
+
+        self.assertFalse(result["memory"]["ballooned"])
 
     def test_host_diagnostic_separates_warnings_from_critical_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -122,6 +232,7 @@ class TestAgentHostReadiness(unittest.TestCase):
                 result = inspect_host_readiness(
                     temp_dir,
                     meminfo_path=meminfo_path,
+                    memory_sysfs_path=os.path.join(temp_dir, "missing-memory"),
                 )
 
         self.assertFalse(result["healthy"])

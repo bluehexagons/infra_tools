@@ -221,6 +221,7 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
         with (
             patch.object(setup_common.shutil, "copytree") as copytree,
             patch.object(setup_common.shutil, "copy2"),
+            patch.object(setup_common, "write_setup_snapshot_metadata"),
         ):
             tmpdir = "/payload"
             setup_common.copy_project_files(tmpdir)

@@ -65,6 +65,7 @@ from lib.cache import get_cache_path_for_host, save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 from lib.display import print_setup_summary
 from lib.interactive_setup import prompt_for_missing_passwords, run_interactive_setup
+from lib.installation_info import write_setup_snapshot_metadata
 from lib.notifications import validate_notification_args
 from lib.proxmox_guest import resolve_guest_ssh_key
 from lib.ssh_utils import (
@@ -312,6 +313,7 @@ def copy_project_files(dest_dir: str) -> None:
                 shutil.copytree(src, dst, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
             else:
                 shutil.copy2(src, dst)
+    write_setup_snapshot_metadata(project_root, dest_dir)
 
 
 def _is_managed_local_install(install_dir: str) -> bool:

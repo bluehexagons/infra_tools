@@ -964,6 +964,34 @@ def _read_meminfo(path: str = "/proc/meminfo") -> dict[str, int]:
     return values
 
 
+def _read_memory_capacity_bytes(
+    path: str = "/sys/devices/system/memory",
+) -> int:
+    """Return guest-visible memory capacity, including ballooned-out pages.
+
+    Linux ``MemTotal`` can reflect only the memory currently available to a
+    dynamically sized guest.  The sysfs memory-block inventory continues to
+    describe the guest's configured capacity, which is the value relevant to
+    sizing recommendations.
+    """
+
+    block_size_path = os.path.join(path, "block_size_bytes")
+    try:
+        with open(block_size_path, encoding="utf-8") as file_obj:
+            block_size = int(file_obj.read().strip(), 16)
+        if block_size <= 0:
+            return 0
+        block_count = sum(
+            1
+            for entry in os.scandir(path)
+            if re.fullmatch(r"memory[0-9]+", entry.name)
+            and entry.is_dir(follow_symlinks=False)
+        )
+    except (OSError, ValueError):
+        return 0
+    return block_size * block_count
+
+
 def _directory_size_bytes(path: str) -> int:
     """Return regular-file bytes below one user path without following links."""
     if os.path.islink(path) or not os.path.isdir(path):
@@ -1085,6 +1113,7 @@ def inspect_host_readiness(
     home: Optional[str] = None,
     *,
     meminfo_path: str = "/proc/meminfo",
+    memory_sysfs_path: str = "/sys/devices/system/memory",
 ) -> JSONDict:
     """Report resource headroom and recurring-maintenance health for an agent VM."""
     user_home = os.path.abspath(home or os.path.expanduser("~"))
@@ -1092,11 +1121,23 @@ def inspect_host_readiness(
     errors: list[str] = []
     meminfo = _read_meminfo(meminfo_path)
     memory_total = meminfo.get("MemTotal", 0)
+    memory_capacity = max(
+        memory_total,
+        _read_memory_capacity_bytes(memory_sysfs_path),
+    )
+    memory_ballooned = bool(
+        memory_total
+        and memory_capacity
+        and memory_total * 10 < memory_capacity * 9
+    )
     memory_available = meminfo.get("MemAvailable", 0)
     swap_total = meminfo.get("SwapTotal", 0)
     swap_free = meminfo.get("SwapFree", 0)
     swap_used = max(0, swap_total - swap_free)
-    if memory_total and memory_total < _AGENT_HOST_MIN_RECOMMENDED_MEMORY:
+    if (
+        memory_capacity
+        and memory_capacity < _AGENT_HOST_MIN_RECOMMENDED_MEMORY
+    ):
         warnings.append(
             "memory is below the 4 GiB recommendation for T3 Code with browser or build workloads"
         )
@@ -1185,6 +1226,8 @@ def inspect_host_readiness(
         "status": "error" if errors else "warning" if warnings else "ok",
         "memory": {
             "total_bytes": memory_total or None,
+            "capacity_bytes": memory_capacity or None,
+            "ballooned": memory_ballooned,
             "available_bytes": memory_available or None,
             "swap_total_bytes": swap_total,
             "swap_used_bytes": swap_used,

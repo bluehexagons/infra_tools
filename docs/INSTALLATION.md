@@ -272,6 +272,15 @@ The default installer channel is `dev`, which tracks `main`. Use `stable` when
 you want the latest versioned release. `upgrade` refuses to overwrite local
 worktree changes; commit or stash changes before reinstalling or upgrading.
 
+These channel commands manage the controller installation. A remote `setup`
+or `patch` run sends a complete snapshot of the controller's current source to
+the target and replaces the target's `/opt/infra_tools` runtime with it while
+preserving `/opt/infra_tools/state`. The snapshot includes its project version,
+source commit, branch, and whether the controller checkout was dirty, so
+`infra-tools channel` on the target reports exactly what that setup run
+deployed. A target snapshot is not a Git worktree: switch or upgrade the
+controller channel first, then rerun `setup` or `patch` to update the target.
+
 ## Debian package sources
 
 The installer and setup need network access to APT. On Debian, they check the
