@@ -71,6 +71,11 @@ an interrupted or older update, repair and verify the managed runtime with:
 infra-tools agent doctor --capability t3code --fix
 ```
 
+Headless infra-tools setup also verifies lingering before satisfying T3's
+no-argument `loginctl enable-linger` call, supplying the validated target
+username only when needed. This setup-scoped compatibility path is removed as
+soon as the upstream updater exits.
+
 This updates the same service managed by infra-tools. When a desktop client
 requires an exact matching version, use:
 

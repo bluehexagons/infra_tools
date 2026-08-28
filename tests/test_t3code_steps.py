@@ -17,6 +17,7 @@ from common.t3code_steps import (
     _configure_t3_https,
     _install_t3_service,
     _rebuild_t3_native_runtime,
+    _temporary_t3_loginctl_shim,
     _wait_for_t3_service,
     _write_passthrough_wrapper,
     install_t3code_web,
@@ -203,6 +204,8 @@ class T3CodeWebTest(unittest.TestCase):
                 command for command in commands if "--package=t3@latest" in command
             )
             self.assertIn("npx --yes --package=t3@latest -c", update_command)
+            self.assertIn(".infra-tools-t3-loginctl-", update_command)
+            self.assertIn('export PATH=', update_command)
             self.assertGreater(
                 update_command.rindex("-u npm_config_allow_scripts"),
                 update_command.index("npx --yes"),
@@ -280,6 +283,34 @@ class T3CodeWebTest(unittest.TestCase):
                     3773,
                 )
             run_as_user.assert_not_called()
+
+    def test_t3_loginctl_shim_supplies_explicit_username(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            real_loginctl = os.path.join(home, "real-loginctl")
+            with open(real_loginctl, "w", encoding="utf-8") as file_obj:
+                file_obj.write("#!/bin/sh\n")
+            os.chmod(real_loginctl, 0o755)
+
+            with patch(
+                "common.t3code_steps.shutil.which",
+                return_value=real_loginctl,
+            ):
+                with _temporary_t3_loginctl_shim(home, "agent") as directory:
+                    shim = os.path.join(directory, "loginctl")
+                    with open(shim, encoding="utf-8") as file_obj:
+                        content = file_obj.read()
+                    self.assertTrue(os.access(shim, os.X_OK))
+
+            self.assertFalse(os.path.exists(directory))
+            self.assertIn(
+                f"exec {real_loginctl} enable-linger agent",
+                content,
+            )
+            self.assertIn(
+                f"{real_loginctl} show-user agent --property=Linger --value",
+                content,
+            )
+            self.assertIn(f'exec {real_loginctl} "$@"', content)
 
     def test_refresh_retains_valid_runtime_when_updater_fails(self) -> None:
         with tempfile.TemporaryDirectory() as home:

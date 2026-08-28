@@ -154,6 +154,14 @@ npm config that allowlists only `node-pty` and `msgpackr-extract` while
 rebuilding them. Other npm settings remain available and the target user's
 normal npm configuration remains unchanged.
 
+T3 v0.0.35 also invokes `loginctl enable-linger` without a username. That can
+fail in the sessionless `runuser` environment used by remote setup even after
+infra-tools has enabled lingering as root. During the upstream update only,
+infra-tools places a short-lived `loginctl` compatibility shim first in PATH;
+it confirms lingering is already enabled, otherwise adds the validated target
+username to that exact no-argument request, and delegates every other
+invocation unchanged. The shim is removed immediately after the updater exits.
+
 T3's published `node-pty` package has no Linux prebuild, so infra-tools also
 selects the `gcc` and `g++` provided by `build-essential` for setup-time and
 service-initiated updates. This prevents a stale inherited `CC` or `CXX` value

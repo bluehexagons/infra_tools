@@ -407,6 +407,57 @@ def _temporary_t3_npm_config(home: str) -> Iterator[str]:
             pass
 
 
+@contextmanager
+def _temporary_t3_loginctl_shim(home: str, username: str) -> Iterator[str]:
+    """Resolve T3's no-argument linger request in a sessionless setup shell."""
+
+    if not validate_username(username):
+        raise ValueError(f"Invalid T3 Code linger username: {username}")
+    if os.path.islink(home) or not os.path.isdir(home):
+        raise RuntimeError(f"Refusing unsafe T3 home directory: {home}")
+    real_loginctl = shutil.which("loginctl")
+    if real_loginctl is None or not os.path.isabs(real_loginctl):
+        raise RuntimeError("T3 Code service setup requires loginctl")
+    validate_filesystem_path(real_loginctl, must_exist=True)
+    directory = tempfile.mkdtemp(
+        prefix=".infra-tools-t3-loginctl-",
+        dir=home,
+    )
+    shim = os.path.join(directory, "loginctl")
+    try:
+        os.chmod(directory, 0o755)
+        descriptor = os.open(
+            shim,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o755,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file_obj:
+            file_obj.write(
+                "#!/bin/sh\n"
+                'if [ "$#" -eq 1 ] && [ "$1" = "enable-linger" ]; then\n'
+                f'  if [ "$({shlex.quote(real_loginctl)} show-user '
+                f'{shlex.quote(username)} --property=Linger --value)" '
+                '= "yes" ]; then\n'
+                "    exit 0\n"
+                "  fi\n"
+                f"  exec {shlex.quote(real_loginctl)} enable-linger "
+                f"{shlex.quote(username)}\n"
+                "fi\n"
+                f'exec {shlex.quote(real_loginctl)} "$@"\n'
+            )
+        os.chmod(shim, 0o755)
+        yield directory
+    finally:
+        try:
+            os.unlink(shim)
+        except FileNotFoundError:
+            pass
+        try:
+            os.rmdir(directory)
+        except FileNotFoundError:
+            pass
+
+
 def _t3_local_endpoint_reachable(host: str, port: int) -> bool:
     if host == "0.0.0.0":
         local_host = "127.0.0.1"
@@ -635,25 +686,27 @@ def _install_t3_service(
 
     try:
         if update_needed:
-            result = _run_as_login_user(
-                username,
-                home,
-                'export NVM_DIR="$HOME/.nvm" && '
-                '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-                'unset npm_config_dangerously_allow_all_scripts '
-                'NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS '
-                'npm_config_allow_scripts NPM_CONFIG_ALLOW_SCRIPTS && '
-                'export CC=gcc && '
-                'export CXX=g++ && '
-                'export npm_config_strict_allow_scripts=false && '
-                'export npm_config_foreground_scripts=true && '
-                f'export XDG_RUNTIME_DIR=/run/user/{uid} && '
-                f'export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus && '
-                'npx --yes --package=t3@latest -c '
-                f'{shlex.quote(_T3_UPDATE_INNER_COMMAND)}',
-                check=False,
-                capture_output=True,
-            )
+            with _temporary_t3_loginctl_shim(home, username) as shim_path:
+                result = _run_as_login_user(
+                    username,
+                    home,
+                    'export NVM_DIR="$HOME/.nvm" && '
+                    '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
+                    f'export PATH={shlex.quote(shim_path)}:"$PATH" && '
+                    'unset npm_config_dangerously_allow_all_scripts '
+                    'NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS '
+                    'npm_config_allow_scripts NPM_CONFIG_ALLOW_SCRIPTS && '
+                    'export CC=gcc && '
+                    'export CXX=g++ && '
+                    'export npm_config_strict_allow_scripts=false && '
+                    'export npm_config_foreground_scripts=true && '
+                    f'export XDG_RUNTIME_DIR=/run/user/{uid} && '
+                    f'export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus && '
+                    'npx --yes --package=t3@latest -c '
+                    f'{shlex.quote(_T3_UPDATE_INNER_COMMAND)}',
+                    check=False,
+                    capture_output=True,
+                )
             if result.returncode != 0:
                 detail = _t3_command_failure_detail(result)
                 binary = _active_t3_binary(home)
