@@ -168,7 +168,15 @@ user:
 gh auth status
 git config --global --get user.name
 git config --global --get user.email
+git config --global --get init.defaultBranch
 ```
 
 Keep repository remotes on HTTPS when GitHub CLI is the credential helper.
 Never copy or print tokens from `~/.config/gh/hosts.yml`.
+
+infra-tools configures new repositories to use `main` unless the user already
+selected another global default. An unborn repository has no branch ref until
+its first commit: rename its symbolic branch with `git branch -m main`; do not
+use `git branch main`, which requires an existing commit and fails in T3's
+create-branch action. Create the initial commit before creating or switching to
+additional branches.

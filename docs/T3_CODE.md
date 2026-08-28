@@ -238,8 +238,18 @@ infra-tools agent doctor --capability t3code --capability host
 gh auth status
 git config --global --get user.name
 git config --global --get user.email
+git config --global --get init.defaultBranch
 infra-tools agent support-bundle
 ```
+
+infra-tools configures `main` as the default for newly initialized repositories
+unless the target user already selected another global default. This matters
+for T3's branch controls: an unborn repository has only a symbolic branch name
+and no branch ref until its first commit. To correct an existing unborn
+repository initialized as `master`, run `git branch -m main`. Using
+`git branch main` invokes branch creation instead and fails because there is no
+commit to reference. Additional branches can be created or selected normally
+after the initial commit.
 
 The doctor validates the upstream service-state protocol and selected immutable
 runtime, required native terminal module, active and boot-enabled user service,

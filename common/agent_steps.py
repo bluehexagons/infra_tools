@@ -200,16 +200,56 @@ def install_github_cli(config: SetupConfig) -> None:
 
 
 def install_git_for_agent_repositories(config: SetupConfig) -> None:
-    """Install only the Git client required by target-side repository setup."""
+    """Install Git and apply safe defaults for target-side repositories."""
     if shutil.which("git"):
         print("  Git already installed")
-        return
-    if is_dry_run():
+    elif is_dry_run():
         print("  [DRY-RUN] Would install Git for agent repositories")
+    else:
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        if not install_package(
+            "Git", "git", ["apt-get", "install", "-y", "-qq", "git"]
+        ):
+            raise RuntimeError("Git installation failed")
+
+    _configure_git_default_branch(config)
+
+
+def _configure_git_default_branch(config: SetupConfig) -> None:
+    """Use ``main`` for new repositories unless the user chose another default."""
+
+    if is_dry_run():
+        print("  [DRY-RUN] Would ensure new Git repositories default to main")
         return
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    if not install_package("Git", "git", ["apt-get", "install", "-y", "-qq", "git"]):
-        raise RuntimeError("Git installation failed")
+
+    user_home = _user_home(config)
+    existing = _run_as_login_user(
+        config.username,
+        user_home,
+        "git config --global --get init.defaultBranch",
+        check=False,
+        capture_output=True,
+    )
+    if existing.returncode == 0 and (existing.stdout or "").strip():
+        print("  Existing Git default branch retained")
+        return
+    if existing.returncode not in {0, 1}:
+        detail = (existing.stderr or existing.stdout or "git config failed").strip()
+        raise RuntimeError(f"Could not inspect target Git default branch: {detail}")
+
+    configured = _run_as_login_user(
+        config.username,
+        user_home,
+        "git config --global init.defaultBranch main",
+        check=False,
+        capture_output=True,
+    )
+    if configured.returncode != 0:
+        detail = (
+            configured.stderr or configured.stdout or "git config failed"
+        ).strip()
+        raise RuntimeError(f"Could not configure target Git default branch: {detail}")
+    print("  Configured new Git repositories to use main")
 
 
 def install_git_lfs_for_agent_repositories(config: SetupConfig) -> None:

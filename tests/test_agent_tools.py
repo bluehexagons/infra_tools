@@ -20,6 +20,7 @@ from common.agent_steps import (
     _chown_path,
     _copy_payload_directory,
     _copy_secret_file,
+    _configure_git_default_branch,
     _configure_git_identity,
     _merge_github_credentials,
     _user_home,
@@ -28,6 +29,7 @@ from common.agent_steps import (
     install_claude,
     install_codex,
     install_agent_cli_launcher,
+    install_git_for_agent_repositories,
     install_git_lfs_for_agent_repositories,
     install_opencode,
 )
@@ -237,6 +239,56 @@ class TestOfficialAgentInstallers(unittest.TestCase):
         self.assertEqual(
             [call.args[2] for call in run_as_user.call_args_list],
             ['git lfs install', 'git lfs version'],
+        )
+
+    def test_git_setup_defaults_new_repositories_to_main(self):
+        missing = type(
+            'Completed',
+            (),
+            {'returncode': 1, 'stdout': '', 'stderr': ''},
+        )()
+        completed = type(
+            'Completed',
+            (),
+            {'returncode': 0, 'stdout': '', 'stderr': ''},
+        )()
+        with (
+            patch('common.agent_steps.shutil.which', return_value='/usr/bin/git'),
+            patch('common.agent_steps._user_home', return_value='/home/agent'),
+            patch(
+                'common.agent_steps._run_as_login_user',
+                side_effect=[missing, completed],
+            ) as run_as_user,
+        ):
+            install_git_for_agent_repositories(self.config)
+
+        self.assertEqual(
+            [call.args[2] for call in run_as_user.call_args_list],
+            [
+                'git config --global --get init.defaultBranch',
+                'git config --global init.defaultBranch main',
+            ],
+        )
+
+    def test_git_setup_preserves_an_explicit_default_branch(self):
+        existing = type(
+            'Completed',
+            (),
+            {'returncode': 0, 'stdout': 'trunk\n', 'stderr': ''},
+        )()
+        with (
+            patch('common.agent_steps._user_home', return_value='/home/agent'),
+            patch(
+                'common.agent_steps._run_as_login_user',
+                return_value=existing,
+            ) as run_as_user,
+        ):
+            _configure_git_default_branch(self.config)
+
+        run_as_user.assert_called_once()
+        self.assertEqual(
+            run_as_user.call_args.args[2],
+            'git config --global --get init.defaultBranch',
         )
 
     def test_git_lfs_initialization_failure_is_fatal(self):
