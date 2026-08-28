@@ -31,16 +31,21 @@ using it as a backup destination:
 
 ```bash
 infra-tools setup server_dev 192.168.0.41 agent \
-  --provision-on pve1 \
+  --provision-on pve1 --memory 2G --cores 2 \
+  --storage root local-lvm 32G \
+  --disk-ssd root --disk-discard root --disk-backup root \
   --storage backup-data bulk-lvm 256G \
   --storage-mount backup-data /srv/backups ext4 empty \
+  --no-disk-ssd backup-data --disk-discard backup-data --disk-backup backup-data \
   --backup /srv/agent-workspace /srv/backups/agent-workspace daily
 ```
 
 The mount declaration is fail-closed: setup will not silently write to the
 root filesystem if the expected device is absent. The destination remains a
 normal path, so the same backup declaration also works with a separately
-managed mount, a local disk, or a future storage provider.
+managed mount, a local disk, or a future storage provider. The disk backup flag
+controls whether Proxmox includes the data disk in a VM-level backup; it does
+not schedule the file-level mirror declared by `--backup`.
 
 ## Consistency and recovery limits
 

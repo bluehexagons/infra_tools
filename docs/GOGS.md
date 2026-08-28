@@ -161,46 +161,86 @@ Gogs deployment is not remotely LFS-ready unless the client has a persistent
 HTTP tunnel and a matching repository LFS URL; routine LFS use should use the
 HTTPS hostname mode or source-restricted private listener.
 
-## Dedicated VM data disk
+## Dedicated mixed-media VM
 
-For a newly provisioned QEMU VM, the Gogs data root can be a required local
-data mount:
+For a modest internal Git and file server, keep the operating system on the
+SSD and give Gogs, cluster storage, and user storage separate HDD-backed data
+disks. Save the placeholder Samba credentials without putting passwords in the
+setup command or shell history:
 
 ```bash
-infra-tools setup server_web 192.168.1.10 deploy \
-  --provision-on pve1 --memory 4G --storage root local-lvm 32G \
-  --storage git-data ts1-storage 3T \
-  --storage git-cache local-lvm 128G \
-  --storage-cache git-data git-cache writethrough \
-  --storage-mount git-data /srv/data ext4 \
-  --samba --samba-source 192.168.1.0/24 \
-  --credential alice "$SAMBA_ALICE_PASSWORD" \
-  --credential bob "$SAMBA_BOB_PASSWORD" \
-  --share write projects /srv/data/shares/projects alice,bob \
-  --share read releases /srv/data/shares/releases alice,bob \
-  --gogs git.example.com:3000 /srv/data/gogs \
-  --ssl --ssl-email admin@example.com
+infra-tools credentials set cluster
+infra-tools credentials set alice
+infra-tools credentials set bob
+
+infra-tools setup server_web 192.168.0.50 gitadmin \
+  --provision-on ts1 --name git-1 --image-storage local \
+  --memory 2G --balloon-min 1536M --cores 2 \
+  --storage root local-lvm 32G \
+  --disk-ssd root --disk-discard root --disk-backup root \
+  --storage git-data ts1-storage 256G \
+  --storage-mount git-data /srv/gogs ext4 empty \
+  --no-disk-ssd git-data --disk-discard git-data --disk-backup git-data \
+  --storage cluster-data ts1-storage 256G \
+  --storage-mount cluster-data /srv/cluster ext4 empty \
+  --no-disk-ssd cluster-data --disk-discard cluster-data --disk-backup cluster-data \
+  --storage user-data ts1-storage 512G \
+  --storage-mount user-data /srv/shares ext4 empty \
+  --no-disk-ssd user-data --disk-discard user-data --disk-backup user-data \
+  --swap-mode auto \
+  --swap-zram fast 512M priority=200 algorithm=zstd \
+  --swap-file root /swapfile 2G priority=50 \
+  --swappiness 20 \
+  --access-source 192.168.0.0/24 \
+  --gogs :3000 /srv/gogs --gogs-source 192.168.0.0/24 \
+  --samba --samba-source 192.168.0.0/24 \
+  --share write cluster /srv/cluster cluster \
+  --share write users /srv/shares alice,bob
 ```
 
-This example puts the VM root and the 128 GiB cache disk on `local-lvm`, while
-the durable 3 TiB origin is allocated from `ts1-storage`. It intentionally
-leaves capacity unallocated on a nominal 4 TB disk. Infra-tools identifies
-both data devices by stable serial, requires them to be blank, constructs an
-LVM writethrough cache, and mounts the resulting ext4 filesystem before Gogs or
-Samba creates data. Gogs and each Samba share then check the mount marker. A
-missing or wrong mount stops setup instead of allowing repositories, LFS
-objects, or shared files to spill onto the SSD boot filesystem.
+Replace the example IP and trusted LAN before running it. The setup user
+`gitadmin` becomes the initial Gogs administrator; the separately managed
+`git` system account remains reserved for Git-over-SSH. The hostless Gogs mode
+serves plaintext HTTP only to the source-restricted private network. Use an
+internal hostname with `--ssl` instead when traffic crosses an untrusted
+network.
 
-Samba's small disposable TDB metadata cache stays at `/var/cache/samba` on the
-root SSD by default. `--samba-metadata-cache PATH` can place it on another
-already mounted SSD filesystem, but it is not a file-data cache and should not
-point inside a share or the Gogs data tree. The LVM cache above accelerates the
-actual repository, LFS, and Samba file workload.
+The three data disks total 1 TiB, leaving most of a nominal shared 4 TB HDD
+unallocated for other guests and later planning. Two vCPUs and a 2 GiB maximum
+with a 1.5 GiB balloon floor are a reasonable starting point for a lightly used
+Gogs/SQLite and Samba server on an 8 GiB host. A small high-priority zram area
+absorbs short pressure spikes; the lower-priority SSD-root swap file provides
+an emergency backstop. Omit `--balloon-min` for a fixed 2 GiB allocation.
 
-This automation is for blank disks allocated with the new VM. It does not
-adopt an existing disk, migrate populated Gogs data, or put live Gogs data on
-CIFS/Samba. Samba is appropriate for a consistent offline archive or export,
-not as the live SQLite, repository, or LFS-object filesystem.
+The per-device SSD, discard, and backup flags are deliberately explicit, so a
+rerun reconciles an existing VM to the intended policy. Discard is useful when
+the Proxmox storage stack can reclaim freed blocks even though the underlying
+medium is rotational. The backup flags include all four disks in Proxmox VM
+backups, but do not create a backup job or make a live SQLite snapshot
+application-consistent. If cluster data is independently replicated and
+rebuildable, `--no-disk-backup cluster-data` can avoid duplicating it in every
+VM backup. Keep `git-data` backed up as one coordinated Gogs recovery set.
+
+No SSD cache is allocated in this low-traffic example: a 128 GiB cache would
+consume one quarter of a shared 512 GB SSD and add recovery complexity without
+a demonstrated need. Samba's small disposable TDB metadata cache stays at
+`/var/cache/samba` on the root SSD. `--samba-metadata-cache PATH` can place it
+on another already mounted SSD filesystem, but it is not a file-data cache and
+must not point inside a share or the Gogs data tree. Gogs already supplies the
+server side of Git LFS; `--git-lfs` installs the client and therefore is not
+needed on this server command.
+
+Infra-tools identifies all data devices by stable serial, requires new devices
+to be blank, and mounts the ext4 filesystems before Gogs or Samba creates data.
+Gogs and each Samba share then check the mount marker. A missing or wrong mount
+stops setup instead of allowing repositories, LFS objects, or shared files to
+spill onto the SSD boot filesystem.
+
+This automation initializes blank disks allocated with a new VM and reconciles
+the declared Proxmox hardware flags on managed disks during reruns. It does not
+adopt an unrelated existing disk, migrate populated Gogs data, or put live
+Gogs data on CIFS/Samba. Samba is appropriate for a consistent offline archive
+or export, not as the live SQLite, repository, or LFS-object filesystem.
 
 ## Troubleshooting
 

@@ -85,12 +85,17 @@ remain operator choices:
 ```bash
 infra-tools setup agent_code_vm 10.0.0.25 agent \
   --provision-on pve1 --name agent-1 \
-  --image-storage local-lvm \
+  --image-storage local \
   --memory 4G --cores 4 \
   --storage root local-lvm 64G \
+  --disk-ssd root --disk-discard root --disk-backup root \
   --lan-access \
   --agent-tool opencode
 ```
+
+The image staging pool must be file-based and enable Proxmox `import` or `iso`
+content; the usual `local-lvm` thin pool is appropriate for the guest root disk
+but not for `--image-storage`.
 
 The profile does not supply implicit web or RDP source ranges. The example
 opts into all private LAN ranges with `--lan-access`; use `--access-source` or

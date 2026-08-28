@@ -40,8 +40,10 @@ infra-tools setup server_web 192.168.1.60 deploy \
   --provision-on pve1 --hostname build \
   --memory 16G --cores 8 \
   --storage root local-lvm 96G \
+  --disk-ssd root --disk-discard root --disk-backup root \
   --storage cicd-data ts1-storage 3500G \
   --storage-mount cicd-data /var/lib/infra_tools/cicd ext4 empty \
+  --no-disk-ssd cicd-data --disk-discard cicd-data --disk-backup cicd-data \
   --build-server --node --python --go
 ```
 
@@ -51,7 +53,9 @@ Proxmox VM disk images and report at least the requested free capacity. The
 mount is fail-closed: setup prepares only the newly attached blank disk and
 will not fall back to putting builds on the root volume. `--build-server`
 already includes the webhook receiver and executor, so adding `--cicd` is
-supported but redundant.
+supported but redundant. The explicit per-device flags let reruns retain SSD
+emulation only for the SSD-backed root while reconciling discard and Proxmox
+backup inclusion on both disks.
 
 For an existing Debian server rather than a newly provisioned VM, omit the
 `--provision-on`, capacity, and `--storage*` flags and mount the bulk disk at
