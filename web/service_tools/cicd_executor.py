@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from web.service_tools.cicd_security import (
+    DEFAULT_BRANCHES,
     MAX_JOB_FILE_BYTES,
     get_workspace_name,
     validate_branch_ref,
@@ -309,7 +310,7 @@ def process_job(job_file: str) -> bool:
             log_event(logger, "Repository not configured", level=40, repo_url=repo_url)
             return False
 
-        configured_branches = repo_config.get('branches', ['main', 'master'])
+        configured_branches = repo_config.get('branches', DEFAULT_BRANCHES)
         if branch not in configured_branches:
             log_event(logger, "Job branch is not configured", level=40, repo_url=repo_url, branch=branch)
             return False

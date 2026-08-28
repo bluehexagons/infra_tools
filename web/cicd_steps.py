@@ -9,6 +9,7 @@ from lib.atomic_io import write_json_atomic, write_text_atomic
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_package_installed
 from lib.systemd_service import cleanup_service
+from web.service_tools.cicd_security import DEFAULT_BRANCHES
 
 
 CICD_USER = "webhook"
@@ -150,7 +151,7 @@ def create_default_webhook_config(config: SetupConfig) -> None:
         "repositories": [
             {
                 "url": "https://github.com/example/repo.git",
-                "branches": ["main", "master"],
+                "branches": list(DEFAULT_BRANCHES),
                 "scripts": {
                     "install": "scripts/install.sh",
                     "build": "scripts/build.sh",

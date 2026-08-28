@@ -24,6 +24,7 @@ import argparse
 from typing import Optional
 
 from lib.atomic_io import write_json_atomic
+from web.service_tools.cicd_security import DEFAULT_BRANCHES
 
 try:
     import argcomplete
@@ -86,7 +87,7 @@ def add_repository(args: argparse.Namespace) -> int:
     # Create new repository configuration
     new_repo = {
         "url": args.url,
-        "branches": args.branches or ["main", "master"],
+        "branches": args.branches or list(DEFAULT_BRANCHES),
         "scripts": {}
     }
     
@@ -257,7 +258,7 @@ def main():
     # add command
     add_parser = subparsers.add_parser('add', help='Add repository configuration')
     add_parser.add_argument('url', help='Repository URL')
-    add_parser.add_argument('--branches', nargs='+', help='Branches to build (default: main, master)')
+    add_parser.add_argument('--branches', nargs='+', help='Branches to build (default: main)')
     add_parser.add_argument('--install', help='Install script path')
     add_parser.add_argument('--build', help='Build script path')
     add_parser.add_argument('--test', help='Test script path')

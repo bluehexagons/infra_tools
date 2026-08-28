@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 MAX_WEBHOOK_PAYLOAD_BYTES = 1024 * 1024
 MAX_JOB_FILE_BYTES = 64 * 1024
+DEFAULT_BRANCHES = ("main",)
 
 _COMMIT_SHA_PATTERN = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 _WORKSPACE_COMPONENT_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")

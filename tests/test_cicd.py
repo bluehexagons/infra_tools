@@ -17,6 +17,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from web.service_tools import cicd_executor
+from web.service_tools import webhook_manager
 from web.service_tools import webhook_receiver
 
 from web.cicd_steps import (
@@ -170,6 +171,31 @@ class TestCICDSteps(unittest.TestCase):
         config_data = mock_write_json.call_args[0][1]
         self.assertIn('repositories', config_data)
         self.assertIsInstance(config_data['repositories'], list)
+        self.assertEqual(config_data['repositories'][0]['branches'], ['main'])
+
+    @patch('web.service_tools.webhook_manager.save_config')
+    @patch(
+        'web.service_tools.webhook_manager.load_config',
+        return_value={'repositories': []},
+    )
+    def test_webhook_manager_defaults_new_repositories_to_main(
+        self,
+        _mock_load,
+        mock_save,
+    ):
+        args = MagicMock(
+            url='https://github.com/example/repo.git',
+            branches=None,
+            install=None,
+            build=None,
+            test=None,
+            deploy=None,
+        )
+
+        self.assertEqual(webhook_manager.add_repository(args), 0)
+
+        saved_config = mock_save.call_args.args[0]
+        self.assertEqual(saved_config['repositories'][0]['branches'], ['main'])
     
     @patch('web.cicd_steps.cleanup_service')
     @patch('web.cicd_steps.os.path.exists')

@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 from lib.logging_utils import get_service_logger, log_event
 from lib.atomic_io import write_json_atomic
 from web.service_tools.cicd_security import (
+    DEFAULT_BRANCHES,
     MAX_WEBHOOK_PAYLOAD_BYTES,
     get_workspace_name,
     validate_branch_ref,
@@ -265,7 +266,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 return
             
             # Check if the branch matches configured branches
-            configured_branches = repo_config.get('branches', ['main', 'master'])
+            configured_branches = repo_config.get('branches', DEFAULT_BRANCHES)
             
             if branch not in configured_branches:
                 log_event(logger, "Branch not configured", branch=branch, repo_url=repo_url)

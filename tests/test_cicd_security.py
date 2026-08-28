@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 from web.service_tools import cicd_executor, webhook_receiver
 from web.service_tools.cicd_security import (
+    DEFAULT_BRANCHES,
     MAX_WEBHOOK_PAYLOAD_BYTES,
     get_workspace_name,
     validate_branch_ref,
@@ -21,6 +22,9 @@ from web.service_tools.cicd_security import (
 
 
 class TestCICDInputValidation(unittest.TestCase):
+    def test_default_branch_is_main_only(self):
+        self.assertEqual(DEFAULT_BRANCHES, ("main",))
+
     def test_commit_sha_requires_full_hex_object_id(self):
         self.assertEqual(validate_commit_sha("A" * 40), "a" * 40)
         for invalid in ("abc123", "g" * 40, "0" * 40, "../etc/passwd"):
