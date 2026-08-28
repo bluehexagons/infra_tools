@@ -199,8 +199,17 @@ class T3CodeWebTest(unittest.TestCase):
                 )
 
             self.assertEqual(binary, _active_t3_binary(home))
-            self.assertTrue(
-                any("npx --yes t3@latest service update" in command for command in commands)
+            update_command = next(
+                command for command in commands if "--package=t3@latest" in command
+            )
+            self.assertIn("npx --yes --package=t3@latest -c", update_command)
+            self.assertGreater(
+                update_command.rindex("-u npm_config_allow_scripts"),
+                update_command.index("npx --yes"),
+            )
+            self.assertGreater(
+                update_command.rindex("t3 service update"),
+                update_command.index("npx --yes"),
             )
             self.assertTrue(
                 any(

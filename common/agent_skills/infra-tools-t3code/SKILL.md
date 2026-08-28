@@ -51,15 +51,21 @@ env -u npm_config_dangerously_allow_all_scripts \
   CXX=g++ \
   npm_config_strict_allow_scripts=false \
   npm_config_foreground_scripts=true \
-  npx t3@latest service update
+  npx --yes --package=t3@latest -c \
+  'env -u npm_config_allow_scripts \
+    -u NPM_CONFIG_ALLOW_SCRIPTS \
+    -u npm_config_dangerously_allow_all_scripts \
+    -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
+    t3 service update'
 infra-tools agent doctor --capability t3code --fix
 ```
 
 Keep those npm settings scoped to this trusted T3 update command. npm 12
 rejects inherited `allow-scripts` and `dangerously-allow-all-scripts` settings
-in T3's nested project-scoped runtime install. The doctor uses a short-lived
-allowlist for T3's required native packages. After an interrupted or older
-update, repair and verify the managed runtime with:
+in T3's nested project-scoped runtime install. The inner `env -u` is required
+because outer `npx` commands re-export policies loaded from `.npmrc`. The
+doctor uses a short-lived allowlist for T3's required native packages. After
+an interrupted or older update, repair and verify the managed runtime with:
 
 ```bash
 infra-tools agent doctor --capability t3code --fix
@@ -77,7 +83,12 @@ env -u npm_config_dangerously_allow_all_scripts \
   CXX=g++ \
   npm_config_strict_allow_scripts=false \
   npm_config_foreground_scripts=true \
-  npx t3@CLIENT_VERSION service update
+  npx --yes --package=t3@CLIENT_VERSION -c \
+  'env -u npm_config_allow_scripts \
+    -u NPM_CONFIG_ALLOW_SCRIPTS \
+    -u npm_config_dangerously_allow_all_scripts \
+    -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
+    t3 service update'
 infra-tools agent doctor --capability t3code --fix
 ```
 

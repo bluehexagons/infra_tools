@@ -84,6 +84,14 @@ _T3_VERSION_RE = re.compile(
 )
 _T3_GH_CONFIG_EXPORT = 'export GH_CONFIG_DIR="$HOME/.config/gh"'
 _T3_NATIVE_PACKAGES = ("node-pty", "msgpackr-extract")
+_T3_UPDATE_INNER_COMMAND = (
+    "/usr/bin/env "
+    "-u npm_config_allow_scripts "
+    "-u NPM_CONFIG_ALLOW_SCRIPTS "
+    "-u npm_config_dangerously_allow_all_scripts "
+    "-u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS "
+    "t3 service update"
+)
 _T3_READINESS_ATTEMPTS = 20
 _T3_READINESS_STABLE_CHECKS = 3
 _T3_COMMAND_OUTPUT_EXCERPT_LIMIT = 1200
@@ -641,7 +649,8 @@ def _install_t3_service(
                 'export npm_config_foreground_scripts=true && '
                 f'export XDG_RUNTIME_DIR=/run/user/{uid} && '
                 f'export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus && '
-                'npx --yes t3@latest service update',
+                'npx --yes --package=t3@latest -c '
+                f'{shlex.quote(_T3_UPDATE_INNER_COMMAND)}',
                 check=False,
                 capture_output=True,
             )

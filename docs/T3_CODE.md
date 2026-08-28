@@ -100,7 +100,12 @@ env -u npm_config_dangerously_allow_all_scripts \
   CXX=g++ \
   npm_config_strict_allow_scripts=false \
   npm_config_foreground_scripts=true \
-  npx t3@latest service update
+  npx --yes --package=t3@latest -c \
+  'env -u npm_config_allow_scripts \
+    -u NPM_CONFIG_ALLOW_SCRIPTS \
+    -u npm_config_dangerously_allow_all_scripts \
+    -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
+    t3 service update'
 infra-tools agent doctor --capability t3code --fix
 
 # From infra-tools:
@@ -120,7 +125,12 @@ env -u npm_config_dangerously_allow_all_scripts \
   CXX=g++ \
   npm_config_strict_allow_scripts=false \
   npm_config_foreground_scripts=true \
-  npx t3@CLIENT_VERSION service update
+  npx --yes --package=t3@CLIENT_VERSION -c \
+  'env -u npm_config_allow_scripts \
+    -u NPM_CONFIG_ALLOW_SCRIPTS \
+    -u npm_config_dangerously_allow_all_scripts \
+    -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
+    t3 service update'
 infra-tools agent doctor --capability t3code --fix
 ```
 
@@ -136,10 +146,13 @@ Keep the npm settings scoped to the trusted T3 updater. npm 12 blocks native
 dependency scripts by default, but inherited `allow-scripts` or
 `dangerously-allow-all-scripts` settings cannot be used by T3's nested
 project-scoped install: npm rejects that combination with `EALLOWSCRIPTS`.
-infra-tools lets the upstream install stage an otherwise valid runtime, then
-uses a short-lived npm config that allowlists only `node-pty` and
-`msgpackr-extract` while rebuilding them. The target user's normal npm
-configuration remains unchanged.
+This also applies when npm reads `allow-scripts` from a user or global
+`.npmrc`: the outer `npx` re-exports the setting before T3 starts. infra-tools
+removes only those policy variables inside the `npx` command boundary, lets
+the upstream install stage an otherwise valid runtime, then uses a short-lived
+npm config that allowlists only `node-pty` and `msgpackr-extract` while
+rebuilding them. Other npm settings remain available and the target user's
+normal npm configuration remains unchanged.
 
 T3's published `node-pty` package has no Linux prebuild, so infra-tools also
 selects the `gcc` and `g++` provided by `build-essential` for setup-time and
