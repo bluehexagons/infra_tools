@@ -69,6 +69,19 @@ class T3CodeWebTest(unittest.TestCase):
             file_obj.write("# upstream managed\n")
         return binary
 
+    @staticmethod
+    def _write_node_tools(home: str) -> str:
+        """Create the minimal target-user Node tool directory used by tests."""
+
+        node_bin = os.path.join(home, "node-bin")
+        os.makedirs(node_bin, exist_ok=True)
+        for executable in ("node", "npm"):
+            path = os.path.join(node_bin, executable)
+            with open(path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("#!/bin/sh\nexit 0\n")
+            os.chmod(path, 0o755)
+        return node_bin
+
     def test_source_promotes_default_bind_to_all_interfaces(self) -> None:
         config = self._config()
         self.assertEqual(config.web_interface_host, "0.0.0.0")
@@ -194,6 +207,7 @@ class T3CodeWebTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             workspace = os.path.join(home, "repos")
             os.makedirs(workspace)
+            node_bin = self._write_node_tools(home)
             completed = SimpleNamespace(returncode=0, stdout="", stderr="")
             commands: list[str] = []
 
@@ -211,7 +225,7 @@ class T3CodeWebTest(unittest.TestCase):
                 ),
                 patch(
                     "common.t3code_steps._node_bin_directory",
-                    return_value="/usr/bin",
+                    return_value=node_bin,
                 ),
                 patch("common.t3code_steps._run_as_login_user", side_effect=run_as_user),
                 patch("common.t3code_steps._t3_native_runtime_healthy", return_value=True),
@@ -385,16 +399,33 @@ class T3CodeWebTest(unittest.TestCase):
                 )[1]
             )
 
+    def test_npm_shim_requires_target_user_npm(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            node_bin = os.path.join(home, "node-bin")
+            os.makedirs(node_bin)
+
+            with self.assertRaisesRegex(RuntimeError, "updates require npm"):
+                _install_t3_npm_shim(
+                    home,
+                    node_bin,
+                    os.getuid(),
+                    os.getgid(),
+                )
+
     def test_healthy_service_is_not_silently_updated(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             workspace = os.path.join(home, "repos")
             os.makedirs(workspace)
+            node_bin = self._write_node_tools(home)
             self._write_upstream_runtime(home)
             completed = SimpleNamespace(returncode=0, stdout="", stderr="")
             with (
                 patch("common.t3code_steps.install_package", return_value=True),
                 patch("common.t3code_steps._ensure_user_manager"),
-                patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
+                patch(
+                    "common.t3code_steps._node_bin_directory",
+                    return_value=node_bin,
+                ),
                 patch("common.t3code_steps._run_as_login_user") as run_as_user,
                 patch("common.t3code_steps._t3_native_runtime_healthy", return_value=True),
                 patch("common.t3code_steps._wait_for_t3_service"),
@@ -448,6 +479,7 @@ class T3CodeWebTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             workspace = os.path.join(home, "repos")
             os.makedirs(workspace)
+            node_bin = self._write_node_tools(home)
             binary = self._write_upstream_runtime(home)
             update_failed = SimpleNamespace(
                 returncode=1,
@@ -464,7 +496,7 @@ class T3CodeWebTest(unittest.TestCase):
                 ),
                 patch(
                     "common.t3code_steps._node_bin_directory",
-                    return_value="/usr/bin",
+                    return_value=node_bin,
                 ),
                 patch(
                     "common.t3code_steps._run_as_login_user",
@@ -520,6 +552,7 @@ class T3CodeWebTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             workspace = os.path.join(home, "repos")
             os.makedirs(workspace)
+            node_bin = self._write_node_tools(home)
             update_failed = SimpleNamespace(
                 returncode=17,
                 stdout="npm stdout context",
@@ -538,7 +571,7 @@ class T3CodeWebTest(unittest.TestCase):
                 ),
                 patch(
                     "common.t3code_steps._node_bin_directory",
-                    return_value="/usr/bin",
+                    return_value=node_bin,
                 ),
                 patch(
                     "common.t3code_steps._run_as_login_user",
@@ -572,6 +605,7 @@ class T3CodeWebTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             workspace = os.path.join(home, "repos")
             os.makedirs(workspace)
+            node_bin = self._write_node_tools(home)
             self._write_upstream_runtime(home)
             legacy_service = os.path.join(home, "infra-tools-t3code.service")
             with open(legacy_service, "w", encoding="utf-8") as file_obj:
@@ -580,7 +614,10 @@ class T3CodeWebTest(unittest.TestCase):
             with (
                 patch("common.t3code_steps.install_package", return_value=True),
                 patch("common.t3code_steps._ensure_user_manager"),
-                patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
+                patch(
+                    "common.t3code_steps._node_bin_directory",
+                    return_value=node_bin,
+                ),
                 patch("common.t3code_steps._run_as_login_user") as run_as_user,
                 patch("common.t3code_steps._t3_native_runtime_healthy", return_value=True),
                 patch("common.t3code_steps._wait_for_t3_service"),
@@ -622,6 +659,7 @@ class T3CodeWebTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             workspace = os.path.join(home, "repos")
             os.makedirs(workspace)
+            node_bin = self._write_node_tools(home)
             self._write_upstream_runtime(home)
             legacy_service = os.path.join(home, "infra-tools-t3code.service")
             with open(legacy_service, "w", encoding="utf-8") as file_obj:
@@ -630,7 +668,10 @@ class T3CodeWebTest(unittest.TestCase):
             with (
                 patch("common.t3code_steps.install_package", return_value=True),
                 patch("common.t3code_steps._ensure_user_manager"),
-                patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
+                patch(
+                    "common.t3code_steps._node_bin_directory",
+                    return_value=node_bin,
+                ),
                 patch("common.t3code_steps._t3_native_runtime_healthy", return_value=True),
                 patch(
                     "common.t3code_steps._wait_for_t3_service",
@@ -666,12 +707,16 @@ class T3CodeWebTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             workspace = os.path.join(home, "repos")
             os.makedirs(workspace)
+            node_bin = self._write_node_tools(home)
             binary = self._write_upstream_runtime(home)
             completed = SimpleNamespace(returncode=0, stdout="", stderr="")
             with (
                 patch("common.t3code_steps.install_package", return_value=True),
                 patch("common.t3code_steps._ensure_user_manager"),
-                patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
+                patch(
+                    "common.t3code_steps._node_bin_directory",
+                    return_value=node_bin,
+                ),
                 patch(
                     "common.t3code_steps._t3_native_runtime_healthy",
                     return_value=False,
@@ -701,7 +746,7 @@ class T3CodeWebTest(unittest.TestCase):
                     binary,
                 )
 
-            rebuild.assert_called_once_with("agent", home, "/usr/bin", binary)
+            rebuild.assert_called_once_with("agent", home, node_bin, binary)
             actions = [call.args[2] for call in systemctl.call_args_list]
             self.assertIn("stop", actions)
             self.assertIn("restart", actions)
@@ -710,6 +755,7 @@ class T3CodeWebTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             workspace = os.path.join(home, "repos")
             os.makedirs(workspace)
+            node_bin = self._write_node_tools(home)
             active_binary = self._write_upstream_runtime(home, "0.0.35")
             candidate_binary = os.path.join(
                 home,
@@ -753,7 +799,10 @@ class T3CodeWebTest(unittest.TestCase):
             with (
                 patch("common.t3code_steps.install_package", return_value=True),
                 patch("common.t3code_steps._ensure_user_manager"),
-                patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
+                patch(
+                    "common.t3code_steps._node_bin_directory",
+                    return_value=node_bin,
+                ),
                 patch("common.t3code_steps._run_as_login_user") as run_as_user,
                 patch(
                     "common.t3code_steps._t3_native_runtime_healthy",
@@ -786,7 +835,7 @@ class T3CodeWebTest(unittest.TestCase):
             rebuild.assert_called_once_with(
                 "agent",
                 home,
-                "/usr/bin",
+                node_bin,
                 candidate_binary,
             )
             self.assertTrue(
