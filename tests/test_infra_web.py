@@ -49,6 +49,27 @@ class TestInfraWebForwarding(unittest.TestCase):
         self.assertIn("Cross-Origin-Opener-Policy \"same-origin\"", content)
         self.assertIn("Cross-Origin-Embedder-Policy \"require-corp\"", content)
 
+    def test_renders_validated_per_route_request_body_limit(self) -> None:
+        route = {
+            "listen": 8444,
+            "max_body_size": "50m",
+            "name": "t3code",
+            "owner": "agent",
+            "profile": "general",
+            "target_host": "127.0.0.1",
+            "target_port": 3773,
+        }
+
+        content = infra_web.render_forward_nginx([route], _policy())
+
+        self.assertIn("client_max_body_size 50m;", content)
+
+    def test_rejects_unsafe_or_unbounded_request_body_limit(self) -> None:
+        for value in ("0", "2g", "50m; include /tmp/unsafe"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    infra_web._validate_body_size(value, "--max-body-size")
+
     def test_forward_add_uses_policy_owner_and_atomic_apply(self) -> None:
         with (
             patch.object(infra_web, "_load_policy", return_value=_policy()),
@@ -66,6 +87,8 @@ class TestInfraWebForwarding(unittest.TestCase):
                     "127.0.0.1:3000",
                     "--profile",
                     "godot",
+                    "--max-body-size",
+                    "50M",
                     "--json",
                 ]
             )
@@ -77,6 +100,7 @@ class TestInfraWebForwarding(unittest.TestCase):
             [
                 {
                     "listen": 8444,
+                    "max_body_size": "50m",
                     "name": "preview",
                     "owner": "agent",
                     "profile": "godot",

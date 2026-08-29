@@ -288,6 +288,49 @@ def _active_t3_binary(home: str) -> str | None:
     return binary if os.path.isfile(binary) and os.access(binary, os.X_OK) else None
 
 
+def _retained_failed_t3_binary(home: str) -> tuple[str, str] | None:
+    """Return a failed immutable update candidate retained by T3's launcher."""
+
+    state_file = os.path.join(_t3_runtime_path(home), "service-state.json")
+    if os.path.islink(state_file) or not os.path.isfile(state_file):
+        return None
+    try:
+        with open(state_file, encoding="utf-8") as file_obj:
+            state = json.load(file_obj)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(state, dict) or state.get("protocol") != 2:
+        return None
+    update = state.get("update")
+    if not isinstance(update, dict) or update.get("status") not in {
+        "failed",
+        "rolled-back",
+    }:
+        return None
+    active_version = state.get("activeVersion")
+    target_version = update.get("targetVersion")
+    if (
+        not isinstance(active_version, str)
+        or _T3_VERSION_RE.fullmatch(active_version) is None
+        or not isinstance(target_version, str)
+        or _T3_VERSION_RE.fullmatch(target_version) is None
+        or target_version == active_version
+    ):
+        return None
+    binary = os.path.join(
+        _t3_runtime_path(home),
+        "versions",
+        target_version,
+        "node_modules",
+        "t3",
+        "dist",
+        "bin.mjs",
+    )
+    if not os.path.isfile(binary) or not os.access(binary, os.X_OK):
+        return None
+    return target_version, binary
+
+
 def _t3_version_root(binary: str) -> str:
     """Return the immutable version root containing an active T3 executable."""
 
@@ -587,12 +630,100 @@ def _node_bin_directory(username: str, home: str) -> str:
     return path
 
 
+def _install_t3_npm_shim(
+    home: str,
+    node_bin: str,
+    uid: int,
+    gid: int,
+) -> tuple[str, bool]:
+    """Allow only T3's native scripts during immutable runtime staging."""
+
+    if os.path.islink(home) or not os.path.isdir(home):
+        raise RuntimeError(f"Refusing unsafe T3 home directory: {home}")
+    real_npm = os.path.join(node_bin, "npm")
+    if not os.path.isfile(real_npm) or not os.access(real_npm, os.X_OK):
+        raise RuntimeError("T3 Code service updates require npm")
+    validate_filesystem_path(real_npm, must_exist=True)
+    current = home
+    for component in (".local", "share", "infra-tools", "t3-npm", "bin"):
+        current = os.path.join(current, component)
+        if os.path.lexists(current):
+            if os.path.islink(current) or not os.path.isdir(current):
+                raise RuntimeError(f"Refusing unsafe T3 npm shim directory: {current}")
+        else:
+            os.mkdir(current, mode=0o755)
+        os.chown(current, uid, gid)
+
+    runtime_versions = os.path.join(_t3_runtime_path(home), "versions")
+    wrapper = os.path.join(current, "npm")
+    content = f"""#!/bin/bash
+set -eu
+real_npm={shlex.quote(real_npm)}
+runtime_versions={shlex.quote(runtime_versions)}
+prefix=
+package=
+expect_prefix=false
+for argument in "$@"; do
+  if "$expect_prefix"; then
+    prefix=$argument
+    expect_prefix=false
+    continue
+  fi
+  case "$argument" in
+    --prefix) expect_prefix=true ;;
+    --prefix=*) prefix=${{argument#--prefix=}} ;;
+    t3@*) package=$argument ;;
+  esac
+done
+staging=
+case "$prefix" in
+  "$runtime_versions"/.staging-*) staging=${{prefix##*/}} ;;
+esac
+if [ "${{1-}}" = install ] \
+  && [[ "$staging" =~ ^\\.staging-[0-9A-Za-z_-]+$ ]] \
+  && [[ "$package" =~ ^t3@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$ ]]; then
+  if [ -L "$prefix" ] || [ ! -d "$prefix" ]; then
+    echo "Refusing unsafe T3 npm staging directory: $prefix" >&2
+    exit 1
+  fi
+  npm_config="$prefix/.npmrc"
+  if [ -e "$npm_config" ] || [ -L "$npm_config" ]; then
+    echo "Refusing existing T3 npm staging policy: $npm_config" >&2
+    exit 1
+  fi
+  umask 077
+  set -o noclobber
+  printf '%s\\n' \
+    'allow-scripts={','.join(_T3_NATIVE_PACKAGES)}' \
+    'dangerously-allow-all-scripts=false' \
+    'ignore-scripts=false' > "$npm_config"
+  set +o noclobber
+  status=0
+  /usr/bin/env \
+    -u npm_config_allow_scripts \
+    -u NPM_CONFIG_ALLOW_SCRIPTS \
+    -u npm_config_dangerously_allow_all_scripts \
+    -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
+    -u npm_config_ignore_scripts \
+    -u NPM_CONFIG_IGNORE_SCRIPTS \
+    "$real_npm" "$@" || status=$?
+  rm -- "$npm_config"
+  exit "$status"
+fi
+exec "$real_npm" "$@"
+"""
+    changed = _write_executable_if_changed(wrapper, content)
+    os.chown(wrapper, uid, gid)
+    return current, changed
+
+
 def _configure_t3_service_drop_in(
     home: str,
     workspace: str,
     host: str,
     port: int,
     node_bin: str,
+    npm_shim_bin: str,
     uid: int,
     gid: int,
 ) -> bool:
@@ -611,6 +742,7 @@ def _configure_t3_service_drop_in(
         os.chown(current, uid, gid)
     environment_path = ":".join(
         (
+            npm_shim_bin,
             node_bin,
             os.path.join(home, ".opencode", "bin"),
             os.path.join(home, ".local", "bin"),
@@ -663,12 +795,19 @@ def _install_t3_service(
 
     _ensure_user_manager(username, uid)
     node_bin = _node_bin_directory(username, home)
+    npm_shim_bin, npm_shim_changed = _install_t3_npm_shim(
+        home,
+        node_bin,
+        uid,
+        gid,
+    )
     drop_in_changed = _configure_t3_service_drop_in(
         home,
         workspace,
         host,
         port,
         node_bin,
+        npm_shim_bin,
         uid,
         gid,
     )
@@ -695,6 +834,25 @@ def _install_t3_service(
         )
 
     try:
+        retained_candidate = _retained_failed_t3_binary(home)
+        if retained_candidate is not None:
+            candidate_version, candidate_binary = retained_candidate
+            if not _t3_native_runtime_healthy(
+                username,
+                home,
+                node_bin,
+                candidate_binary,
+            ):
+                _rebuild_t3_native_runtime(
+                    username,
+                    home,
+                    node_bin,
+                    candidate_binary,
+                )
+                print(
+                    "  ✓ Repaired retained T3 Code "
+                    f"v{candidate_version} update candidate"
+                )
         if update_needed:
             with _temporary_t3_loginctl_shim(home, username) as shim_path:
                 result = _run_as_login_user(
@@ -702,7 +860,8 @@ def _install_t3_service(
                     home,
                     'export NVM_DIR="$HOME/.nvm" && '
                     '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-                    f'export PATH={shlex.quote(shim_path)}:"$PATH" && '
+                    f'export PATH={shlex.quote(shim_path)}:'
+                    f'{shlex.quote(npm_shim_bin)}:"$PATH" && '
                     'unset npm_config_dangerously_allow_all_scripts '
                     'NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS '
                     'npm_config_allow_scripts NPM_CONFIG_ALLOW_SCRIPTS && '
@@ -756,7 +915,10 @@ def _install_t3_service(
             raise RuntimeError("Could not enable the T3 Code user service")
         action = (
             "restart"
-            if drop_in_changed or update_needed or native_repaired
+            if drop_in_changed
+            or npm_shim_changed
+            or update_needed
+            or native_repaired
             else "start"
         )
         service_result = _user_systemctl(username, uid, action, T3_SERVICE_NAME)
@@ -1410,10 +1572,15 @@ def _configure_t3_https(
     )
     utility = "/usr/local/bin/infra-web"
     urls: list[tuple[str, int]] = []
-    routes = [("t3code", port)]
+    routes = [("t3code", port, "50m")]
     if pairing_port is not None:
-        routes.append(("t3code-pairing", pairing_port))
-    for name, target_port in routes:
+        routes.append(("t3code-pairing", pairing_port, None))
+    for name, target_port, max_body_size in routes:
+        body_size_argument = (
+            " --max-body-size " + shlex.quote(max_body_size)
+            if max_body_size is not None
+            else ""
+        )
         result = run(
             "SUDO_USER="
             + shlex.quote(config.username)
@@ -1423,6 +1590,7 @@ def _configure_t3_https(
             + shlex.quote(name)
             + " --listen auto --to 127.0.0.1:"
             + str(target_port)
+            + body_size_argument
             + " --json",
             check=False,
             capture_output=True,

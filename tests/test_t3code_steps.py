@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from common.t3code_steps import (
     _active_t3_binary,
     _configure_firewall,
     _configure_t3_https,
+    _install_t3_npm_shim,
     _install_t3_service,
     _rebuild_t3_native_runtime,
     _temporary_t3_loginctl_shim,
@@ -75,6 +77,34 @@ class T3CodeWebTest(unittest.TestCase):
     def test_https_gateway_is_optional_when_managed_utility_is_unavailable(self) -> None:
         with patch("common.t3code_steps.os.path.isfile", return_value=False):
             self.assertEqual(_configure_t3_https(self._config(), 3773, None), [])
+
+    def test_https_gateway_preserves_t3_file_upload_limit(self) -> None:
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "listen": 8444,
+                    "url": "https://target:8444/",
+                }
+            ),
+            stderr="",
+        )
+        with (
+            patch("common.t3code_steps.os.geteuid", return_value=0),
+            patch("common.t3code_steps.os.path.isfile", return_value=True),
+            patch("common.godot_web_steps.configure_internal_web_host"),
+            patch(
+                "common.godot_web_steps.identities_for_config",
+                return_value=["target"],
+            ),
+            patch("common.t3code_steps.run", return_value=completed) as run_command,
+        ):
+            urls = _configure_t3_https(self._config(), 3773, None)
+
+        self.assertEqual(urls, [("https://target:8444/", 8444)])
+        command = run_command.call_args.args[0]
+        self.assertIn("forward add t3code", command)
+        self.assertIn("--max-body-size 50m", command)
 
     def test_non_loopback_bind_requires_private_source(self) -> None:
         config = self._config(web_interface_host="0.0.0.0", web_interface_sources=None)
@@ -209,6 +239,10 @@ class T3CodeWebTest(unittest.TestCase):
             )
             self.assertIn("npx --yes --package=t3@latest -c", update_command)
             self.assertIn(".infra-tools-t3-loginctl-", update_command)
+            self.assertIn(
+                f"{home}/.local/share/infra-tools/t3-npm/bin",
+                update_command,
+            )
             self.assertIn('export PATH=', update_command)
             self.assertGreater(
                 update_command.rindex("-u npm_config_allow_scripts"),
@@ -253,8 +287,102 @@ class T3CodeWebTest(unittest.TestCase):
             self.assertIn("Environment=CXX=g++", content)
             self.assertIn("Environment=npm_config_strict_allow_scripts=false", content)
             self.assertIn(
+                f"Environment=PATH={home}/.local/share/infra-tools/t3-npm/bin:",
+                content,
+            )
+            self.assertIn(
                 "UnsetEnvironment=npm_config_allow_scripts NPM_CONFIG_ALLOW_SCRIPTS",
                 content,
+            )
+
+    def test_npm_shim_only_allows_native_scripts_for_t3_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            node_bin = os.path.join(home, "node-bin")
+            os.makedirs(node_bin)
+            real_npm = os.path.join(node_bin, "npm")
+            with open(real_npm, "w", encoding="utf-8") as file_obj:
+                file_obj.write(
+                    "#!/bin/sh\n"
+                    "prefix=\n"
+                    "expect_prefix=false\n"
+                    "for argument in \"$@\"; do\n"
+                    "  if $expect_prefix; then prefix=$argument; "
+                    "expect_prefix=false; continue; fi\n"
+                    "  case \"$argument\" in\n"
+                    "    --prefix) expect_prefix=true ;;\n"
+                    "    --prefix=*) prefix=${argument#--prefix=} ;;\n"
+                    "  esac\n"
+                    "done\n"
+                    "if [ -n \"$prefix\" ] && [ -f \"$prefix/.npmrc\" ]; then\n"
+                    "  cp -- \"$prefix/.npmrc\" \"$NPM_CONFIG_LOG\"\n"
+                    "fi\n"
+                    "printf '%s\\n' \"$@\" > \"$NPM_ARGUMENT_LOG\"\n"
+                )
+            os.chmod(real_npm, 0o755)
+            shim_bin, changed = _install_t3_npm_shim(
+                home,
+                node_bin,
+                os.getuid(),
+                os.getgid(),
+            )
+            wrapper = os.path.join(shim_bin, "npm")
+            argument_log = os.path.join(home, "npm-arguments")
+            config_log = os.path.join(home, "npm-config")
+            environment = dict(
+                os.environ,
+                NPM_ARGUMENT_LOG=argument_log,
+                NPM_CONFIG_LOG=config_log,
+            )
+
+            subprocess.run(
+                [wrapper, "install", "example@1.0.0", "--prefix", home],
+                check=True,
+                env=environment,
+            )
+            with open(argument_log, encoding="utf-8") as file_obj:
+                ordinary_arguments = file_obj.read().splitlines()
+
+            staging = os.path.join(
+                home,
+                ".t3",
+                "runtime",
+                "versions",
+                ".staging-update_123",
+            )
+            os.makedirs(staging)
+            subprocess.run(
+                [wrapper, "install", "t3@0.0.36", f"--prefix={staging}"],
+                check=True,
+                env=environment,
+            )
+            with open(argument_log, encoding="utf-8") as file_obj:
+                staging_arguments = file_obj.read().splitlines()
+            with open(config_log, encoding="utf-8") as file_obj:
+                npm_config = file_obj.read()
+
+            self.assertTrue(changed)
+            self.assertEqual(
+                ordinary_arguments,
+                ["install", "example@1.0.0", "--prefix", home],
+            )
+            self.assertEqual(
+                staging_arguments,
+                ["install", "t3@0.0.36", f"--prefix={staging}"],
+            )
+            self.assertEqual(
+                npm_config,
+                "allow-scripts=node-pty,msgpackr-extract\n"
+                "dangerously-allow-all-scripts=false\n"
+                "ignore-scripts=false\n",
+            )
+            self.assertFalse(os.path.exists(os.path.join(staging, ".npmrc")))
+            self.assertFalse(
+                _install_t3_npm_shim(
+                    home,
+                    node_bin,
+                    os.getuid(),
+                    os.getgid(),
+                )[1]
             )
 
     def test_healthy_service_is_not_silently_updated(self) -> None:
@@ -577,6 +705,97 @@ class T3CodeWebTest(unittest.TestCase):
             actions = [call.args[2] for call in systemctl.call_args_list]
             self.assertIn("stop", actions)
             self.assertIn("restart", actions)
+
+    def test_setup_repairs_retained_failed_update_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            workspace = os.path.join(home, "repos")
+            os.makedirs(workspace)
+            active_binary = self._write_upstream_runtime(home, "0.0.35")
+            candidate_binary = os.path.join(
+                home,
+                ".t3",
+                "runtime",
+                "versions",
+                "0.0.36",
+                "node_modules",
+                "t3",
+                "dist",
+                "bin.mjs",
+            )
+            os.makedirs(os.path.dirname(candidate_binary), exist_ok=True)
+            with open(candidate_binary, "w", encoding="utf-8") as file_obj:
+                file_obj.write("#!/usr/bin/env node\n")
+            os.chmod(candidate_binary, 0o755)
+            state_file = os.path.join(
+                home,
+                ".t3",
+                "runtime",
+                "service-state.json",
+            )
+            with open(state_file, "w", encoding="utf-8") as file_obj:
+                json.dump(
+                    {
+                        "protocol": 2,
+                        "activeVersion": "0.0.35",
+                        "update": {
+                            "status": "rolled-back",
+                            "targetVersion": "0.0.36",
+                            "reason": "candidate-exited:1",
+                        },
+                    },
+                    file_obj,
+                )
+            completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            def native_healthy(_username, _home, _node_bin, binary):
+                return binary == active_binary
+
+            with (
+                patch("common.t3code_steps.install_package", return_value=True),
+                patch("common.t3code_steps._ensure_user_manager"),
+                patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
+                patch("common.t3code_steps._run_as_login_user") as run_as_user,
+                patch(
+                    "common.t3code_steps._t3_native_runtime_healthy",
+                    side_effect=native_healthy,
+                ),
+                patch("common.t3code_steps._rebuild_t3_native_runtime") as rebuild,
+                patch("common.t3code_steps._wait_for_t3_service"),
+                patch("common.t3code_steps._user_systemctl", return_value=completed),
+                patch("common.t3code_steps.os.chown"),
+                patch("builtins.print") as print_message,
+                patch(
+                    "common.t3code_steps.LEGACY_T3_SERVICE_FILE",
+                    os.path.join(home, "legacy.service"),
+                ),
+            ):
+                self.assertEqual(
+                    _install_t3_service(
+                        home,
+                        "agent",
+                        os.getuid(),
+                        os.getgid(),
+                        workspace,
+                        "127.0.0.1",
+                        3773,
+                    ),
+                    active_binary,
+                )
+
+            run_as_user.assert_not_called()
+            rebuild.assert_called_once_with(
+                "agent",
+                home,
+                "/usr/bin",
+                candidate_binary,
+            )
+            self.assertTrue(
+                any(
+                    "Repaired retained T3 Code v0.0.36 update candidate"
+                    in call.args[0]
+                    for call in print_message.call_args_list
+                )
+            )
 
     def test_native_rebuild_uses_scoped_npm_script_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as home:

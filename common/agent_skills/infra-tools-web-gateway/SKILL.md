@@ -74,9 +74,11 @@ sudo infra-web forward add NAME --listen auto --to 127.0.0.1:PORT
 ```
 
 Add `--profile godot` for a Godot preview that needs secure-context and
-cross-origin isolation headers. The command chooses a permitted HTTPS port,
-applies the VM's existing access-source policy, validates Nginx, reconciles
-UFW, and prints the URL.
+cross-origin isolation headers. If the upstream has a documented request-body
+limit above Nginx's 1 MiB default, add a bounded limit such as
+`--max-body-size 50m`. The command chooses a permitted HTTPS port, applies the
+VM's existing access-source policy, validates Nginx, reconciles UFW, and prints
+the URL.
 
 Treat the two ports as distinct: `--to` is the private loopback HTTP upstream;
 `--listen` is the externally reachable Nginx HTTPS port. Only the Nginx

@@ -88,15 +88,19 @@ primarily records the launcher lifecycle.
 
 T3 Code does not silently update after setup. A normal infra-tools rerun keeps
 the active healthy version. The T3 client can offer an explicit **Update
-server** action for this background service. The following host-side commands
-are also supported:
+server** action for this background service; prefer that action after active
+agent work and terminal commands finish. Keep the client open while the
+launcher downloads, installs, restarts, and reconnects. The following
+host-side commands are also supported:
 
 ```bash
 # As the target user, using T3 Code's documented updater:
+T3_NPM_SHIM="$HOME/.local/share/infra-tools/t3-npm/bin"
 env -u npm_config_dangerously_allow_all_scripts \
   -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
   -u npm_config_allow_scripts \
   -u NPM_CONFIG_ALLOW_SCRIPTS \
+  PATH="$T3_NPM_SHIM:$PATH" \
   CC=gcc \
   CXX=g++ \
   npm_config_strict_allow_scripts=false \
@@ -114,14 +118,18 @@ infra-tools setup server_dev vm.example agent --refresh-packages ...
 ```
 
 The direct `npx` command is expected to work after infra-tools setup because
-both commands operate on the same upstream-managed user service. If the
-desktop client and server differ, update the service to the client version:
+both commands operate on the same upstream-managed user service. `latest` is
+appropriate only when the connected client is also the latest release. If the
+desktop or mobile client and server differ, update the service to the exact
+client version shown in the warning:
 
 ```bash
+T3_NPM_SHIM="$HOME/.local/share/infra-tools/t3-npm/bin"
 env -u npm_config_dangerously_allow_all_scripts \
   -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
   -u npm_config_allow_scripts \
   -u NPM_CONFIG_ALLOW_SCRIPTS \
+  PATH="$T3_NPM_SHIM:$PATH" \
   CC=gcc \
   CXX=g++ \
   npm_config_strict_allow_scripts=false \
@@ -149,11 +157,20 @@ dependency scripts by default, but inherited `allow-scripts` or
 project-scoped install: npm rejects that combination with `EALLOWSCRIPTS`.
 This also applies when npm reads `allow-scripts` from a user or global
 `.npmrc`: the outer `npx` re-exports the setting before T3 starts. infra-tools
-removes only those policy variables inside the `npx` command boundary, lets
-the upstream install stage an otherwise valid runtime, then uses a short-lived
-npm config that allowlists only `node-pty` and `msgpackr-extract` while
-rebuilding them. Other npm settings remain available and the target user's
-normal npm configuration remains unchanged.
+removes only those policy variables inside the `npx` command boundary and
+places a managed npm passthrough first in the T3 service PATH. The passthrough
+recognizes only an exact versioned `t3` install targeting T3's immutable
+`.staging-*` directory. For that call it creates a short-lived, project-scoped
+npm policy allowing only `node-pty` and `msgpackr-extract`, then removes the
+policy before T3 publishes the runtime. All other npm commands pass through
+unchanged, and the target user's normal npm configuration remains unchanged.
+
+If npm 12 already produced an incomplete candidate and T3 rolled back, rerun
+the same infra-tools setup on that VM. Setup identifies the retained `failed`
+or `rolled-back` candidate from protocol-2 service state and rebuilds its two
+trusted native dependencies without stopping the active working version. Then
+retry **Update server** in the client. A refresh setup performs the same repair
+before invoking the upstream updater.
 
 T3 v0.0.35 also invokes `loginctl enable-linger` without a username. That can
 fail in the sessionless `runuser` environment used by remote setup even after
@@ -169,17 +186,20 @@ service-initiated updates. This prevents a stale inherited `CC` or `CXX` value
 from selecting a missing versioned compiler. infra-tools validates the native
 module, rebuilds an incomplete active runtime, and waits for several
 consecutive healthy service and HTTP checks before setup succeeds. The same
-repair is available after setup:
+active-runtime repair is available after setup:
 
 ```bash
 infra-tools agent doctor --capability t3code --fix
 ```
 
-As of 2026-08-27, infra-tools was checked against T3 Code v0.0.35. That release
-uses service-state protocol 2 and requires Node.js `^22.16`, `^23.11`, or
-`>=24.10`, the same requirement as the previous release. See the upstream [background-service documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/background-service.md),
+As of 2026-08-29, infra-tools was checked against T3 Code v0.0.36. That release
+uses service-state protocol 2, keeps the same `node-pty` and
+`msgpackr-extract` native dependencies, and requires Node.js `^22.16`,
+`^23.11`, or `>=24.10`. It also raises supported file uploads to 50 MiB;
+infra-tools applies the matching request-body limit to T3's managed HTTPS route
+while leaving the pairing route at its deliberately small limit. See the upstream [background-service documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/background-service.md),
 [update documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/updating.md),
-and [v0.0.35 release](https://github.com/pingdotgg/t3code/releases/tag/v0.0.35).
+and [v0.0.36 release](https://github.com/pingdotgg/t3code/releases/tag/v0.0.36).
 
 Older infra-tools installations used a root-owned
 `infra-tools-t3code.service` and a separate npm runtime. A subsequent setup

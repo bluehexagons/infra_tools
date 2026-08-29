@@ -125,6 +125,18 @@ The forward list reports whether each upstream TCP port is ready. Use
 `sudo infra-web forward prune --yes` only for unmanaged dead forwards; managed
 preview services should be cleaned up through `preview prune`.
 
+Nginx retains its 1 MiB request-body default unless the upstream service has a
+larger documented limit. Set a bounded per-route limit when needed:
+
+```bash
+sudo infra-web forward add upload-api \
+  --to 127.0.0.1:3000 \
+  --max-body-size 50m
+```
+
+The limit accepts a positive integer with an optional `k`, `m`, or `g` suffix
+and is capped at 1 GiB. T3 Code's managed route sets 50 MiB automatically.
+
 ## Certificate trust
 
 When the VM uses its local certificate authority, enroll the public CA

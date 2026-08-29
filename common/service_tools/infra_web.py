@@ -47,7 +47,9 @@ _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 _USERNAME_PATTERN = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 _SAFE_PATH_PATTERN = re.compile(r"^/[A-Za-z0-9_./-]+$")
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]\s+(.*)$")
+_BODY_SIZE_PATTERN = re.compile(r"^([1-9][0-9]{0,9})([kKmMgG]?)$")
 _PROFILES = ("general", "godot")
+_MAX_FORWARD_BODY_BYTES = 1024**3
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -132,6 +134,11 @@ def _parser() -> argparse.ArgumentParser:
         default="/",
         metavar="PATH",
         help="HTTP readiness path used with --wait (default: /)",
+    )
+    forward_add.add_argument(
+        "--max-body-size",
+        metavar="SIZE",
+        help="Maximum proxied request body, such as 50m (default: Nginx 1m)",
     )
     forward_add.add_argument("--open", action="store_true")
     forward_add.add_argument("--json", action="store_true")
@@ -320,6 +327,26 @@ def _parse_upstream(value: str) -> tuple[str, int]:
     return str(address), port
 
 
+def _validate_body_size(value: object, label: str) -> str | None:
+    """Validate a bounded Nginx request-body size without allowing directives."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a size such as 50m")
+    match = _BODY_SIZE_PATTERN.fullmatch(value)
+    if match is None:
+        raise ValueError(
+            f"{label} must be a positive integer with optional k, m, or g suffix"
+        )
+    number = int(match.group(1))
+    unit = match.group(2).lower()
+    multiplier = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3}[unit]
+    if number * multiplier > _MAX_FORWARD_BODY_BYTES:
+        raise ValueError(f"{label} must not exceed 1g")
+    return f"{number}{unit}"
+
+
 def _validate_route(value: object, policy: dict[str, object]) -> dict[str, object]:
     if not isinstance(value, dict):
         raise RuntimeError("Invalid HTTPS forward state")
@@ -348,6 +375,13 @@ def _validate_route(value: object, policy: dict[str, object]) -> dict[str, objec
     profile = value.get("profile")
     if profile not in _PROFILES:
         raise RuntimeError("Invalid profile in HTTPS forward state")
+    try:
+        max_body_size = _validate_body_size(
+            value.get("max_body_size"),
+            "HTTPS forward maximum body size",
+        )
+    except ValueError as exc:
+        raise RuntimeError("Invalid maximum body size in HTTPS forward state") from exc
     return {
         "listen": listen,
         "name": name,
@@ -355,6 +389,7 @@ def _validate_route(value: object, policy: dict[str, object]) -> dict[str, objec
         "profile": profile,
         "target_host": str(address),
         "target_port": target_port,
+        **({"max_body_size": max_body_size} if max_body_size is not None else {}),
     }
 
 
@@ -424,6 +459,12 @@ def render_forward_nginx(
     for route in routes:
         target_host = str(route["target_host"])
         upstream_host = f"[{target_host}]" if ":" in target_host else target_host
+        max_body_size = route.get("max_body_size")
+        body_size_directive = (
+            f"\n    client_max_body_size {max_body_size};"
+            if max_body_size is not None
+            else ""
+        )
         profile_headers = ""
         if route["profile"] == "godot":
             profile_headers = """
@@ -440,7 +481,7 @@ server {{
 
     ssl_certificate {policy['certificate']};
     ssl_certificate_key {policy['certificate_key']};
-    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_protocols TLSv1.2 TLSv1.3;{body_size_directive}
 
     location / {{
         proxy_pass http://{upstream_host}:{route['target_port']};
@@ -1036,6 +1077,7 @@ def _forward_add(args: argparse.Namespace) -> int:
     _validate_health_path(args.health)
     if args.wait:
         _wait_for_upstream(target_host, target_port, args.health, args.wait)
+    max_body_size = _validate_body_size(args.max_body_size, "--max-body-size")
     listen = _select_listen_port(args.listen, routes, policy, existing)
     route = {
         "listen": listen,
@@ -1044,6 +1086,7 @@ def _forward_add(args: argparse.Namespace) -> int:
         "profile": args.profile,
         "target_host": target_host,
         "target_port": target_port,
+        **({"max_body_size": max_body_size} if max_body_size is not None else {}),
     }
     updated = [item for item in routes if item["name"] != name]
     updated.append(route)

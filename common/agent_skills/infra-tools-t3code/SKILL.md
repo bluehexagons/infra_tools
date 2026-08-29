@@ -40,10 +40,12 @@ or the exact version required by the client, then run:
 
 ```bash
 T3_RELEASE=latest
+T3_NPM_SHIM="$HOME/.local/share/infra-tools/t3-npm/bin"
 env -u npm_config_dangerously_allow_all_scripts \
   -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
   -u npm_config_allow_scripts \
   -u NPM_CONFIG_ALLOW_SCRIPTS \
+  PATH="$T3_NPM_SHIM:$PATH" \
   CC=gcc \
   CXX=g++ \
   npm_config_strict_allow_scripts=false \
@@ -59,10 +61,18 @@ infra-tools agent doctor --capability t3code --fix
 
 Keep those npm settings scoped to this trusted T3 update command. npm 12
 rejects inherited `allow-scripts` and `dangerously-allow-all-scripts` settings
-in T3's nested runtime. The doctor performs the bounded native-module repair
-and verifies the service. `infra-tools agent update` is not a T3 updater; it
-updates selected Codex, Claude Code, and OpenCode installations. Do not start a
-second foreground T3 server on the managed port.
+in T3's nested runtime. infra-tools installs the referenced npm passthrough; it
+recognizes only a versioned T3 install into an immutable `.staging-*` runtime,
+creates a short-lived project policy allowing only `node-pty` and
+`msgpackr-extract`, and removes it before publication. Other npm commands pass
+through unchanged.
+
+If the UI update rolled back with a native-module load error, rerun the VM's
+infra-tools setup first. It repairs the retained candidate without stopping
+the working active version; then retry **Update server**. The doctor repairs
+and verifies the active runtime. `infra-tools agent update` is not a T3
+updater; it updates selected Codex, Claude Code, and OpenCode installations.
+Do not start a second foreground T3 server on the managed port.
 
 ## Long-running work
 
