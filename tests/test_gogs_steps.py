@@ -438,6 +438,26 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertIn("[REDACTED]", command)
         self.assertNotIn("supersecret", command)
 
+    @patch("web.gogs_steps._get_git_home", return_value="/home/git")
+    def test_admin_command_places_config_after_subcommand(self, _git_home):
+        command = gogs_steps.build_gogs_admin_command(
+            ["admin", "create-user", "--name", "admin"],
+            "/srv/gogs/custom/conf/app.ini",
+        )
+
+        self.assertEqual(
+            command,
+            "runuser -u git -- env HOME=/home/git /usr/local/bin/gogs "
+            "admin create-user --config /srv/gogs/custom/conf/app.ini --name admin",
+        )
+
+    def test_admin_command_requires_subcommand(self):
+        with self.assertRaisesRegex(ValueError, "requires 'admin' and a subcommand"):
+            gogs_steps.build_gogs_admin_command(
+                ["admin"],
+                "/srv/gogs/custom/conf/app.ini",
+            )
+
 
 class TestGogsHostlessFirewall(unittest.TestCase):
     def test_source_exposure_requires_active_ufw(self):

@@ -735,6 +735,8 @@ def _maybe_configure_firewall(config: SetupConfig, domain: str, port: int) -> No
 
 def build_gogs_admin_command(args: list[str], config_path: str) -> str:
     """Return a shell-safe command string for running the Gogs CLI as the git user."""
+    if len(args) < 2 or args[0] != "admin":
+        raise ValueError("Gogs admin command requires 'admin' and a subcommand")
     git_home = _get_git_home()
     command = [
         "runuser",
@@ -744,9 +746,11 @@ def build_gogs_admin_command(args: list[str], config_path: str) -> str:
         "env",
         f"HOME={git_home}",
         GOGS_BINARY_LINK,
+        *args[:2],
         "--config",
         config_path,
-    ] + args
+        *args[2:],
+    ]
     return shlex.join(command)
 
 
