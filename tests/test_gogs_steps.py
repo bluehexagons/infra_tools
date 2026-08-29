@@ -336,6 +336,9 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertIn("STORAGE = local", content)
         self.assertIn("OBJECTS_PATH = /srv/gogs/data/lfs-objects", content)
         self.assertIn("OBJECTS_TEMP_PATH = /srv/gogs/data/tmp/lfs-objects", content)
+        self.assertIn("BRAND_NAME = Gogs", content)
+        self.assertNotIn("APP_NAME =", content)
+        self.assertIn("[log]\nROOT_PATH = /srv/gogs/log", content)
         self.assertIn("DISABLE_REGISTRATION = true", content)
 
     def test_hostless_app_ini_is_loopback_only_by_default(self):
@@ -381,6 +384,7 @@ class TestGenerateGogsConfig(unittest.TestCase):
         content = gogs_steps.generate_gogs_service("/srv/gogs/custom/conf/app.ini")
         self.assertIn("WorkingDirectory=/opt/gogs/current", content)
         self.assertIn("ExecStart=/opt/gogs/current/gogs web --config /srv/gogs/custom/conf/app.ini", content)
+        self.assertIn("Environment=GOGS_WORK_DIR=/opt/gogs/current", content)
         self.assertIn("User=git", content)
 
     def test_direct_nginx_http_redirects_to_https(self):
@@ -447,7 +451,8 @@ class TestGenerateGogsConfig(unittest.TestCase):
 
         self.assertEqual(
             command,
-            "runuser -u git -- env HOME=/home/git /usr/local/bin/gogs "
+            "runuser -u git -- env HOME=/home/git GOGS_WORK_DIR=/opt/gogs/current "
+            "/usr/local/bin/gogs "
             "admin create-user --config /srv/gogs/custom/conf/app.ini --name admin",
         )
 

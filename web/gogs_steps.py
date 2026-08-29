@@ -347,7 +347,7 @@ def generate_gogs_app_ini(
         else "127.0.0.1"
     )
     secret_key = _load_or_create_gogs_secret_key()
-    return f"""APP_NAME = Gogs
+    return f"""BRAND_NAME = Gogs
 RUN_USER = {GOGS_GIT_USER}
 RUN_MODE = prod
 
@@ -382,6 +382,9 @@ STORAGE = local
 OBJECTS_PATH = {data_path}/data/lfs-objects
 OBJECTS_TEMP_PATH = {data_path}/data/tmp/lfs-objects
 
+[log]
+ROOT_PATH = {data_path}/log
+
 [security]
 INSTALL_LOCK = true
 SECRET_KEY = {secret_key}
@@ -409,6 +412,7 @@ Restart=always
 RestartSec=2s
 Environment=USER={GOGS_GIT_USER}
 Environment=HOME={_get_git_home()}
+Environment=GOGS_WORK_DIR={GOGS_CURRENT_DIR}
 ProtectSystem=full
 PrivateDevices=yes
 PrivateTmp=yes
@@ -745,6 +749,7 @@ def build_gogs_admin_command(args: list[str], config_path: str) -> str:
         "--",
         "env",
         f"HOME={git_home}",
+        f"GOGS_WORK_DIR={GOGS_CURRENT_DIR}",
         GOGS_BINARY_LINK,
         *args[:2],
         "--config",
