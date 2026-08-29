@@ -695,7 +695,6 @@ class TestGogsStorageHealth(unittest.TestCase):
         with tempfile.TemporaryDirectory() as data_path:
             for relative in (
                 "data/lfs-objects",
-                "data/tmp/lfs-objects",
                 "data/attachments",
                 "repositories",
                 "log",
@@ -716,12 +715,24 @@ class TestGogsStorageHealth(unittest.TestCase):
                     stdout = ""
                 return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
-            with patch("web.gogs_steps.run", side_effect=result_for):
+            with patch("web.gogs_steps.run", side_effect=result_for) as mock_run:
                 health = gogs_steps.check_gogs_storage_health(data_path)
+
+            commands = [call.args[0] for call in mock_run.call_args_list]
 
         self.assertEqual(health["filesystem"], "ext4")
         self.assertEqual(health["free_bytes"], 1048576)
         self.assertEqual(health["usage"]["lfs_objects"], 4096)
+        self.assertFalse(
+            any("data/tmp/lfs-objects" in command for command in commands)
+        )
+        self.assertFalse(any("data/tmp/uploads" in command for command in commands))
+        repository_check = next(
+            command
+            for command in commands
+            if "runuser -u git" in command and "/repositories" in command
+        )
+        self.assertIn(" -a -x ", repository_check)
 
     def test_rejects_cifs_live_data(self):
         result = SimpleNamespace(

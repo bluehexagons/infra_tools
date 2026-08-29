@@ -873,7 +873,7 @@ def _run_gogs_post_setup_commands(config_path: str) -> None:
 
 def _wait_for_gogs_ready(port: int) -> None:
     result = run(
-        "curl --fail --silent --show-error --output /dev/null "
+        "curl --fail --silent --output /dev/null "
         "--connect-timeout 2 --max-time 2 --retry 15 --retry-delay 1 "
         "--retry-max-time 30 --retry-all-errors "
         f"http://127.0.0.1:{port}/",
@@ -930,8 +930,6 @@ def check_gogs_storage_health(data_path: str) -> Mapping[str, Any]:
         data_path,
         f"{data_path}/data",
         f"{data_path}/data/lfs-objects",
-        f"{data_path}/data/tmp/lfs-objects",
-        f"{data_path}/data/tmp/uploads",
         f"{data_path}/data/attachments",
         f"{data_path}/data/avatars",
         f"{data_path}/data/repo-avatars",
@@ -942,11 +940,14 @@ def check_gogs_storage_health(data_path: str) -> Mapping[str, Any]:
     for path in managed_paths:
         result = run(
             f"runuser -u {shlex.quote(GOGS_GIT_USER)} -- "
-            f"test -r {shlex.quote(path)} -a -w {shlex.quote(path)}",
+            f"test -r {shlex.quote(path)} -a -w {shlex.quote(path)} "
+            f"-a -x {shlex.quote(path)}",
             check=False,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"Gogs data path is not readable and writable by git: {path}")
+            raise RuntimeError(
+                f"Gogs data path is not accessible and writable by git: {path}"
+            )
 
     database_path = f"{data_path}/data/gogs.db"
     database_result = run(
