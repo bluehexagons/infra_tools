@@ -296,6 +296,26 @@ class TestInstallGogsRelease(unittest.TestCase):
 
 class TestGenerateGogsConfig(unittest.TestCase):
     @patch("web.gogs_steps.run")
+    @patch("web.gogs_steps._reject_symlinked_gogs_path")
+    def test_data_directory_setup_prepares_all_writable_runtime_paths(
+        self,
+        _reject_symlinks,
+        mock_run,
+    ):
+        config_path = gogs_steps._ensure_gogs_data_dirs("/srv/gogs")
+
+        self.assertEqual(config_path, "/srv/gogs/custom/conf/app.ini")
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        for path in (
+            "/srv/gogs/data/tmp/uploads",
+            "/srv/gogs/data/attachments",
+            "/srv/gogs/data/avatars",
+            "/srv/gogs/data/repo-avatars",
+            "/srv/gogs/data/sessions",
+        ):
+            self.assertIn(f"mkdir -p {path}", commands)
+
+    @patch("web.gogs_steps.run")
     def test_data_directory_setup_rejects_symlinked_subpath(self, mock_run):
         with tempfile.TemporaryDirectory() as directory:
             outside = os.path.join(directory, "outside")
@@ -336,6 +356,14 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertIn("STORAGE = local", content)
         self.assertIn("OBJECTS_PATH = /srv/gogs/data/lfs-objects", content)
         self.assertIn("OBJECTS_TEMP_PATH = /srv/gogs/data/tmp/lfs-objects", content)
+        self.assertIn("TEMP_PATH = /srv/gogs/data/tmp/uploads", content)
+        self.assertIn("PATH = /srv/gogs/data/attachments", content)
+        self.assertIn("AVATAR_UPLOAD_PATH = /srv/gogs/data/avatars", content)
+        self.assertIn(
+            "REPOSITORY_AVATAR_UPLOAD_PATH = /srv/gogs/data/repo-avatars",
+            content,
+        )
+        self.assertIn("PROVIDER_CONFIG = /srv/gogs/data/sessions", content)
         self.assertIn("BRAND_NAME = Gogs", content)
         self.assertNotIn("APP_NAME =", content)
         self.assertIn("[log]\nROOT_PATH = /srv/gogs/log", content)
@@ -385,6 +413,7 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertIn("WorkingDirectory=/opt/gogs/current", content)
         self.assertIn("ExecStart=/opt/gogs/current/gogs web --config /srv/gogs/custom/conf/app.ini", content)
         self.assertIn("Environment=GOGS_WORK_DIR=/opt/gogs/current", content)
+        self.assertIn("Environment=GOGS_CUSTOM=/srv/gogs/custom", content)
         self.assertIn("User=git", content)
 
     def test_direct_nginx_http_redirects_to_https(self):
@@ -452,7 +481,7 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertEqual(
             command,
             "runuser -u git -- env HOME=/home/git GOGS_WORK_DIR=/opt/gogs/current "
-            "/usr/local/bin/gogs "
+            "GOGS_CUSTOM=/srv/gogs/custom /opt/gogs/current/gogs "
             "admin create-user --config /srv/gogs/custom/conf/app.ini --name admin",
         )
 
@@ -462,6 +491,24 @@ class TestGenerateGogsConfig(unittest.TestCase):
                 ["admin"],
                 "/srv/gogs/custom/conf/app.ini",
             )
+
+    @patch("web.gogs_steps.run")
+    def test_wait_for_gogs_ready_retries_local_http(self, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        gogs_steps._wait_for_gogs_ready(3000)
+
+        command = mock_run.call_args.args[0]
+        self.assertIn("--retry-all-errors", command)
+        self.assertIn("--retry-max-time 30", command)
+        self.assertIn("http://127.0.0.1:3000/", command)
+
+    @patch("web.gogs_steps.run")
+    def test_wait_for_gogs_ready_fails_when_http_never_responds(self, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=7, stdout="", stderr="failed")
+
+        with self.assertRaisesRegex(RuntimeError, "did not become HTTP-ready"):
+            gogs_steps._wait_for_gogs_ready(3000)
 
 
 class TestGogsHostlessFirewall(unittest.TestCase):

@@ -35,6 +35,7 @@ GOGS_GIT_GROUP = "git"
 GOGS_INSTALL_ROOT = "/opt/gogs"
 GOGS_RELEASES_DIR = f"{GOGS_INSTALL_ROOT}/releases"
 GOGS_CURRENT_DIR = f"{GOGS_INSTALL_ROOT}/current"
+GOGS_EXECUTABLE = f"{GOGS_CURRENT_DIR}/gogs"
 GOGS_BINARY_LINK = "/usr/local/bin/gogs"
 GOGS_STATE_FILE = "/opt/infra_tools/state/gogs.json"
 GOGS_SECRET_KEY_FILE = "/opt/infra_tools/state/gogs_secret_key"
@@ -307,6 +308,11 @@ def _ensure_gogs_data_dirs(data_path: str) -> str:
         f"{data_path}/data",
         f"{data_path}/data/lfs-objects",
         f"{data_path}/data/tmp/lfs-objects",
+        f"{data_path}/data/tmp/uploads",
+        f"{data_path}/data/attachments",
+        f"{data_path}/data/avatars",
+        f"{data_path}/data/repo-avatars",
+        f"{data_path}/data/sessions",
         f"{data_path}/repositories",
         f"{data_path}/log",
     ):
@@ -373,6 +379,9 @@ DISABLE_ROUTER_LOG = true
 ROOT = {data_path}/repositories
 DISABLE_HTTP_GIT = false
 
+[repository.upload]
+TEMP_PATH = {data_path}/data/tmp/uploads
+
 [database]
 TYPE = sqlite3
 PATH = {data_path}/data/gogs.db
@@ -381,6 +390,16 @@ PATH = {data_path}/data/gogs.db
 STORAGE = local
 OBJECTS_PATH = {data_path}/data/lfs-objects
 OBJECTS_TEMP_PATH = {data_path}/data/tmp/lfs-objects
+
+[attachment]
+PATH = {data_path}/data/attachments
+
+[picture]
+AVATAR_UPLOAD_PATH = {data_path}/data/avatars
+REPOSITORY_AVATAR_UPLOAD_PATH = {data_path}/data/repo-avatars
+
+[session]
+PROVIDER_CONFIG = {data_path}/data/sessions
 
 [log]
 ROOT_PATH = {data_path}/log
@@ -397,6 +416,7 @@ ENABLE_REGISTRATION_CAPTCHA = false
 
 def generate_gogs_service(config_path: str) -> str:
     """Return a hardened systemd unit file for Gogs."""
+    custom_dir = os.path.dirname(os.path.dirname(config_path))
     return f"""[Unit]
 Description=Gogs
 After=network.target ssh.service sshd.service
@@ -407,12 +427,13 @@ Type=simple
 User={GOGS_GIT_USER}
 Group={GOGS_GIT_GROUP}
 WorkingDirectory={GOGS_CURRENT_DIR}
-ExecStart={GOGS_CURRENT_DIR}/gogs web --config {config_path}
+ExecStart={GOGS_EXECUTABLE} web --config {config_path}
 Restart=always
 RestartSec=2s
 Environment=USER={GOGS_GIT_USER}
 Environment=HOME={_get_git_home()}
 Environment=GOGS_WORK_DIR={GOGS_CURRENT_DIR}
+Environment=GOGS_CUSTOM={custom_dir}
 ProtectSystem=full
 PrivateDevices=yes
 PrivateTmp=yes
@@ -742,6 +763,7 @@ def build_gogs_admin_command(args: list[str], config_path: str) -> str:
     if len(args) < 2 or args[0] != "admin":
         raise ValueError("Gogs admin command requires 'admin' and a subcommand")
     git_home = _get_git_home()
+    custom_dir = os.path.dirname(os.path.dirname(config_path))
     command = [
         "runuser",
         "-u",
@@ -750,7 +772,8 @@ def build_gogs_admin_command(args: list[str], config_path: str) -> str:
         "env",
         f"HOME={git_home}",
         f"GOGS_WORK_DIR={GOGS_CURRENT_DIR}",
-        GOGS_BINARY_LINK,
+        f"GOGS_CUSTOM={custom_dir}",
+        GOGS_EXECUTABLE,
         *args[:2],
         "--config",
         config_path,
@@ -848,6 +871,18 @@ def _run_gogs_post_setup_commands(config_path: str) -> None:
             raise RuntimeError(f"Failed to refresh Gogs {label}")
 
 
+def _wait_for_gogs_ready(port: int) -> None:
+    result = run(
+        "curl --fail --silent --show-error --output /dev/null "
+        "--connect-timeout 2 --max-time 2 --retry 15 --retry-delay 1 "
+        "--retry-max-time 30 --retry-all-errors "
+        f"http://127.0.0.1:{port}/",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Gogs did not become HTTP-ready after service startup")
+
+
 def _gogs_directory_usage(path: str) -> int:
     if not os.path.exists(path):
         return 0
@@ -896,6 +931,11 @@ def check_gogs_storage_health(data_path: str) -> Mapping[str, Any]:
         f"{data_path}/data",
         f"{data_path}/data/lfs-objects",
         f"{data_path}/data/tmp/lfs-objects",
+        f"{data_path}/data/tmp/uploads",
+        f"{data_path}/data/attachments",
+        f"{data_path}/data/avatars",
+        f"{data_path}/data/repo-avatars",
+        f"{data_path}/data/sessions",
         f"{data_path}/repositories",
         f"{data_path}/log",
     )
@@ -1000,6 +1040,7 @@ def _complete_gogs_setup(
     else:
         raise RuntimeError("Gogs service failed to start")
 
+    _wait_for_gogs_ready(port)
     _ensure_gogs_admin_account(config, config_path, data_path)
     _run_gogs_post_setup_commands(config_path)
     check_gogs_storage_health(data_path)
