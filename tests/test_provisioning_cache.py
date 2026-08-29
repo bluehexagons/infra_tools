@@ -16,7 +16,7 @@ def _config(**overrides: object) -> SetupConfig:
         "username": "agent",
         "system_type": "workstation_dev",
         "machine_type": "vm",
-        "hosted_node": "pve1",
+        "hosted_node": "10.0.0.10",
     }
     values.update(overrides)
     return SetupConfig(**values)
@@ -27,7 +27,9 @@ def _args(**overrides: object) -> Namespace:
         "host": "10.0.0.50",
         "username": "agent",
         "system_type": "workstation_dev",
-        "hosted_node": "pve1",
+        "hosted_node": "10.0.0.10",
+        "hosted_user": "root",
+        "hosted_key": None,
         "machine_type": None,
         "hosted_bridge": None,
         "container_memory": None,
@@ -206,6 +208,98 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
                 _config(container_base="debian"),
                 _args(container_base="ubuntu"),
             )
+        )
+
+    def test_provider_rebind_preserves_explicit_destination_metadata(self) -> None:
+        current = _config(
+            hosted_node="10.0.0.11",
+            hosted_user="admin",
+            hosted_key="/keys/pve2",
+            hosted_bridge="vmbr1",
+        )
+        cached = _config(
+            hosted_node="10.0.0.10",
+            hosted_user="root",
+            hosted_key="/keys/pve1",
+            hosted_bridge="vmbr0",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        args = _args(
+            hosted_node="10.0.0.11",
+            hosted_user="admin",
+            hosted_key="/keys/pve2",
+            hosted_bridge="vmbr1",
+        )
+
+        provider_rebind = infra_tools._provider_rebind_requested(
+            current,
+            cached,
+            args,
+        )
+        reused = infra_tools._reuse_cached_provisioning_metadata(
+            current,
+            args,
+            cached,
+            provider_rebind=provider_rebind,
+        )
+
+        self.assertTrue(provider_rebind)
+        self.assertFalse(reused)
+        self.assertEqual(current.hosted_node, "10.0.0.11")
+        self.assertEqual(current.hosted_user, "admin")
+        self.assertEqual(current.hosted_key, "/keys/pve2")
+        self.assertEqual(current.hosted_bridge, "vmbr1")
+        self.assertEqual(current.container_storage, cached.container_storage)
+
+    def test_provider_rebind_allows_only_storage_pool_remapping(self) -> None:
+        cached = _config(
+            hosted_node="10.0.0.10",
+            hosted_bridge="vmbr0",
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["data", "bulk", "64G"],
+                ["template", "local"],
+            ],
+        )
+        moved = _config(
+            hosted_node="10.0.0.11",
+            hosted_bridge="vmbr1",
+            container_storage=[
+                ["root", "fast-zfs", "32G"],
+                ["data", "archive", "64G"],
+                ["template", "fast-zfs"],
+            ],
+        )
+        args = _args(
+            hosted_node="10.0.0.11",
+            hosted_bridge="vmbr1",
+            container_storage=moved.container_storage,
+        )
+
+        self.assertEqual(
+            infra_tools._unsupported_cached_provisioning_changes(
+                moved,
+                cached,
+                args,
+                provider_rebind=True,
+            ),
+            [],
+        )
+
+        moved.container_storage = [["root", "fast-zfs", "64G"]]
+        args.container_storage = moved.container_storage
+        self.assertEqual(
+            infra_tools._unsupported_cached_provisioning_changes(
+                moved,
+                cached,
+                args,
+                provider_rebind=True,
+            ),
+            ["--storage"],
         )
 
     def test_unsupported_existing_vm_change_stops_before_cache_update(self) -> None:
@@ -437,7 +531,7 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         self.assertTrue(reused)
         mock_load.assert_called_once_with("10.0.0.50")
 
-    def test_managed_guest_refresh_requires_the_same_saved_identity(self) -> None:
+    def test_saved_guest_identity_is_independent_of_provider_node(self) -> None:
         cached = _config(
             host="10.0.0.50",
             hosted_node="10.0.0.10",
@@ -445,7 +539,7 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         )
 
         self.assertTrue(
-            infra_tools._is_same_cached_provisioned_guest(
+            infra_tools._is_cached_provisioned_guest_identity(
                 _config(
                     host="10.0.0.50/24",
                     hosted_node="10.0.0.10",
@@ -455,19 +549,19 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             )
         )
         self.assertFalse(
-            infra_tools._is_same_cached_provisioned_guest(
+            infra_tools._is_cached_provisioned_guest_identity(
                 _config(host="10.0.0.51", hosted_node="10.0.0.10"),
                 cached,
             )
         )
-        self.assertFalse(
-            infra_tools._is_same_cached_provisioned_guest(
+        self.assertTrue(
+            infra_tools._is_cached_provisioned_guest_identity(
                 _config(host="10.0.0.50", hosted_node="10.0.0.11"),
                 cached,
             )
         )
         self.assertFalse(
-            infra_tools._is_same_cached_provisioned_guest(
+            infra_tools._is_cached_provisioned_guest_identity(
                 _config(
                     host="10.0.0.50",
                     hosted_node="10.0.0.10",
@@ -656,6 +750,136 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             "/keys/proxmox",
             dry_run=False,
         )
+
+    def test_migrated_vm_is_verified_and_rebound_to_explicit_destination(
+        self,
+    ) -> None:
+        from lib.proxmox_vm import VMAlreadyExists
+
+        current = _config(
+            hosted_node="10.0.0.11",
+            hosted_user="root",
+            hosted_key="/keys/pve2",
+            hosted_bridge="vmbr1",
+            container_memory="4G",
+            container_storage=[
+                ["root", "fast-zfs", "32G"],
+                ["agent-data", "archive", "128G"],
+            ],
+            storage_mounts=[["agent-data", "/srv/agent-workspace"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        cached = _config(
+            hosted_node="10.0.0.10",
+            hosted_user="root",
+            hosted_key="/keys/pve1",
+            hosted_bridge="vmbr0",
+            container_memory="4G",
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["agent-data", "bulk", "128G"],
+            ],
+            storage_mounts=[["agent-data", "/srv/agent-workspace"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        args = _args(
+            hosted_node="10.0.0.11",
+            hosted_key="/keys/pve2",
+            hosted_bridge="vmbr1",
+            container_storage=current.container_storage,
+        )
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=current), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch(
+                 "infra_tools._prepare_runtime_config_for_cli",
+                 side_effect=lambda config: config,
+             ), \
+             patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.print_setup_summary"), \
+             patch("infra_tools.store_cli_credentials"), \
+             patch("infra_tools.save_setup_command") as mock_save, \
+             patch("infra_tools.register_proxmox_setup_host"), \
+             patch("infra_tools.run_remote_setup", return_value=0), \
+             patch("infra_tools.ensure_guest_ipv4_route"), \
+             patch(
+                 "lib.proxmox_vm.verify_vm_rebind_source_stopped",
+             ) as mock_source, \
+             patch(
+                 "lib.proxmox_vm.provision_vm",
+                 side_effect=VMAlreadyExists(),
+             ) as mock_provision, \
+             patch(
+                 "infra_tools.refresh_managed_guest_host_keys",
+             ) as mock_refresh:
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 0)
+        mock_source.assert_called_once_with(cached, dry_run=False)
+        mock_provision.assert_called_once_with(
+            current,
+            image=current.vm_image,
+            allow_existing_data_disks=True,
+            require_existing_name=True,
+            verify_existing_bridge=True,
+            verify_existing_storage=True,
+        )
+        mock_refresh.assert_called_once_with(
+            "10.0.0.50",
+            "10.0.0.11",
+            "root",
+            "/keys/pve2",
+            dry_run=False,
+        )
+        mock_save.assert_called_once()
+        self.assertEqual(mock_save.call_args.args[0].hosted_node, "10.0.0.11")
+
+    def test_failed_provider_rebind_preserves_saved_binding(self) -> None:
+        current = _config(
+            hosted_node="10.0.0.11",
+            container_memory="4G",
+            container_storage=[["root", "fast-zfs", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        cached = _config(
+            hosted_node="10.0.0.10",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        args = _args(
+            hosted_node="10.0.0.11",
+            container_storage=current.container_storage,
+        )
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=current), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch(
+                 "infra_tools._prepare_runtime_config_for_cli",
+                 side_effect=lambda config: config,
+             ), \
+             patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.print_setup_summary"), \
+             patch("infra_tools.save_setup_command") as mock_save, \
+             patch(
+                 "lib.proxmox_vm.verify_vm_rebind_source_stopped",
+                 side_effect=infra_tools.ProvisionError("source is running"),
+             ), \
+             patch("builtins.print"):
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 1)
+        mock_save.assert_not_called()
 
     def test_existing_unsaved_vm_does_not_refresh_host_key(self) -> None:
         from lib.proxmox_vm import VMAlreadyExists

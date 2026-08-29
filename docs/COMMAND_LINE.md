@@ -200,6 +200,24 @@ when a cached provisioned guest should be compared with Proxmox even though
 the saved declaration has not changed; supported provider-side drift, such as
 the guest vCPU count, is reconciled and verified.
 
+After moving an infra-tools-provisioned QEMU VM with the Proxmox GUI, rerun its
+saved setup command with the destination in `--provision-on`. A changed
+provider host is never replaced with the cached source: infra-tools verifies
+that any matching source VM is stopped, requires the destination VM to match
+the saved name, IPv4 address, and managed-disk identities, then updates the
+saved provider binding only after remote setup succeeds. Supply the moved
+VM's actual `--bridge` when it changed. Storage pool names may also be updated
+with `--storage` when the logical disk names and declared sizes are unchanged;
+the destination volumes and minimum sizes are verified before provider-side
+settings are reconciled. A different disk set or size remains an explicit
+storage operation and is rejected by setup.
+
+A GUI clone that replaces the original can use the same rebind path only while
+the saved source VM is stopped. A clone intended to coexist with its source
+must first receive a unique IPv4 address and Proxmox/system hostname, and must
+be saved as a separate setup identity; do not run two copies with the same
+network or credential identity.
+
 `--activate-network` uses a retry-safe transaction for an existing host and
 must be run from a separate controller. The remote
 setup temporarily adds the requested addresses without removing the address

@@ -101,6 +101,7 @@ class _ExistingVM:
     balloon_shares: Optional[int]
     cpu_type: Optional[str]
     scsi_disks: tuple[tuple[str, str], ...]
+    network_bridges: tuple[tuple[str, str], ...]
 
 
 _UNIT_TO_KIB = {"K": 1, "M": 1024, "G": 1024 * 1024, "T": 1024 * 1024 * 1024}
@@ -270,6 +271,46 @@ def _existing_managed_disks(
             + ", ".join(missing)
         )
     return managed
+
+
+def _verify_existing_storage_layout(
+    vm: _ExistingVM,
+    managed_disks: dict[str, tuple[str, str]],
+    desired: dict[str, VMDataDisk],
+) -> None:
+    """Verify a GUI-migrated VM uses the newly declared storage pools."""
+
+    for logical_name, disk in desired.items():
+        _device, value = managed_disks[logical_name]
+        volume = value.split(",", 1)[0]
+        observed_pool, separator, _volume_name = volume.partition(":")
+        if not separator or observed_pool != disk.pool:
+            raise ProvisionError(
+                f"VM {vm.vmid} disk '{logical_name}' uses storage "
+                f"'{observed_pool or volume}', expected '{disk.pool}'"
+            )
+        observed_size = _disk_option(value, "size")
+        if observed_size is None:
+            raise ProvisionError(
+                f"VM {vm.vmid} disk '{logical_name}' did not report its size"
+            )
+        if storage_size_kib(observed_size) < storage_size_kib(disk.size):
+            raise ProvisionError(
+                f"VM {vm.vmid} disk '{logical_name}' is {observed_size}, "
+                f"smaller than the saved {disk.size} declaration"
+            )
+
+
+def _verify_existing_bridge(vm: _ExistingVM, desired_bridge: str) -> None:
+    """Verify the primary NIC of a GUI-migrated VM uses the declared bridge."""
+
+    bridges = dict(vm.network_bridges)
+    observed = bridges.get("net0")
+    if observed != desired_bridge:
+        raise ProvisionError(
+            f"VM {vm.vmid} net0 uses bridge '{observed or 'none'}', "
+            f"expected '{desired_bridge}'"
+        )
 
 
 def _parse_size_kib(value: str, *, label: str) -> int:
@@ -580,6 +621,7 @@ def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
     balloon_shares: Optional[int] = None
     cpu_type: Optional[str] = None
     scsi_disks: list[tuple[str, str]] = []
+    network_bridges: list[tuple[str, str]] = []
     for line in config_text.splitlines():
         key, separator, value = line.partition(":")
         if not separator:
@@ -593,6 +635,11 @@ def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
             continue
         if re.fullmatch(r"scsi\d+", normalized_key):
             scsi_disks.append((normalized_key, value.strip()))
+            continue
+        if re.fullmatch(r"net\d+", normalized_key):
+            bridge = _disk_option(value.strip(), "bridge")
+            if bridge:
+                network_bridges.append((normalized_key, bridge))
             continue
         if normalized_key == "cores":
             try:
@@ -635,6 +682,7 @@ def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
         balloon_shares=balloon_shares,
         cpu_type=cpu_type,
         scsi_disks=tuple(scsi_disks),
+        network_bridges=tuple(network_bridges),
     )
 
 
@@ -681,6 +729,9 @@ def _reconcile_existing_vm(
     desired_balloon_shares: Optional[int] = None,
     desired_cpu_type: Optional[str] = None,
     desired_disk_hardware: Optional[dict[str, VMDiskHardware]] = None,
+    desired_storage_layout: Optional[dict[str, VMDataDisk]] = None,
+    desired_bridge: Optional[str] = None,
+    require_existing_name: bool = False,
     allow_managed_data_disks: bool = False,
     allow_memory_overcommit: bool = False,
     dry_run: bool = False,
@@ -757,6 +808,15 @@ def _reconcile_existing_vm(
             f"Cannot rename VM {matched.vmid} to '{desired_name}': that name is "
             f"already used on {node_ip} by VMID(s) {ids}"
         )
+    if (
+        require_existing_name
+        and desired_name
+        and matched.name.lower() != desired_name.lower()
+    ):
+        raise ProvisionError(
+            f"VM {matched.vmid} at {target_ip} is named '{matched.name}', "
+            f"expected saved name '{desired_name}' for provider rebind"
+        )
 
     status = _ssh_run(
         node_ip, user, ssh_opts, f"qm status {matched.vmid}", dry_run=False
@@ -814,6 +874,18 @@ def _reconcile_existing_vm(
         if desired_disk_hardware is not None
         else {}
     )
+    if desired_storage_layout is not None:
+        if set(desired_storage_layout) != set(managed_disks):
+            raise ProvisionError(
+                "VM storage verification requires every declared disk"
+            )
+        _verify_existing_storage_layout(
+            matched,
+            managed_disks,
+            desired_storage_layout,
+        )
+    if desired_bridge is not None:
+        _verify_existing_bridge(matched, desired_bridge)
     disk_changes = [
         (logical_name, device, value, desired_disk_hardware[logical_name])
         for logical_name, (device, value) in managed_disks.items()
@@ -1026,6 +1098,66 @@ def check_vm_exists(
         ssh_opts,
         dry_run=dry_run,
     )
+
+
+def verify_vm_rebind_source_stopped(
+    config: SetupConfig,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Refuse a provider rebind while the saved source VM can still run."""
+
+    node_ip = cast(str, config.hosted_node)
+    if dry_run:
+        print(f"[DRY RUN] Would verify the saved VM is stopped or absent on {node_ip}")
+        return
+
+    target_ip = (
+        str(ipaddress.ip_interface(config.static_ipv4).ip)
+        if config.static_ipv4
+        else config.host
+    )
+    desired_name = config.system_hostname or _build_guest_hostname(
+        target_ip,
+        config.friendly_name,
+        default_prefix="vm",
+    )
+    ssh_opts = _ssh_opts(config.hosted_key)
+    matches = [
+        vm
+        for vm in _list_existing_vms(node_ip, config.hosted_user, ssh_opts)
+        if target_ip in vm.ipv4_addresses
+        or vm.name.lower() == desired_name.lower()
+    ]
+    if len(matches) > 1:
+        ids = ", ".join(str(vm.vmid) for vm in matches)
+        raise ProvisionError(
+            f"Saved source {node_ip} has multiple VMs matching {desired_name} / "
+            f"{target_ip} (VMIDs: {ids})"
+        )
+    if not matches:
+        print(f"  ✓ Saved source {node_ip} no longer contains the VM")
+        return
+
+    source = matches[0]
+    status = _ssh_run(
+        node_ip,
+        config.hosted_user,
+        ssh_opts,
+        f"qm status {source.vmid}",
+        dry_run=False,
+    )
+    if status.returncode != 0:
+        detail = (status.stderr or status.stdout or "").strip() or "unknown error"
+        raise ProvisionError(
+            f"Could not verify source VM {source.vmid} on {node_ip}: {detail}"
+        )
+    if "status: stopped" not in (status.stdout or ""):
+        raise ProvisionError(
+            f"Refusing provider rebind while source VM {source.vmid} on "
+            f"{node_ip} is not stopped"
+        )
+    print(f"  ✓ Saved source VM {source.vmid} on {node_ip} is stopped")
 
 
 def _resolve_image(
@@ -1664,6 +1796,9 @@ def provision_vm(
     *,
     image: Optional[str] = None,
     allow_existing_data_disks: bool = False,
+    require_existing_name: bool = False,
+    verify_existing_bridge: bool = False,
+    verify_existing_storage: bool = False,
 ) -> None:
     """Orchestrate Proxmox VM provisioning.
 
@@ -1673,6 +1808,9 @@ def provision_vm(
             reference like ``local:import/foo.qcow2``.
         allow_existing_data_disks: Permit reconciliation of named disks only
             when the caller has matched this guest to saved provisioning state.
+        require_existing_name: Require an existing VM to retain the saved name.
+        verify_existing_bridge: Require an existing VM's net0 bridge to match.
+        verify_existing_storage: Require existing disks to match declared pools.
 
     Raises:
         VMAlreadyExists: if a VM with the target IP already exists on the node.
@@ -1736,6 +1874,11 @@ def provision_vm(
 
     if dry_run:
         print("[DRY RUN] Would provision Proxmox VM:")
+        if verify_existing_bridge or verify_existing_storage:
+            print(
+                "  Existing VM rebind: verify destination identity and declared "
+                "hardware before adoption"
+            )
         print(f"  Proxmox node: {node_ip}")
         print(f"  Target IP: {target_ip}")
         if config.static_ipv6:
@@ -1844,6 +1987,16 @@ def provision_vm(
         desired_balloon_shares=balloon_shares,
         desired_cpu_type=cpu_type,
         desired_disk_hardware=disk_hardware_settings,
+        desired_storage_layout=(
+            {
+                "root": VMDataDisk("root", root_pool_arg, disk_amount),
+                **{disk.name: disk for disk in declared_data_disks},
+            }
+            if verify_existing_storage
+            else None
+        ),
+        desired_bridge=bridge if verify_existing_bridge else None,
+        require_existing_name=require_existing_name,
         allow_managed_data_disks=allow_existing_data_disks,
         allow_memory_overcommit=getattr(
             config,

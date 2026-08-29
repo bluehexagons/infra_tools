@@ -85,6 +85,7 @@ from lib.proxmox_guest import (
     get_provisioned_guest_ssh_user,
     refresh_managed_guest_host_keys,
 )
+from lib.proxmox_hosts import find_proxmox_host
 from lib.proxmox_cli import add_proxmox_subparser, run_proxmox_command
 from lib.vm_cli import add_vm_subparser, run_vm_command
 from lib.sysadmin_cli import add_sysadmin_subparsers, run_sysadmin_command
@@ -103,7 +104,7 @@ from lib.setup_common import (
 )
 from lib.interactive_setup import prompt_for_missing_passwords
 from lib.system_utils import get_current_username
-from lib.types import Deployments, JSONDict, JSONList, StrList
+from lib.types import Deployments, JSONDict, JSONList, NestedStrList, StrList
 from lib.validators import validate_host, validate_username
 from lib.validation import (
     validate_apt_packages,
@@ -1125,6 +1126,13 @@ _RECONCILABLE_VM_PROVISIONING_CHANGES = {
     "vm_disk_settings",
 }
 
+_PROVIDER_BINDING_FIELDS = {
+    "hosted_node",
+    "hosted_user",
+    "hosted_key",
+    "hosted_bridge",
+}
+
 _PROVISIONING_FIELD_FLAGS = {
     "machine_type": "--machine",
     "hosted_bridge": "--bridge",
@@ -1160,10 +1168,62 @@ def _provisioning_changes_requested(
     )
 
 
+def _canonical_provisioning_node(node: object) -> str:
+    """Return a stable registered-host address for provider comparisons."""
+
+    value = str(node or "").strip()
+    registered = find_proxmox_host(value) if value else None
+    return (registered.address if registered else value).lower().rstrip(".")
+
+
+def _provider_rebind_requested(
+    config: SetupConfig,
+    cached_config: Optional[SetupConfig],
+    args: argparse.Namespace,
+) -> bool:
+    """Return whether setup explicitly moves a saved guest to another node."""
+
+    if cached_config is None or getattr(args, "hosted_node", None) is None:
+        return False
+    return _canonical_provisioning_node(
+        config.hosted_node
+    ) != _canonical_provisioning_node(cached_config.hosted_node)
+
+
+def _storage_declaration_sizes(
+    specs: Optional[NestedStrList],
+) -> Optional[dict[str, str]]:
+    """Return logical disk sizes when a storage declaration is well formed."""
+
+    if not specs:
+        return None
+    sizes: dict[str, str] = {}
+    for spec in specs:
+        if spec and spec[0] == "template":
+            continue
+        if len(spec) < 2 or spec[0] in sizes:
+            return None
+        sizes[spec[0]] = spec[-1]
+    return sizes or None
+
+
+def _storage_pool_only_rebind(
+    config: SetupConfig,
+    cached_config: SetupConfig,
+) -> bool:
+    """Return whether a rebind changes only provider storage pool names."""
+
+    desired = _storage_declaration_sizes(config.container_storage)
+    cached = _storage_declaration_sizes(cached_config.container_storage)
+    return desired is not None and desired == cached
+
+
 def _unsupported_cached_provisioning_changes(
     config: SetupConfig,
     cached_config: SetupConfig,
     args: argparse.Namespace,
+    *,
+    provider_rebind: bool = False,
 ) -> list[str]:
     """Return explicit existing-guest changes setup cannot safely reconcile."""
 
@@ -1179,6 +1239,16 @@ def _unsupported_cached_provisioning_changes(
             for field in changed_fields
             if field not in _RECONCILABLE_VM_PROVISIONING_CHANGES
         ]
+        if provider_rebind:
+            changed_fields = [
+                field
+                for field in changed_fields
+                if field != "hosted_bridge"
+                and not (
+                    field == "container_storage"
+                    and _storage_pool_only_rebind(config, cached_config)
+                )
+            ]
     return [_PROVISIONING_FIELD_FLAGS[field] for field in changed_fields]
 
 
@@ -1208,6 +1278,8 @@ def _reuse_cached_provisioning_metadata(
     config: SetupConfig,
     args: argparse.Namespace,
     cached_config: Optional[SetupConfig] = None,
+    *,
+    provider_rebind: bool = False,
 ) -> bool:
     """Hydrate an existing guest from local state and skip Proxmox discovery."""
     if not config.hosted_node:
@@ -1252,6 +1324,8 @@ def _reuse_cached_provisioning_metadata(
     )
 
     for field in _CACHED_PROVISIONING_FIELDS:
+        if provider_rebind and field in _PROVIDER_BINDING_FIELDS:
+            continue
         if (
             field in _PROVISIONING_CHANGE_ARGS
             and getattr(args, field, None) is not None
@@ -1300,7 +1374,8 @@ def _reuse_cached_provisioning_metadata(
         )
     )
     if (
-        provisioning_changes_requested
+        provider_rebind
+        or provisioning_changes_requested
         or vm_identity_changed
         or getattr(args, "verify_provider", False)
         or disk_policy_requested
@@ -1314,18 +1389,18 @@ def _reuse_cached_provisioning_metadata(
     return True
 
 
-def _is_same_cached_provisioned_guest(
+def _is_cached_provisioned_guest_identity(
     config: SetupConfig,
     cached_config: Optional[SetupConfig],
 ) -> bool:
-    """Return whether current Proxmox discovery targets the saved guest."""
+    """Return whether config retains a saved guest's non-provider identity."""
+
     if cached_config is None:
         return False
     return (
         _provisioning_cache_target(config.host)
         == _provisioning_cache_target(cached_config.host)
         and config.machine_type == cached_config.machine_type
-        and config.hosted_node == cached_config.hosted_node
     )
 
 
@@ -1334,7 +1409,7 @@ def _refresh_existing_managed_guest_host_keys(
     cached_config: Optional[SetupConfig],
 ) -> None:
     """Refresh SSH trust only for an existing guest known in local metadata."""
-    if not _is_same_cached_provisioned_guest(config, cached_config):
+    if not _is_cached_provisioned_guest_identity(config, cached_config):
         return
     refresh_managed_guest_host_keys(
         _provisioning_cache_target(config.host),
@@ -1486,11 +1561,17 @@ def run_setup_command(args: argparse.Namespace) -> int:
         return 1
 
     cached_provisioning = _load_cached_provisioning_metadata(config)
+    provider_rebind = _provider_rebind_requested(
+        config,
+        cached_provisioning,
+        args,
+    )
     if cached_provisioning is not None:
         unsupported_changes = _unsupported_cached_provisioning_changes(
             config,
             cached_provisioning,
             args,
+            provider_rebind=provider_rebind,
         )
         if unsupported_changes:
             print(
@@ -1504,7 +1585,15 @@ def run_setup_command(args: argparse.Namespace) -> int:
         config,
         args,
         cached_provisioning,
+        provider_rebind=provider_rebind,
     )
+
+    if provider_rebind and config.machine_type != "vm":
+        print(
+            "Error: changing --provision-on for a saved guest is currently "
+            "supported only for QEMU VMs"
+        )
+        return 1
 
     if not validate_username(config.username):
         print(f"Error: Invalid username: {config.username}")
@@ -1534,20 +1623,47 @@ def run_setup_command(args: argparse.Namespace) -> int:
         print("  ✓ Guest already provisioned in local metadata; skipping Proxmox host check")
     elif config.hosted_node:
         if config.machine_type == "vm":
-            from lib.proxmox_vm import provision_vm, VMAlreadyExists
+            from lib.proxmox_vm import (
+                VMAlreadyExists,
+                provision_vm,
+                verify_vm_rebind_source_stopped,
+            )
 
             print(f"\n{'='*60}")
             print(f"Provisioning VM on {config.hosted_node}...")
             print(f"{'='*60}")
             try:
-                provision_vm(
-                    config,
-                    image=config.vm_image,
-                    allow_existing_data_disks=_is_same_cached_provisioned_guest(
+                if provider_rebind:
+                    assert cached_provisioning is not None
+                    verify_vm_rebind_source_stopped(
+                        cached_provisioning,
+                        dry_run=config.dry_run,
+                    )
+                allow_existing_data_disks = (
+                    _is_cached_provisioned_guest_identity(
                         config,
                         cached_provisioning,
-                    ),
+                    )
                 )
+                if provider_rebind:
+                    provision_vm(
+                        config,
+                        image=config.vm_image,
+                        allow_existing_data_disks=allow_existing_data_disks,
+                        require_existing_name=True,
+                        verify_existing_bridge=(
+                            getattr(args, "hosted_bridge", None) is not None
+                        ),
+                        verify_existing_storage=(
+                            getattr(args, "container_storage", None) is not None
+                        ),
+                    )
+                else:
+                    provision_vm(
+                        config,
+                        image=config.vm_image,
+                        allow_existing_data_disks=allow_existing_data_disks,
+                    )
             except VMAlreadyExists:
                 from lib.swap_config import swap_device_disk_names
 
@@ -1556,7 +1672,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
                     or config.storage_caches
                     or swap_device_disk_names(config)
                 )
-                if has_managed_data_disks and not _is_same_cached_provisioned_guest(
+                if has_managed_data_disks and not _is_cached_provisioned_guest_identity(
                     config,
                     cached_provisioning,
                 ):
@@ -1631,7 +1747,8 @@ def run_setup_command(args: argparse.Namespace) -> int:
 
     if not config.dry_run:
         store_cli_credentials(config)
-        save_setup_command(config, operation="setup")
+        if not provider_rebind:
+            save_setup_command(config, operation="setup")
 
     if not os.path.exists(REMOTE_SCRIPT_PATH):
         print(f"Error: Remote setup script not found: {REMOTE_SCRIPT_PATH}")
@@ -1652,7 +1769,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     finally:
         end_time = time.time()
         success = (returncode == 0)
-        if not config.dry_run:
+        if not config.dry_run and (not provider_rebind or success):
             save_setup_command(config, start_time, end_time, success, operation="setup")
 
     if replaced_cache_host:

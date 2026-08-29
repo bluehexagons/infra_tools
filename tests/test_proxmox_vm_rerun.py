@@ -13,8 +13,9 @@ from lib.proxmox_vm import (
     _disk_hardware_update_verified,
     _disk_hardware_value,
     _reconcile_existing_vm,
+    verify_vm_rebind_source_stopped,
 )
-from lib.vm_storage import VMDiskHardware
+from lib.vm_storage import VMDataDisk, VMDiskHardware
 
 
 class TestExistingVMMemoryReconciliation(unittest.TestCase):
@@ -262,6 +263,173 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
                 for call in mock_run.call_args_list
             )
         )
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_migrated_vm_bridge_and_storage_are_verified(self, mock_run) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "net0: virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr1\n"
+                    "scsi0: fast-zfs:vm-112-disk-0,iothread=1,size=32G\n"
+                    "scsi1: archive:vm-112-disk-1,iothread=1,serial=it-data,size=64G\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+        ]
+
+        self.assertTrue(
+            _reconcile_existing_vm(
+                "10.0.0.11",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_disk_hardware={
+                    "root": VMDiskHardware("root", False, False),
+                    "data": VMDiskHardware("data", False, False),
+                },
+                desired_storage_layout={
+                    "root": VMDataDisk("root", "fast-zfs", "32G"),
+                    "data": VMDataDisk("data", "archive", "64G"),
+                },
+                desired_bridge="vmbr1",
+                allow_managed_data_disks=True,
+            )
+        )
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_migrated_vm_storage_mismatch_stops_before_mutation(self, mock_run) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "net0: virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr1\n"
+                    "scsi0: local-lvm:vm-112-disk-0,size=32G\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+        ]
+
+        with self.assertRaisesRegex(ProvisionError, "uses storage 'local-lvm'"):
+            _reconcile_existing_vm(
+                "10.0.0.11",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_disk_hardware={
+                    "root": VMDiskHardware("root", False, False),
+                },
+                desired_storage_layout={
+                    "root": VMDataDisk("root", "fast-zfs", "32G"),
+                },
+                allow_managed_data_disks=True,
+            )
+
+        self.assertFalse(
+            any(call.args[3].startswith("qm set") for call in mock_run.call_args_list)
+        )
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_provider_rebind_requires_saved_destination_name(self, mock_run) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 copied-vm running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: copied-vm\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+        ]
+
+        with self.assertRaisesRegex(ProvisionError, "expected saved name 'agent-2'"):
+            _reconcile_existing_vm(
+                "10.0.0.11",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                require_existing_name=True,
+            )
+
+        self.assertEqual(len(mock_run.call_args_list), 2)
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_provider_rebind_requires_stopped_source_vm(self, mock_run) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+        ]
+        config = SetupConfig(
+            host="10.0.0.50",
+            username="agent",
+            system_type="agent_code_vm",
+            machine_type="vm",
+            hosted_node="10.0.0.10",
+            system_hostname="agent-2",
+            static_ipv4="10.0.0.50/24",
+        )
+
+        with self.assertRaisesRegex(ProvisionError, "source VM 112.*not stopped"):
+            verify_vm_rebind_source_stopped(config)
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_provider_rebind_accepts_stopped_source_vm(self, mock_run) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 stopped\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: stopped\n"),
+        ]
+        config = SetupConfig(
+            host="10.0.0.50",
+            username="agent",
+            system_type="agent_code_vm",
+            machine_type="vm",
+            hosted_node="10.0.0.10",
+            system_hostname="agent-2",
+            static_ipv4="10.0.0.50/24",
+        )
+
+        verify_vm_rebind_source_stopped(config)
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_provider_rebind_dry_run_does_not_contact_source(self, mock_run) -> None:
+        config = SetupConfig(
+            host="10.0.0.50",
+            username="agent",
+            system_type="agent_code_vm",
+            machine_type="vm",
+            hosted_node="10.0.0.10",
+            system_hostname="agent-2",
+            static_ipv4="10.0.0.50/24",
+        )
+
+        verify_vm_rebind_source_stopped(config, dry_run=True)
+
+        mock_run.assert_not_called()
 
 
 class TestCachedProvisioningChangeSafety(unittest.TestCase):
