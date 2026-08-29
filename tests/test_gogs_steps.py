@@ -668,6 +668,94 @@ class TestGogsNginx(unittest.TestCase):
 
 
 class TestGogsRequiredSetupSteps(unittest.TestCase):
+    @patch("web.gogs_steps._write_admin_credentials")
+    @patch("web.gogs_steps.generate_password")
+    @patch("web.gogs_steps._gogs_admin_user_exists", return_value=False)
+    @patch("web.gogs_steps.run")
+    def test_initial_admin_uses_matching_runtime_credential(
+        self,
+        mock_run,
+        _user_exists,
+        mock_generate_password,
+        mock_write_credentials,
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        config = SetupConfig(
+            host="host",
+            username="gitadmin",
+            system_type="server_web",
+            gogs=[":3000", "/srv/gogs"],
+            share_credentials=[["gitadmin", "chosen-password"]],
+        )
+
+        gogs_steps._ensure_gogs_admin_account(
+            config,
+            "/srv/gogs/custom/conf/app.ini",
+            "/srv/gogs",
+        )
+
+        mock_generate_password.assert_not_called()
+        command = mock_run.call_args.args[0]
+        display_command = mock_run.call_args.kwargs["display_cmd"]
+        self.assertIn("--password chosen-password", command)
+        self.assertNotIn("chosen-password", display_command)
+        mock_write_credentials.assert_called_once_with("gitadmin", "chosen-password")
+
+    @patch("web.gogs_steps._write_admin_credentials")
+    @patch("web.gogs_steps.generate_password", return_value="generated-password")
+    @patch("web.gogs_steps._gogs_admin_user_exists", return_value=False)
+    @patch("web.gogs_steps.run")
+    def test_initial_admin_generates_password_without_matching_credential(
+        self,
+        mock_run,
+        _user_exists,
+        mock_generate_password,
+        mock_write_credentials,
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        config = SetupConfig(
+            host="host",
+            username="gitadmin",
+            system_type="server_web",
+            gogs=[":3000", "/srv/gogs"],
+        )
+
+        gogs_steps._ensure_gogs_admin_account(
+            config,
+            "/srv/gogs/custom/conf/app.ini",
+            "/srv/gogs",
+        )
+
+        mock_generate_password.assert_called_once_with(24)
+        self.assertIn("--password generated-password", mock_run.call_args.args[0])
+        mock_write_credentials.assert_called_once_with("gitadmin", "generated-password")
+
+    @patch("web.gogs_steps._write_admin_credentials")
+    @patch("web.gogs_steps.run")
+    @patch("web.gogs_steps._gogs_admin_user_exists", return_value=True)
+    def test_existing_admin_password_is_preserved(
+        self,
+        _user_exists,
+        mock_run,
+        mock_write_credentials,
+    ):
+        config = SetupConfig(
+            host="host",
+            username="gitadmin",
+            system_type="server_web",
+            gogs=[":3000", "/srv/gogs"],
+            share_credentials=[["gitadmin", "replacement-password"]],
+        )
+
+        gogs_steps._ensure_gogs_admin_account(
+            config,
+            "/srv/gogs/custom/conf/app.ini",
+            "/srv/gogs",
+        )
+
+        mock_run.assert_not_called()
+        mock_write_credentials.assert_not_called()
+
     def test_ssh_reload_failure_is_fatal(self):
         failed = SimpleNamespace(returncode=1, stdout="", stderr="failed")
         with (

@@ -13,6 +13,7 @@ from typing import Any, Mapping
 from lib.atomic_io import write_json_atomic, write_text_atomic
 from lib.auth_failure_bans import configure_nginx_auth_failure_ban
 from lib.config import SetupConfig
+from lib.credentials import get_runtime_credential
 from lib.nginx_config import SSL_CIPHERS, SSL_PROTOCOLS, generate_self_signed_cert, get_ssl_cert_path
 from lib.release_management import (
     detect_release_arch,
@@ -831,7 +832,9 @@ def _ensure_gogs_admin_account(config: SetupConfig, config_path: str, data_path:
         print(f"  ✓ Gogs admin user already exists: {admin_username}")
         return
 
-    password = generate_password(24)
+    password = get_runtime_credential(config, admin_username)
+    if password is None:
+        password = generate_password(24)
     email = f"{admin_username}@localhost"
     result = run(
         build_gogs_admin_command(

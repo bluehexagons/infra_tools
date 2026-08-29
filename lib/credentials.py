@@ -130,6 +130,19 @@ def list_workspace_credentials(workspace: str | None = None) -> list[str]:
     return sorted(load_workspace_credentials(workspace))
 
 
+def get_runtime_credential(config: SetupConfig, username: str) -> str | None:
+    """Return the last runtime credential matching ``username``, if present."""
+    requested_username = _normalize_credential_username(username)
+    password: str | None = None
+    for credential_spec in config.share_credentials or []:
+        if len(credential_spec) != 2:
+            raise ValueError("Credential spec requires USERNAME and PASSWORD")
+        credential_username, credential_password = credential_spec
+        if _normalize_credential_username(credential_username) == requested_username:
+            password = _normalize_credential_password(credential_password)
+    return password
+
+
 def store_cli_credentials(config: SetupConfig, workspace: str | None = None) -> None:
     """Persist credentials supplied on the command line."""
     credentials = load_workspace_credentials(workspace)
@@ -211,6 +224,15 @@ def _resolve_share_credentials(config: SetupConfig, credential_map: dict[str, st
         if username not in seen_usernames:
             seen_usernames.add(username)
             resolved_credentials.append([username, password])
+
+    if config.gogs:
+        gogs_admin = _normalize_credential_username(config.username)
+        password = credential_map.get(gogs_admin)
+        if password is not None and gogs_admin not in seen_usernames:
+            seen_usernames.add(gogs_admin)
+            resolved_credentials.append(
+                [gogs_admin, _normalize_credential_password(password)]
+            )
 
     return resolved_credentials
 

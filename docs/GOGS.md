@@ -58,11 +58,20 @@ path must be absolute and defaults to `/var/lib/gogs`.
 ## First login and Git access
 
 Registration is disabled. Setup creates the initial administrator named by
-the setup username and writes the generated password to the root-only file
-`/opt/infra_tools/state/gogs_admin_credentials.json`; retrieve it locally on
-the target and rotate it after the first login. The generated password has 24
-random characters. Use another unique, high-entropy value when rotating it and
-enable MFA for administrator accounts.
+the setup username. To choose its password without exposing it in shell
+history, save a matching workspace credential before setup:
+
+```bash
+infra-tools credentials set gitadmin
+```
+
+The setup command may instead include `--credential gitadmin PASSWORD`, but
+that exposes the value to shell history and potentially the process list. If
+there is no matching credential, setup generates a 24-character random
+password. In either case, setup records the initial value in the root-only file
+`/opt/infra_tools/state/gogs_admin_credentials.json`. A rerun preserves an
+existing administrator account and does not rotate its password. Use a unique,
+high-entropy value and enable MFA for administrator accounts.
 
 Hostname deployments throttle password and MFA submission endpoints to five
 requests per minute per client with a small burst. Nginx also emits a
@@ -169,6 +178,7 @@ disks. Save the placeholder Samba credentials without putting passwords in the
 setup command or shell history:
 
 ```bash
+infra-tools credentials set gitadmin
 infra-tools credentials set cluster
 infra-tools credentials set alice
 infra-tools credentials set bob

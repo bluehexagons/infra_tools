@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.config import SetupConfig
 from lib.credentials import (
+    get_runtime_credential,
     list_workspace_credentials,
     load_workspace_credentials,
     prepare_runtime_config,
@@ -126,6 +127,38 @@ class TestWorkspaceCredentials(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "Missing credential for Antistatic admin: operator"):
                 prepare_runtime_config(config, tmpdir)
+
+    def test_prepare_runtime_config_optionally_resolves_gogs_admin_credential(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            set_workspace_credential("gitadmin", "gogs-secret", tmpdir)
+            config = SetupConfig(
+                host="host",
+                username="gitadmin",
+                system_type="server_web",
+                gogs=[":3000", "/srv/gogs"],
+            )
+
+            runtime_config = prepare_runtime_config(config, tmpdir)
+
+            self.assertIsNone(config.share_credentials)
+            self.assertEqual(
+                get_runtime_credential(runtime_config, "gitadmin"),
+                "gogs-secret",
+            )
+
+    def test_missing_gogs_admin_credential_keeps_generation_optional(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = SetupConfig(
+                host="host",
+                username="gitadmin",
+                system_type="server_web",
+                gogs=[":3000", "/srv/gogs"],
+            )
+
+            runtime_config = prepare_runtime_config(config, tmpdir)
+
+            self.assertIsNone(runtime_config.share_credentials)
+            self.assertIsNone(get_runtime_credential(runtime_config, "gitadmin"))
 
     def test_set_workspace_credential_rejects_separator_username(self):
         with tempfile.TemporaryDirectory() as tmpdir:
