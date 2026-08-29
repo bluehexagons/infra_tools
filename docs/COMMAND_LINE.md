@@ -205,12 +205,15 @@ saved setup command with the destination in `--provision-on`. A changed
 provider host is never replaced with the cached source: infra-tools verifies
 that any matching source VM is stopped, requires the destination VM to match
 the saved name, IPv4 address, and managed-disk identities, then updates the
-saved provider binding only after remote setup succeeds. Supply the moved
-VM's actual `--bridge` when it changed. Storage pool names may also be updated
-with `--storage` when the logical disk names and declared sizes are unchanged;
-the destination volumes and minimum sizes are verified before provider-side
-settings are reconciled. A different disk set or size remains an explicit
-storage operation and is rejected by setup.
+saved provider binding only after remote setup succeeds. A missing destination
+is rejected rather than provisioned as a replacement. The destination bridge,
+storage pools, and minimum disk sizes are verified on every rebind before any
+provider-side settings are reconciled; a verified stopped destination is
+started and allowed time for SSH to return. Supply the moved VM's actual
+`--bridge` when it changed. Storage pool names may also be updated with
+`--storage` when the logical disk names and declared sizes are unchanged. A
+different disk set or size remains an explicit storage operation and is
+rejected by setup.
 
 A GUI clone that replaces the original can use the same rebind path only while
 the saved source VM is stopped. A clone intended to coexist with its source

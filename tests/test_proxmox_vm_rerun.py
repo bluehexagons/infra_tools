@@ -13,6 +13,7 @@ from lib.proxmox_vm import (
     _disk_hardware_update_verified,
     _disk_hardware_value,
     _reconcile_existing_vm,
+    _storage_specs_with_resolved_pools,
     verify_vm_rebind_source_stopped,
 )
 from lib.vm_storage import VMDataDisk, VMDiskHardware
@@ -163,6 +164,24 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
 
         self.assertEqual(len(mock_run.call_args_list), 4)
 
+    def test_resolved_storage_pools_replace_auto_declarations(self) -> None:
+        self.assertEqual(
+            _storage_specs_with_resolved_pools(
+                [
+                    ["root", "auto", "32G"],
+                    ["data", "auto", "64G"],
+                    ["template", "local"],
+                ],
+                "fast-zfs",
+                [VMDataDisk("data", "archive", "64G")],
+            ),
+            [
+                ["root", "fast-zfs", "32G"],
+                ["data", "archive", "64G"],
+                ["template", "local"],
+            ],
+        )
+
     @patch("lib.proxmox_vm._ssh_run")
     def test_cpu_and_disk_hints_are_reconciled_and_verified(self, mock_run) -> None:
         mock_run.side_effect = [
@@ -256,7 +275,7 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(len(mock_run.call_args_list), 4)
+        self.assertEqual(len(mock_run.call_args_list), 2)
         self.assertFalse(
             any(
                 call.args[3].startswith("qm set")
@@ -363,6 +382,70 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
             )
 
         self.assertEqual(len(mock_run.call_args_list), 2)
+
+    @patch("lib.proxmox_vm._wait_for_guest_ssh")
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_provider_rebind_starts_verified_stopped_destination(
+        self,
+        mock_run,
+        mock_wait,
+    ) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 stopped\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: stopped\n"),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+
+        self.assertTrue(
+            _reconcile_existing_vm(
+                "10.0.0.11",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                require_existing=True,
+                require_existing_name=True,
+                start_existing=True,
+            )
+        )
+
+        self.assertEqual(mock_run.call_args_list[3].args[3], "qm start 112")
+        mock_wait.assert_called_once_with(
+            "10.0.0.50",
+            "10.0.0.11",
+            "root",
+            [],
+            timeout=300,
+            dry_run=False,
+            label="Migrated VM",
+        )
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_provider_rebind_refuses_missing_destination(self, mock_run) -> None:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="VMID NAME STATUS\n",
+        )
+
+        with self.assertRaisesRegex(ProvisionError, "No VM matching saved name"):
+            _reconcile_existing_vm(
+                "10.0.0.11",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                require_existing=True,
+                require_existing_name=True,
+            )
+
+        mock_run.assert_called_once()
 
     @patch("lib.proxmox_vm._ssh_run")
     def test_provider_rebind_requires_stopped_source_vm(self, mock_run) -> None:

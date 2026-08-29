@@ -28,8 +28,6 @@ def _args(**overrides: object) -> Namespace:
         "username": "agent",
         "system_type": "workstation_dev",
         "hosted_node": "10.0.0.10",
-        "hosted_user": "root",
-        "hosted_key": None,
         "machine_type": None,
         "hosted_bridge": None,
         "container_memory": None,
@@ -254,6 +252,51 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         self.assertEqual(current.hosted_key, "/keys/pve2")
         self.assertEqual(current.hosted_bridge, "vmbr1")
         self.assertEqual(current.container_storage, cached.container_storage)
+
+    def test_same_node_rerun_preserves_explicit_provider_credentials(self) -> None:
+        current = _config(
+            hosted_user="operator",
+            hosted_key="/keys/new",
+        )
+        cached = _config(
+            hosted_user="admin",
+            hosted_key="/keys/old",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+
+        infra_tools._reuse_cached_provisioning_metadata(
+            current,
+            _args(hosted_user="operator", hosted_key="/keys/new"),
+            cached,
+        )
+
+        self.assertEqual(current.hosted_user, "operator")
+        self.assertEqual(current.hosted_key, "/keys/new")
+
+    def test_same_node_rerun_inherits_unmodified_provider_credentials(self) -> None:
+        current = _config()
+        cached = _config(
+            hosted_user="admin",
+            hosted_key="/keys/old",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+
+        infra_tools._reuse_cached_provisioning_metadata(
+            current,
+            _args(),
+            cached,
+        )
+
+        self.assertEqual(current.hosted_user, "admin")
+        self.assertEqual(current.hosted_key, "/keys/old")
 
     def test_provider_rebind_allows_only_storage_pool_remapping(self) -> None:
         cached = _config(
@@ -825,7 +868,9 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             current,
             image=current.vm_image,
             allow_existing_data_disks=True,
+            require_existing_vm=True,
             require_existing_name=True,
+            start_existing_vm=True,
             verify_existing_bridge=True,
             verify_existing_storage=True,
         )

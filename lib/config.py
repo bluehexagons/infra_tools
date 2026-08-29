@@ -1981,7 +1981,7 @@ class SetupConfig:
             auto_restart_grace=auto_restart_grace,
             proxmox_balloon_target=getattr(args, 'proxmox_balloon_target', None),
             hosted_node=getattr(args, 'hosted_node', None),
-            hosted_user=getattr(args, 'hosted_user', 'root'),
+            hosted_user=getattr(args, 'hosted_user', None) or 'root',
             hosted_key=getattr(args, 'hosted_key', None),
             hosted_bridge=getattr(args, 'hosted_bridge', None),
             container_memory=getattr(args, 'container_memory', None),

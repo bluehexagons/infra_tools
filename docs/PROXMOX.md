@@ -335,10 +335,13 @@ credentials, and bridge instead of restoring the cached source binding. It
 requires the old source VM to be stopped or absent and the destination to have
 the saved IPv4 address, VM name, and managed-disk identities. If storage pools
 changed, repeat `--storage` with the new pools and unchanged logical names and
-sizes; setup verifies the destination pool and minimum size of every declared
-disk. The saved provider binding changes only after remote setup succeeds.
-A replacement clone can follow this path while the original remains stopped;
-a coexisting clone needs a unique address, hostname, and saved setup identity.
+sizes. Every rebind verifies the destination bridge, pool, and minimum size of
+each declared disk. A missing destination is rejected instead of creating a
+new VM; a matching stopped destination is started only after those checks and
+allowed time for SSH to return. The saved provider binding changes only after
+remote setup succeeds. A replacement clone can follow this path while the
+original remains stopped; a coexisting clone needs a unique address, hostname,
+and saved setup identity.
 
 Existing-guest setup does not replace, resize, attach, or detach root/data
 volumes, and does not mutate bridges, cache declarations, base images, or image

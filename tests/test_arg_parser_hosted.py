@@ -21,9 +21,10 @@ class TestHostedFlagParsing(unittest.TestCase):
         args = self.parser.parse_args(["10.0.0.50", "--provision-on", "10.0.0.1"])
         self.assertEqual(args.hosted_node, "10.0.0.1")
 
-    def test_hosted_user_default_root(self):
+    def test_hosted_user_default_is_deferred_to_config(self):
         args = self.parser.parse_args(["10.0.0.50", "--provision-on", "10.0.0.1"])
-        self.assertEqual(args.hosted_user, "root")
+        self.assertFalse(hasattr(args, "hosted_user"))
+        self.assertFalse(hasattr(args, "hosted_key"))
 
     def test_hosted_user_override(self):
         args = self.parser.parse_args([

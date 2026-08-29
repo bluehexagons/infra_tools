@@ -313,6 +313,27 @@ def _verify_existing_bridge(vm: _ExistingVM, desired_bridge: str) -> None:
         )
 
 
+def _storage_specs_with_resolved_pools(
+    specs: NestedStrList,
+    root_pool: str,
+    data_disk_specs: list[VMDataDisk],
+) -> NestedStrList:
+    """Replace logical disk pool declarations with resolved provider pools."""
+
+    resolved_by_name = {disk.name: disk.pool for disk in data_disk_specs}
+    resolved_specs: NestedStrList = []
+    for spec in specs:
+        if len(spec) == 3 and spec[0] == "root":
+            resolved_specs.append(["root", root_pool, spec[2]])
+        elif len(spec) == 3 and spec[0] in resolved_by_name:
+            resolved_specs.append(
+                [spec[0], resolved_by_name[spec[0]], spec[2]]
+            )
+        else:
+            resolved_specs.append(list(spec))
+    return resolved_specs
+
+
 def _parse_size_kib(value: str, *, label: str) -> int:
     s = (value or "").strip()
     if not s:
@@ -731,7 +752,9 @@ def _reconcile_existing_vm(
     desired_disk_hardware: Optional[dict[str, VMDiskHardware]] = None,
     desired_storage_layout: Optional[dict[str, VMDataDisk]] = None,
     desired_bridge: Optional[str] = None,
+    require_existing: bool = False,
     require_existing_name: bool = False,
+    start_existing: bool = False,
     allow_managed_data_disks: bool = False,
     allow_memory_overcommit: bool = False,
     dry_run: bool = False,
@@ -798,6 +821,11 @@ def _reconcile_existing_vm(
                 f"(VMIDs: {ids}) but is not configured with IP {target_ip}; "
                 "choose a unique name or repair the existing VM explicitly"
             )
+        if require_existing:
+            raise ProvisionError(
+                f"No VM matching saved name '{desired_name}' and IP {target_ip} "
+                f"was found on rebind destination {node_ip}"
+            )
         return False
 
     matched = ip_matches[0]
@@ -818,26 +846,6 @@ def _reconcile_existing_vm(
             f"expected saved name '{desired_name}' for provider rebind"
         )
 
-    status = _ssh_run(
-        node_ip, user, ssh_opts, f"qm status {matched.vmid}", dry_run=False
-    )
-    probe = _ssh_run(
-        node_ip,
-        user,
-        ssh_opts,
-        f"timeout 3 bash -c '</dev/tcp/{shlex.quote(target_ip)}/22' && echo READY",
-        dry_run=False,
-    )
-    if not (
-        status.returncode == 0
-        and "status: running" in (status.stdout or "")
-        and "READY" in (probe.stdout or "")
-    ):
-        raise ProvisionError(
-            f"VM {matched.vmid} is configured with IP {target_ip} but is not "
-            "reachable on SSH; remove or repair it before retrying provisioning"
-        )
-
     if (
         desired_disk_hardware is not None
         and any(name != "root" for name in desired_disk_hardware)
@@ -846,6 +854,55 @@ def _reconcile_existing_vm(
         raise ProvisionError(
             "named VM data disks, caches, and swap disks are provisioning-only; "
             "refusing to adopt disks on an existing unsaved VM"
+        )
+
+    managed_disks = (
+        _existing_managed_disks(matched, desired_disk_hardware)
+        if desired_disk_hardware is not None
+        else {}
+    )
+    if desired_storage_layout is not None:
+        if set(desired_storage_layout) != set(managed_disks):
+            raise ProvisionError(
+                "VM storage verification requires every declared disk"
+            )
+        _verify_existing_storage_layout(
+            matched,
+            managed_disks,
+            desired_storage_layout,
+        )
+    if desired_bridge is not None:
+        _verify_existing_bridge(matched, desired_bridge)
+
+    status = _ssh_run(
+        node_ip, user, ssh_opts, f"qm status {matched.vmid}", dry_run=False
+    )
+    if status.returncode != 0:
+        detail = (status.stderr or status.stdout or "").strip() or "unknown error"
+        raise ProvisionError(
+            f"Could not verify VM {matched.vmid} on {node_ip}: {detail}"
+        )
+    status_text = status.stdout or ""
+    start_after_reconcile = False
+    if "status: stopped" in status_text and start_existing:
+        start_after_reconcile = True
+    elif "status: running" in status_text:
+        probe = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"timeout 3 bash -c '</dev/tcp/{shlex.quote(target_ip)}/22' && echo READY",
+            dry_run=False,
+        )
+        if probe.returncode != 0 or "READY" not in (probe.stdout or ""):
+            raise ProvisionError(
+                f"VM {matched.vmid} is configured with IP {target_ip} but is not "
+                "reachable on SSH; repair it before retrying provisioning"
+            )
+    else:
+        raise ProvisionError(
+            f"VM {matched.vmid} is not reachable because it is not running; "
+            "start or repair it before retrying provisioning"
         )
 
     name_changed = bool(
@@ -869,23 +926,6 @@ def _reconcile_existing_vm(
     cpu_changed = bool(
         desired_cpu_type is not None and matched.cpu_type != desired_cpu_type
     )
-    managed_disks = (
-        _existing_managed_disks(matched, desired_disk_hardware)
-        if desired_disk_hardware is not None
-        else {}
-    )
-    if desired_storage_layout is not None:
-        if set(desired_storage_layout) != set(managed_disks):
-            raise ProvisionError(
-                "VM storage verification requires every declared disk"
-            )
-        _verify_existing_storage_layout(
-            matched,
-            managed_disks,
-            desired_storage_layout,
-        )
-    if desired_bridge is not None:
-        _verify_existing_bridge(matched, desired_bridge)
     disk_changes = [
         (logical_name, device, value, desired_disk_hardware[logical_name])
         for logical_name, (device, value) in managed_disks.items()
@@ -1010,6 +1050,30 @@ def _reconcile_existing_vm(
                 f"for VM {matched.vmid}"
             )
 
+    if start_after_reconcile:
+        started = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"qm start {matched.vmid}",
+            dry_run=False,
+        )
+        if started.returncode != 0:
+            detail = (started.stderr or started.stdout or "").strip() or "unknown error"
+            raise ProvisionError(
+                f"Failed to start migrated VM {matched.vmid} on {node_ip}: {detail}"
+            )
+        _wait_for_guest_ssh(
+            target_ip,
+            node_ip,
+            user,
+            ssh_opts,
+            timeout=300,
+            dry_run=False,
+            label="Migrated VM",
+        )
+        print(f"  ✓ Started migrated VM {matched.vmid} on {node_ip}")
+
     if name_changed:
         print(
             f"  ✓ Renamed existing VM {matched.vmid} from "
@@ -1020,10 +1084,11 @@ def _reconcile_existing_vm(
             f"  ✓ Reconfigured existing VM {matched.vmid} from "
             f"{matched.cores or 'an unspecified number of'} to {desired_cores} cores"
         )
-        print(
-            f"  ⚠ VM {matched.vmid} is running; restart it for the vCPU "
-            "change to take effect in the guest"
-        )
+        if not start_after_reconcile:
+            print(
+                f"  ⚠ VM {matched.vmid} is running; restart it for the vCPU "
+                "change to take effect in the guest"
+            )
     if memory_changed:
         previous_maximum = matched.memory_mib or "an unspecified maximum"
         previous_minimum = (
@@ -1036,7 +1101,7 @@ def _reconcile_existing_vm(
             f"{previous_maximum}/{previous_minimum} MiB max/floor to "
             f"{desired_memory_mib}/{desired_balloon_min_mib} MiB"
         )
-        if matched.memory_mib != desired_memory_mib:
+        if matched.memory_mib != desired_memory_mib and not start_after_reconcile:
             print(
                 f"  ⚠ VM {matched.vmid} is running; restart it if the guest "
                 "does not observe the new memory maximum"
@@ -1068,7 +1133,7 @@ def _reconcile_existing_vm(
         or _disk_option(value, "iothread") != "1"
         for _logical_name, _device, value, hardware in disk_changes
     )
-    if cpu_changed or disk_model_changed:
+    if (cpu_changed or disk_model_changed) and not start_after_reconcile:
         print(
             f"  ⚠ VM {matched.vmid} is running; restart it for all hardware "
             "model changes to take effect in the guest"
@@ -1796,7 +1861,9 @@ def provision_vm(
     *,
     image: Optional[str] = None,
     allow_existing_data_disks: bool = False,
+    require_existing_vm: bool = False,
     require_existing_name: bool = False,
+    start_existing_vm: bool = False,
     verify_existing_bridge: bool = False,
     verify_existing_storage: bool = False,
 ) -> None:
@@ -1808,7 +1875,9 @@ def provision_vm(
             reference like ``local:import/foo.qcow2``.
         allow_existing_data_disks: Permit reconciliation of named disks only
             when the caller has matched this guest to saved provisioning state.
+        require_existing_vm: Refuse to create a replacement when rebind lookup fails.
         require_existing_name: Require an existing VM to retain the saved name.
+        start_existing_vm: Start a verified existing VM when it is stopped.
         verify_existing_bridge: Require an existing VM's net0 bridge to match.
         verify_existing_storage: Require existing disks to match declared pools.
 
@@ -1876,8 +1945,8 @@ def provision_vm(
         print("[DRY RUN] Would provision Proxmox VM:")
         if verify_existing_bridge or verify_existing_storage:
             print(
-                "  Existing VM rebind: verify destination identity and declared "
-                "hardware before adoption"
+                "  Existing VM rebind: require and verify the destination, then "
+                "start it if stopped"
             )
         print(f"  Proxmox node: {node_ip}")
         print(f"  Target IP: {target_ip}")
@@ -1975,6 +2044,43 @@ def provision_vm(
         else _get_bridge_prefix_length(node_ip, user, ssh_opts, bridge)
     )
 
+    verified_storage_layout: Optional[dict[str, VMDataDisk]] = None
+    resolved_root_pool: Optional[str] = None
+    resolved_data_disks: Optional[list[VMDataDisk]] = None
+    if verify_existing_storage:
+        resolved_root_pool = _resolve_storage_pool(
+            root_pool_arg,
+            node_ip,
+            user,
+            ssh_opts,
+            "images",
+        )
+        resolved_data_disks = [
+            VMDataDisk(
+                disk.name,
+                _resolve_storage_pool(
+                    disk.pool,
+                    node_ip,
+                    user,
+                    ssh_opts,
+                    "images",
+                    strict_content=True,
+                ),
+                disk.size,
+            )
+            for disk in declared_data_disks
+        ]
+        verified_storage_layout = {
+            "root": VMDataDisk("root", resolved_root_pool, disk_amount),
+            **{disk.name: disk for disk in resolved_data_disks},
+        }
+        config.container_storage = _storage_specs_with_resolved_pools(
+            storage_specs,
+            resolved_root_pool,
+            resolved_data_disks,
+        )
+        storage_specs = cast(NestedStrList, config.container_storage)
+
     if _reconcile_existing_vm(
         node_ip,
         target_ip,
@@ -1987,16 +2093,11 @@ def provision_vm(
         desired_balloon_shares=balloon_shares,
         desired_cpu_type=cpu_type,
         desired_disk_hardware=disk_hardware_settings,
-        desired_storage_layout=(
-            {
-                "root": VMDataDisk("root", root_pool_arg, disk_amount),
-                **{disk.name: disk for disk in declared_data_disks},
-            }
-            if verify_existing_storage
-            else None
-        ),
+        desired_storage_layout=verified_storage_layout,
         desired_bridge=bridge if verify_existing_bridge else None,
+        require_existing=require_existing_vm,
         require_existing_name=require_existing_name,
+        start_existing=start_existing_vm,
         allow_managed_data_disks=allow_existing_data_disks,
         allow_memory_overcommit=getattr(
             config,
@@ -2020,19 +2121,25 @@ def provision_vm(
         getattr(config, "allow_memory_overcommit", False),
     )
 
-    root_pool = _resolve_storage_pool(
+    root_pool = resolved_root_pool or _resolve_storage_pool(
         root_pool_arg, node_ip, user, ssh_opts, "images"
     )
-    resolved_data_disks = [
-        VMDataDisk(
-            disk.name,
-            _resolve_storage_pool(
-                disk.pool, node_ip, user, ssh_opts, "images", strict_content=True
-            ),
-            disk.size,
-        )
-        for disk in declared_data_disks
-    ]
+    if resolved_data_disks is None:
+        resolved_data_disks = [
+            VMDataDisk(
+                disk.name,
+                _resolve_storage_pool(
+                    disk.pool,
+                    node_ip,
+                    user,
+                    ssh_opts,
+                    "images",
+                    strict_content=True,
+                ),
+                disk.size,
+            )
+            for disk in declared_data_disks
+        ]
     from lib.swap_config import swap_device_disk_names
 
     _warn_zfs_swap_storage(
@@ -2048,13 +2155,11 @@ def provision_vm(
         user,
         ssh_opts,
     )
-    resolved_by_name = {disk.name: disk for disk in resolved_data_disks}
-    config.container_storage = [
-        [spec[0], resolved_by_name[spec[0]].pool, spec[2]]
-        if len(spec) == 3 and spec[0] in resolved_by_name
-        else list(spec)
-        for spec in storage_specs
-    ]
+    config.container_storage = _storage_specs_with_resolved_pools(
+        storage_specs,
+        root_pool,
+        resolved_data_disks,
+    )
     snippet_pool = _resolve_storage_pool(
         "auto", node_ip, user, ssh_opts, "snippets"
     )

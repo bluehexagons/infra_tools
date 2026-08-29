@@ -407,13 +407,14 @@ def add_setup_arguments(
         parser.add_argument(
             "--provision-user",
             dest="hosted_user",
-            default="root",
+            default=argparse.SUPPRESS,
             metavar="USER",
             help="SSH user for Proxmox node (default: root)",
         )
         parser.add_argument(
             "--provision-key",
             dest="hosted_key",
+            default=argparse.SUPPRESS,
             metavar="PATH",
             help="SSH key for Proxmox node (default: saved host key, --key, or SSH config)",
         )

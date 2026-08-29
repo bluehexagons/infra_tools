@@ -1190,6 +1190,17 @@ def _provider_rebind_requested(
     ) != _canonical_provisioning_node(cached_config.hosted_node)
 
 
+def _provider_binding_was_explicit(
+    args: argparse.Namespace,
+    field: str,
+) -> bool:
+    """Return whether a provider-binding field was supplied on the CLI."""
+
+    if field in {"hosted_user", "hosted_key"}:
+        return hasattr(args, field)
+    return getattr(args, field, None) is not None
+
+
 def _storage_declaration_sizes(
     specs: Optional[NestedStrList],
 ) -> Optional[dict[str, str]]:
@@ -1324,7 +1335,9 @@ def _reuse_cached_provisioning_metadata(
     )
 
     for field in _CACHED_PROVISIONING_FIELDS:
-        if provider_rebind and field in _PROVIDER_BINDING_FIELDS:
+        if field in _PROVIDER_BINDING_FIELDS and (
+            provider_rebind or _provider_binding_was_explicit(args, field)
+        ):
             continue
         if (
             field in _PROVISIONING_CHANGE_ARGS
@@ -1650,13 +1663,11 @@ def run_setup_command(args: argparse.Namespace) -> int:
                         config,
                         image=config.vm_image,
                         allow_existing_data_disks=allow_existing_data_disks,
+                        require_existing_vm=True,
                         require_existing_name=True,
-                        verify_existing_bridge=(
-                            getattr(args, "hosted_bridge", None) is not None
-                        ),
-                        verify_existing_storage=(
-                            getattr(args, "container_storage", None) is not None
-                        ),
+                        start_existing_vm=True,
+                        verify_existing_bridge=True,
+                        verify_existing_storage=True,
                     )
                 else:
                     provision_vm(
