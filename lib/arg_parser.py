@@ -1158,6 +1158,16 @@ def add_setup_arguments(
             "(default: syncthing-admin)"
         ),
     )
+    parser.add_argument(
+        "--syncthing-root",
+        dest="syncthing_root",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Confine Syncthing folders to this storage root "
+            "(default: /srv/syncthing)"
+        ),
+    )
     
     parser.add_argument("--sync", dest="sync_specs", 
                        action="append", nargs=3, metavar=("SOURCE", "DESTINATION", "INTERVAL"),

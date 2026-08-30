@@ -6,10 +6,10 @@ encrypts device-to-device traffic and can use outbound relays when direct
 connections are unavailable.
 
 Infra-tools owns the service boundary: a non-root systemd service, an
-authenticated HTTPS admin endpoint, a fixed writable root at `/srv/syncthing`,
-and conservative network defaults. The Syncthing web GUI owns devices, folders,
-folder direction, and versioning. Rerunning infra-tools preserves those GUI
-changes.
+authenticated HTTPS admin endpoint, one configurable writable storage root,
+and conservative network defaults. The Syncthing web GUI owns devices,
+folders, folder direction, and versioning. Rerunning infra-tools preserves
+those GUI changes.
 
 ## Install the endpoint
 
@@ -38,14 +38,62 @@ each administrator's browser device as described in
 [Internal HTTPS sites and previews](INTERNAL_WEB.md#certificate-trust). Do not
 disable certificate verification.
 
+## Choose the storage root
+
+The default storage root is `/srv/syncthing`. Select another bounded service
+path with `--syncthing-root`; `/data` and paths below `/data`, `/mnt`, `/srv`,
+or `/var/lib` are accepted:
+
+```bash
+infra-tools setup server_lite fileserver admin \
+  --syncthing --syncthing-root /mnt/team-files
+```
+
+Infra-tools creates the root for the setup user and confines the systemd
+service to that root. The generated service also uses `RequiresMountsFor=`, so
+a declared or separately managed data mount must be available before Syncthing
+starts. This prevents a missing disk from redirecting writes into the root
+filesystem.
+
+### Provision a VM with dedicated Syncthing storage
+
+When provisioning a Proxmox VM, declare the root disk, a named data disk, its
+guest mount, and the matching Syncthing root together:
+
+```bash
+infra-tools credentials set syncthing-admin
+
+infra-tools setup server_lite 192.168.0.60 admin \
+  --provision-on pve1 --name fileserver \
+  --cores 2 --memory 4G \
+  --storage root local-lvm 32G \
+  --storage syncthing-data bulk-lvm 512G \
+  --storage-mount syncthing-data /srv/syncthing ext4 empty \
+  --disk-backup syncthing-data \
+  --syncthing --syncthing-root /srv/syncthing
+```
+
+Replace the Proxmox host, pools, target address, and sizes with the deployment's
+values. The named disk and `--storage-mount` are provisioning declarations;
+`--syncthing-root` tells the service which mounted tree it may use. Keeping the
+same path for both makes the dependency explicit and fail-closed. Proxmox disk
+backup inclusion does not replace Syncthing versioning or an independent
+off-host backup.
+
+Changing `--syncthing-root` does not move files or rewrite GUI folder paths.
+Before changing it on an existing endpoint, migrate the data and update or
+recreate the GUI folders so every folder path is below the new root. Setup
+rejects a configuration that would leave a GUI-managed folder outside the
+service sandbox.
+
 ## Add people and folders
 
 1. Open the printed HTTPS URL and sign in.
 2. Have each coworker install Syncthing and send you their device ID.
 3. In the server GUI, select **Add Remote Device**, enter the ID and a helpful
    name, and save it. Do not mark a coworker as an introducer.
-4. Select **Add Folder**, use a path below `/srv/syncthing`, and select only the
-   devices that should receive it.
+4. Select **Add Folder**, use a path below the configured Syncthing root, and
+   select only the devices that should receive it.
 5. On each coworker's client, add the server device ID and accept the offered
    folder at an appropriate local path.
 
@@ -55,11 +103,11 @@ password, SSH access, a VPN, or access to one another's devices. A normal
 that need different access, because Syncthing does not provide per-file ACLs
 inside one folder.
 
-New folders default to `/srv/syncthing` and staggered versioning for up to one
-year. Both are visible and adjustable in the GUI. Existing folder settings are
-never reset by an infra-tools rerun. Versioning is useful recovery but is not
-an independent backup; retain server snapshots or another backup for disk
-loss, administrator mistakes, or compromise.
+New folders default to the configured storage root and staggered versioning for
+up to one year. Both are visible and adjustable in the GUI. Existing folder
+settings are never reset by an infra-tools rerun. Versioning is useful recovery
+but is not an independent backup; retain server snapshots or another backup
+for disk loss, administrator mistakes, or compromise.
 
 ## Administrator credential rotation
 
@@ -93,17 +141,18 @@ To remove the service and HTTPS route while preserving state and files:
 infra-tools patch fileserver --no-syncthing
 ```
 
-Re-enabling the endpoint retains the device ID and GUI-managed sharing state.
-Delete `/var/lib/infra-tools/syncthing` or `/srv/syncthing` only as a separate,
-deliberate cleanup after verifying the data is no longer needed.
+Re-enabling the endpoint retains the configured storage root, device ID, and
+GUI-managed sharing state. Delete `/var/lib/infra-tools/syncthing` or the
+configured storage root only as a separate, deliberate cleanup after verifying
+the data is no longer needed.
 
 ## Security boundaries
 
 - The GUI remains bound to `127.0.0.1:8384`; only the managed HTTPS gateway is
   externally reachable, and its firewall scope follows infra-tools access
   sources.
-- The service can write only its state directory and `/srv/syncthing`; GUI
-  folder paths outside that root will fail rather than expanding access.
+- The service can write only its state directory and configured storage root;
+  GUI folder paths outside that root fail rather than expanding access.
 - Automatic router mapping is disabled. Existing routing can permit direct
   device connections; otherwise outbound relay fallback remains enabled.
 - Device IDs grant folder-level Syncthing trust, not Unix or general network

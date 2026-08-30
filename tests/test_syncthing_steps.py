@@ -9,8 +9,8 @@ from unittest.mock import patch
 from lib.config import SetupConfig
 from lib.system_types import get_steps_for_system_type
 from sync.syncthing_steps import (
+    DEFAULT_SYNCTHING_ROOT,
     SYNCTHING_HOME,
-    SYNCTHING_SHARE_ROOT,
     _configure_syncthing_https,
     _render_service,
     build_syncthing_policy_config,
@@ -91,7 +91,7 @@ class SyncthingDesiredConfigTest(unittest.TestCase):
     def test_policy_preserves_gui_devices_folders_and_versioning(self) -> None:
         current = _current_config()
 
-        desired = build_syncthing_policy_config(current)
+        desired = build_syncthing_policy_config(current, DEFAULT_SYNCTHING_ROOT)
 
         self.assertEqual(desired["devices"], current["devices"])
         self.assertEqual(desired["folders"], current["folders"])
@@ -103,9 +103,12 @@ class SyncthingDesiredConfigTest(unittest.TestCase):
         self.assertFalse(desired["options"]["natEnabled"])
         self.assertEqual(
             desired["options"]["defaultFolderPath"],
-            SYNCTHING_SHARE_ROOT,
+            DEFAULT_SYNCTHING_ROOT,
         )
-        self.assertEqual(desired["defaults"]["folder"]["path"], SYNCTHING_SHARE_ROOT)
+        self.assertEqual(
+            desired["defaults"]["folder"]["path"],
+            DEFAULT_SYNCTHING_ROOT,
+        )
         self.assertEqual(
             desired["defaults"]["folder"]["versioning"]["type"],
             "staggered",
@@ -116,7 +119,14 @@ class SyncthingDesiredConfigTest(unittest.TestCase):
         current["gui"].pop("password")
 
         with self.assertRaisesRegex(RuntimeError, "password was not configured"):
-            build_syncthing_policy_config(current)
+            build_syncthing_policy_config(current, DEFAULT_SYNCTHING_ROOT)
+
+    def test_policy_rejects_gui_folder_outside_storage_root(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "outside the configured"):
+            build_syncthing_policy_config(
+                _current_config(),
+                "/mnt/team-files",
+            )
 
     def test_service_is_unprivileged_hardened_and_confined(self) -> None:
         service = _render_service(_config(), "agent")
@@ -127,7 +137,21 @@ class SyncthingDesiredConfigTest(unittest.TestCase):
         self.assertIn("CapabilityBoundingSet=", service)
         self.assertIn("--gui-address=http://127.0.0.1:8384", service)
         self.assertIn(f'ReadWritePaths="{SYNCTHING_HOME}"', service)
-        self.assertIn(f'ReadWritePaths="{SYNCTHING_SHARE_ROOT}"', service)
+        self.assertIn(f'ReadWritePaths="{DEFAULT_SYNCTHING_ROOT}"', service)
+        self.assertIn(
+            f'RequiresMountsFor="{DEFAULT_SYNCTHING_ROOT}"',
+            service,
+        )
+
+    def test_service_uses_custom_storage_root(self) -> None:
+        service = _render_service(
+            _config(syncthing_root="/mnt/team-files"),
+            "agent",
+        )
+
+        self.assertIn('ReadWritePaths="/mnt/team-files"', service)
+        self.assertIn('RequiresMountsFor="/mnt/team-files"', service)
+        self.assertNotIn(f'ReadWritePaths="{DEFAULT_SYNCTHING_ROOT}"', service)
 
 
 class SyncthingCompositionTest(unittest.TestCase):

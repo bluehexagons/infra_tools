@@ -97,12 +97,47 @@ _CHANNEL_VERSION_PATTERN = re.compile(
 )
 _CHANNEL_BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9._/-]*[A-Za-z0-9_])?$")
 _CHANNEL_COMMIT_PATTERN = re.compile(r"^[0-9A-Fa-f]{4,64}$")
+
+
+def _validate_syncthing_root(storage_root: object) -> None:
+    if storage_root is None:
+        return
+    if not isinstance(storage_root, str):
+        raise ValueError("--syncthing-root must be a filesystem path")
+    validate_filesystem_path(storage_root, must_exist=False)
+    if not os.path.isabs(storage_root) or os.path.normpath(storage_root) != storage_root:
+        raise ValueError("--syncthing-root must be an absolute, normalized path")
+    if not _VM_MOUNT_PATH_PATTERN.fullmatch(storage_root):
+        raise ValueError(
+            "--syncthing-root components may contain only letters, numbers, "
+            "'.', '_', or '-'"
+        )
+    allowed = storage_root == "/data" or storage_root.startswith(
+        ("/data/", "/mnt/", "/srv/", "/var/lib/")
+    )
+    if not allowed:
+        raise ValueError(
+            "--syncthing-root must be /data or below /data, /mnt, /srv, or /var/lib"
+        )
+    state_root = "/var/lib/infra-tools/syncthing"
+    if (
+        storage_root == state_root
+        or storage_root.startswith(f"{state_root}{os.sep}")
+        or state_root.startswith(f"{storage_root}{os.sep}")
+    ):
+        raise ValueError(
+            "--syncthing-root must not overlap Syncthing's managed state directory"
+        )
+
+
 def validate_syncthing_settings(config: Any) -> None:
     """Validate managed Syncthing service and administrator boundaries."""
 
     enabled = bool(getattr(config, "enable_syncthing", False))
     disabled = bool(getattr(config, "disable_syncthing", False))
     admin = getattr(config, "syncthing_admin", None)
+    storage_root = getattr(config, "syncthing_root", None)
+    _validate_syncthing_root(storage_root)
 
     if disabled:
         if enabled or admin:

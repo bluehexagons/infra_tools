@@ -1040,6 +1040,7 @@ health.
 | `--mount-smb MOUNTPOINT IP CREDENTIALS SHARE SUBDIR` | Mount an SMB share persistently; `SUBDIR` may be `/` |
 | `--syncthing` | Install a managed, non-root Syncthing endpoint with an authenticated HTTPS admin UI |
 | `--syncthing-admin USERNAME` | Select the workspace credential used for the web administrator (default: `syncthing-admin`) |
+| `--syncthing-root PATH` | Confine GUI-managed folders to a storage root (default: `/srv/syncthing`) |
 | `--no-syncthing` | Stop and remove the managed service while preserving its identity, database, and synchronized files |
 | `--sync SOURCE DEST INTERVAL` | Configure rsync sync |
 | `--scrub DIR DBPATH REDUNDANCY FREQ` | Configure par2 integrity checking |

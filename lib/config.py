@@ -35,6 +35,7 @@ BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
 EDITORS = ("geany", "vscode")
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 GODOT_BUNDLES = ("web", "publishing")
+DEFAULT_SYNCTHING_ROOT = "/srv/syncthing"
 GODOT_WEB_HTTPS_PORT = 8443
 DEFAULT_AGENT_WEB_PORTS = (80, 443, 8080, 8081)
 LAN_ACCESS_SOURCES = (
@@ -342,6 +343,7 @@ class SetupConfig:
     enable_syncthing: bool = False
     disable_syncthing: bool = False
     syncthing_admin: MaybeStr = None
+    syncthing_root: MaybeStr = None
     sync_specs: Optional[NestedStrList] = None
     backup_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
@@ -962,10 +964,18 @@ class SetupConfig:
 
         if self.disable_syncthing:
             args.append("--no-syncthing")
+            if self.syncthing_root:
+                args.append(
+                    f"--syncthing-root {shlex.quote(self.syncthing_root)}"
+                )
         elif self.enable_syncthing:
             args.append("--syncthing")
             args.append(
                 f"--syncthing-admin {shlex.quote(self.syncthing_admin or '')}"
+            )
+            args.append(
+                "--syncthing-root "
+                f"{shlex.quote(self.syncthing_root or DEFAULT_SYNCTHING_ROOT)}"
             )
         
         if self.sync_specs:
@@ -1475,10 +1485,18 @@ class SetupConfig:
 
         if self.disable_syncthing:
             cmd_parts.append("--no-syncthing")
+            if self.syncthing_root:
+                cmd_parts.append(
+                    f"--syncthing-root {shlex.quote(self.syncthing_root)}"
+                )
         elif self.enable_syncthing:
             cmd_parts.append("--syncthing")
             cmd_parts.append(
                 f"--syncthing-admin {shlex.quote(self.syncthing_admin or '')}"
+            )
+            cmd_parts.append(
+                "--syncthing-root "
+                f"{shlex.quote(self.syncthing_root or DEFAULT_SYNCTHING_ROOT)}"
             )
         
         # Sync
@@ -1576,6 +1594,8 @@ class SetupConfig:
             self.install_data_analysis_tools
         )
         data['enable_syncthing'] = bool(self.enable_syncthing)
+        if self.enable_syncthing and not self.syncthing_root:
+            data['syncthing_root'] = DEFAULT_SYNCTHING_ROOT
         # Live activation is a one-shot controller operation. Persisting it
         # would make a later deploy retry a sensitive address change without
         # the operator explicitly requesting another handoff.
@@ -1737,6 +1757,7 @@ class SetupConfig:
         if disable_syncthing:
             enable_syncthing = False
         syncthing_admin = _optional_str_arg(args, 'syncthing_admin')
+        syncthing_root = _optional_str_arg(args, 'syncthing_root')
 
         is_build_server = bool(getattr(args, 'is_build_server', False))
         is_app_server = bool(getattr(args, 'is_app_server', False))
@@ -2114,6 +2135,7 @@ class SetupConfig:
             enable_syncthing=enable_syncthing,
             disable_syncthing=disable_syncthing,
             syncthing_admin=syncthing_admin,
+            syncthing_root=syncthing_root,
             sync_specs=getattr(args, 'sync_specs', None),
             backup_specs=getattr(args, 'backup_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),

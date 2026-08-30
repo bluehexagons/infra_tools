@@ -29,17 +29,75 @@ class SyncthingConfigTest(unittest.TestCase):
 
         self.assertTrue(config.enable_syncthing)
         self.assertEqual(config.syncthing_admin, "syncthing-admin")
+        self.assertIsNone(config.syncthing_root)
         self.assertIn("--syncthing", config.to_remote_args())
         self.assertIn("--syncthing-admin syncthing-admin", config.to_remote_args())
+        self.assertIn("--syncthing-root /srv/syncthing", config.to_remote_args())
 
         restored = SetupConfig.from_dict("fileserver", "server_lite", config.to_dict())
         self.assertEqual(restored.syncthing_admin, "syncthing-admin")
+        self.assertEqual(restored.syncthing_root, "/srv/syncthing")
 
     def test_custom_admin_is_in_commands(self) -> None:
-        config = self._config(syncthing_admin="file-admin")
+        config = self._config(
+            syncthing_admin="file-admin",
+            syncthing_root="/mnt/team-files",
+        )
 
         self.assertIn("--syncthing-admin file-admin", config.to_remote_args())
         self.assertIn("--syncthing-admin file-admin", config.to_setup_command())
+        self.assertIn("--syncthing-root /mnt/team-files", config.to_remote_args())
+        self.assertIn("--syncthing-root /mnt/team-files", config.to_setup_command())
+
+    def test_vm_storage_provisioning_example_parses(self) -> None:
+        parser = create_setup_argument_parser("test")
+        args = parser.parse_args(
+            [
+                "192.168.0.60",
+                "admin",
+                "--provision-on",
+                "pve1",
+                "--name",
+                "fileserver",
+                "--cores",
+                "2",
+                "--memory",
+                "4G",
+                "--storage",
+                "root",
+                "local-lvm",
+                "32G",
+                "--storage",
+                "syncthing-data",
+                "bulk-lvm",
+                "512G",
+                "--storage-mount",
+                "syncthing-data",
+                "/srv/syncthing",
+                "ext4",
+                "empty",
+                "--disk-backup",
+                "syncthing-data",
+                "--syncthing",
+                "--syncthing-root",
+                "/srv/syncthing",
+            ]
+        )
+        with patch("lib.system_utils.get_local_timezone", return_value="UTC"):
+            config = SetupConfig.from_args(args, "server_lite")
+
+        self.assertEqual(
+            config.container_storage,
+            [
+                ["root", "local-lvm", "32G"],
+                ["syncthing-data", "bulk-lvm", "512G"],
+            ],
+        )
+        self.assertEqual(
+            config.storage_mounts,
+            [["syncthing-data", "/srv/syncthing", "ext4", "empty"]],
+        )
+        self.assertEqual(config.syncthing_root, "/srv/syncthing")
 
     def test_patch_omission_preserves_syncthing_settings(self) -> None:
         parser = create_setup_argument_parser("test")
@@ -49,9 +107,13 @@ class SyncthingConfigTest(unittest.TestCase):
         self.assertIsNone(update.enable_syncthing)
         self.assertIsNone(update.syncthing_admin)
 
-        merged = merge_setup_configs(self._config(), update)
+        merged = merge_setup_configs(
+            self._config(syncthing_root="/srv/syncthing"),
+            update,
+        )
         self.assertTrue(merged.enable_syncthing)
         self.assertEqual(merged.syncthing_admin, "syncthing-admin")
+        self.assertEqual(merged.syncthing_root, "/srv/syncthing")
 
     def test_explicit_disable_clears_admin(self) -> None:
         parser = create_setup_argument_parser("test")
@@ -59,13 +121,46 @@ class SyncthingConfigTest(unittest.TestCase):
         with patch("lib.system_utils.get_local_timezone", return_value="UTC"):
             update = SetupConfig.from_args(args, "server_lite")
 
-        merged = merge_setup_configs(self._config(), update)
+        merged = merge_setup_configs(
+            self._config(syncthing_root="/mnt/team-files"),
+            update,
+        )
 
         self.assertFalse(merged.enable_syncthing)
         self.assertTrue(merged.disable_syncthing)
         self.assertIsNone(merged.syncthing_admin)
+        self.assertEqual(merged.syncthing_root, "/mnt/team-files")
         self.assertIn("--no-syncthing", merged.to_remote_args())
+        self.assertIn(
+            "--syncthing-root /mnt/team-files",
+            merged.to_remote_args(),
+        )
         self.assertNotIn("disable_syncthing", merged.to_dict())
+
+        restored = SetupConfig.from_dict(
+            "fileserver",
+            "server_lite",
+            merged.to_dict(),
+        )
+        self.assertFalse(restored.enable_syncthing)
+        self.assertEqual(restored.syncthing_root, "/mnt/team-files")
+
+    def test_reenable_preserves_saved_custom_storage_root(self) -> None:
+        current = self._config(
+            enable_syncthing=False,
+            syncthing_admin=None,
+            syncthing_root="/mnt/team-files",
+        )
+        parser = create_setup_argument_parser("test")
+        args = parser.parse_args(["fileserver", "agent", "--syncthing"])
+        with patch("lib.system_utils.get_local_timezone", return_value="UTC"):
+            update = SetupConfig.from_args(args, "server_lite")
+
+        self.assertIsNone(update.syncthing_root)
+        merged = merge_setup_configs(current, update)
+
+        self.assertTrue(merged.enable_syncthing)
+        self.assertEqual(merged.syncthing_root, "/mnt/team-files")
 
     def test_removed_declarations_are_ignored_in_old_cache(self) -> None:
         data = self._config().to_dict()
@@ -89,6 +184,16 @@ class SyncthingConfigTest(unittest.TestCase):
             self._config(enable_syncthing=False, syncthing_admin="file-admin")
         with self.assertRaisesRegex(ValueError, "valid username"):
             self._config(syncthing_admin="Not Valid")
+
+    def test_storage_root_is_bounded_and_normalized(self) -> None:
+        with self.assertRaisesRegex(ValueError, "absolute, normalized"):
+            self._config(syncthing_root="srv/syncthing")
+        with self.assertRaisesRegex(ValueError, "must be /data or below"):
+            self._config(syncthing_root="/home/agent/syncthing")
+        with self.assertRaisesRegex(ValueError, "components may contain"):
+            self._config(syncthing_root="/srv/team files")
+        with self.assertRaisesRegex(ValueError, "must not overlap"):
+            self._config(syncthing_root="/var/lib/infra-tools")
 
     def test_root_and_oci_targets_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "non-root"):

@@ -15,14 +15,13 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from lib.atomic_io import write_text_atomic
-from lib.config import SetupConfig
+from lib.config import DEFAULT_SYNCTHING_ROOT, SetupConfig
 from lib.credentials import get_runtime_credential
 from lib.machine_state import can_manage_system_services
 from lib.remote_utils import is_dry_run, is_package_installed, run
 
 
 SYNCTHING_HOME = "/var/lib/infra-tools/syncthing"
-SYNCTHING_SHARE_ROOT = "/srv/syncthing"
 SYNCTHING_SERVICE_NAME = "infra-syncthing"
 SYNCTHING_SERVICE_FILE = f"/etc/systemd/system/{SYNCTHING_SERVICE_NAME}.service"
 SYNCTHING_GUI_ADDRESS = "127.0.0.1:8384"
@@ -46,16 +45,22 @@ def _systemd_quote(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _share_root(config: SetupConfig) -> str:
+    return config.syncthing_root or DEFAULT_SYNCTHING_ROOT
+
+
 def _render_service(config: SetupConfig, group_name: str) -> str:
+    share_root = _share_root(config)
     writable_lines = "\n".join(
         f"ReadWritePaths={_systemd_quote(path)}"
-        for path in (SYNCTHING_HOME, SYNCTHING_SHARE_ROOT)
+        for path in (SYNCTHING_HOME, share_root)
     )
     return f"""[Unit]
 Description=Managed Syncthing file synchronization
 Documentation=https://docs.syncthing.net/
 Wants=network-online.target
 After=network-online.target
+RequiresMountsFor={_systemd_quote(share_root)}
 
 [Service]
 Type=simple
@@ -160,13 +165,28 @@ def _staggered_versioning(default: object) -> dict[str, Any]:
     return versioning
 
 
-def build_syncthing_policy_config(current: dict[str, Any]) -> dict[str, Any]:
+def build_syncthing_policy_config(
+    current: dict[str, Any],
+    share_root: str,
+) -> dict[str, Any]:
     """Apply service policy without replacing GUI-managed devices or folders."""
 
     desired = copy.deepcopy(current)
+    folders = desired.get("folders")
+    if not isinstance(folders, list):
+        raise RuntimeError("Syncthing configuration is missing folders")
+    for folder in folders:
+        path = folder.get("path") if isinstance(folder, dict) else None
+        if (
+            not isinstance(path, str)
+            or (path != share_root and not path.startswith(f"{share_root}{os.sep}"))
+        ):
+            raise RuntimeError(
+                f"Syncthing folder path is outside the configured storage root: {path}"
+            )
     defaults = _mapping(desired.get("defaults"), "defaults")
     default_folder = _mapping(defaults.get("folder"), "folder defaults")
-    default_folder["path"] = SYNCTHING_SHARE_ROOT
+    default_folder["path"] = share_root
     default_folder["versioning"] = _staggered_versioning(
         default_folder.get("versioning")
     )
@@ -194,7 +214,7 @@ def build_syncthing_policy_config(current: dict[str, Any]) -> dict[str, Any]:
     options = _mapping(desired.get("options"), "options")
     options.update(
         {
-            "defaultFolderPath": SYNCTHING_SHARE_ROOT,
+            "defaultFolderPath": share_root,
             "startBrowser": False,
             "globalAnnounceEnabled": True,
             "localAnnounceEnabled": True,
@@ -297,11 +317,12 @@ def _remove_syncthing_https(config: SetupConfig) -> None:
 
 
 def _prepare_share_root(config: SetupConfig, group_name: str) -> None:
-    if os.path.lexists(SYNCTHING_SHARE_ROOT) and (
-        os.path.islink(SYNCTHING_SHARE_ROOT)
-        or not os.path.isdir(SYNCTHING_SHARE_ROOT)
+    share_root = _share_root(config)
+    if os.path.lexists(share_root) and (
+        os.path.islink(share_root)
+        or not os.path.isdir(share_root)
     ):
-        raise RuntimeError(f"Refusing unsafe Syncthing share root: {SYNCTHING_SHARE_ROOT}")
+        raise RuntimeError(f"Refusing unsafe Syncthing share root: {share_root}")
     run(
         [
             "install",
@@ -312,7 +333,7 @@ def _prepare_share_root(config: SetupConfig, group_name: str) -> None:
             config.username,
             "-g",
             group_name,
-            SYNCTHING_SHARE_ROOT,
+            share_root,
         ]
     )
 
@@ -353,7 +374,8 @@ def setup_syncthing(config: SetupConfig, **_kwargs: Any) -> None:
         run(["systemctl", "daemon-reload"])
         print("  ✓ Managed Syncthing service and HTTPS endpoint removed")
         print(f"  ℹ Preserved Syncthing identity and database in {SYNCTHING_HOME}")
-        print(f"  ℹ Preserved synchronized files in {SYNCTHING_SHARE_ROOT}")
+        retained_root = config.syncthing_root or DEFAULT_SYNCTHING_ROOT
+        print(f"  ℹ Preserved synchronized files in {retained_root}")
         return
 
     admin_username = config.syncthing_admin
@@ -421,7 +443,13 @@ def setup_syncthing(config: SetupConfig, **_kwargs: Any) -> None:
     local_device_id = str(device_id_result.stdout or "").strip()
     if not _DEVICE_ID_PATTERN.fullmatch(local_device_id):
         raise RuntimeError("Syncthing returned an invalid local device ID")
-    _put_config(build_syncthing_policy_config(_load_current_config(config.username)))
+    share_root = _share_root(config)
+    _put_config(
+        build_syncthing_policy_config(
+            _load_current_config(config.username),
+            share_root,
+        )
+    )
     run(["systemctl", "restart", f"{SYNCTHING_SERVICE_NAME}.service"])
     _wait_for_api(config.username)
     active = run(
@@ -436,6 +464,6 @@ def setup_syncthing(config: SetupConfig, **_kwargs: Any) -> None:
     print(f"  ✓ Syncthing device ID: {local_device_id}")
     if https_url:
         print(f"  ✓ Syncthing HTTPS admin: {https_url}")
-    print(f"  ✓ Syncthing GUI folders are confined to {SYNCTHING_SHARE_ROOT}")
+    print(f"  ✓ Syncthing GUI folders are confined to {share_root}")
     print("  ℹ Device and folder membership is managed in the Syncthing web GUI")
     print("  ℹ No router mapping was added; relay fallback remains enabled")
