@@ -115,6 +115,8 @@ def validate_syncthing_settings(config: Any) -> None:
     )
     versioning = getattr(config, "syncthing_versioning", "staggered")
 
+    if versioning is None and not enabled:
+        return
     if versioning not in {"none", "trashcan", "staggered"}:
         raise ValueError(
             "--syncthing-versioning must be none, trashcan, or staggered"

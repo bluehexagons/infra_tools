@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from lib.arg_parser import create_setup_argument_parser
+from lib.cache import merge_setup_configs
 from lib.config import SetupConfig
 
 
@@ -82,6 +83,19 @@ class SyncthingConfigTest(unittest.TestCase):
         self.assertNotIn(
             "--syncthing-versioning staggered", config.to_setup_command()
         )
+
+    def test_patch_omission_preserves_syncthing_settings(self) -> None:
+        parser = create_setup_argument_parser("test")
+        args = parser.parse_args(["fileserver", "agent"])
+        with patch("lib.system_utils.get_local_timezone", return_value="UTC"):
+            update = SetupConfig.from_args(args, "server_lite")
+        self.assertIsNone(update.enable_syncthing)
+        self.assertIsNone(update.syncthing_versioning)
+
+        merged = merge_setup_configs(self._config(), update)
+        self.assertTrue(merged.enable_syncthing)
+        self.assertEqual(merged.syncthing_versioning, "staggered")
+        self.assertEqual(merged.syncthing_devices, self._config().syncthing_devices)
 
     def test_folder_must_reference_a_declared_device(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown device.*bob-laptop"):

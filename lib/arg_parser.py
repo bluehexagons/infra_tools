@@ -1133,7 +1133,7 @@ def add_setup_arguments(
     parser.add_argument(
         "--syncthing",
         dest="enable_syncthing",
-        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+        action="store_true",
         default=None if not for_remote else False,
         help=(
             "Install a managed Syncthing endpoint with a loopback-only admin UI; "
@@ -1165,7 +1165,7 @@ def add_setup_arguments(
     parser.add_argument(
         "--syncthing-versioning",
         choices=SYNCTHING_VERSIONING_MODES,
-        default="staggered",
+        default="staggered" if for_remote else None,
         metavar="MODE",
         help=(
             "Version files replaced or deleted by peers: none, trashcan, or "

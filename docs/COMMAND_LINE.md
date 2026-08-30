@@ -12,6 +12,7 @@ Related pages:
 - [`CICD.md`](./CICD.md) for webhook CI/CD setup
 - [`WORKSTATIONS.md`](./WORKSTATIONS.md) for desktop profiles and application choices
 - [`GODOT.md`](./GODOT.md) for graphical/headless Godot installation and updates
+- [`SYNCTHING.md`](./SYNCTHING.md) for private peer and folder synchronization
 - [`MACHINE_TYPES.md`](./MACHINE_TYPES.md) for machine type behavior
 - [`CREDENTIALS.md`](./CREDENTIALS.md) for workspace passwords, Git access,
   agent auth/config sources, sharing, and credential rotation
@@ -1037,6 +1038,10 @@ health.
 | `--credential USERNAME PASSWORD` | Define a password for username-only share entries |
 | `--smbclient` | Install SMB/CIFS client |
 | `--mount-smb MOUNTPOINT IP CREDENTIALS SHARE SUBDIR` | Mount an SMB share persistently; `SUBDIR` may be `/` |
+| `--syncthing` | Install a managed, non-root Syncthing endpoint with a loopback-only admin UI |
+| `--syncthing-device NAME DEVICE_ID` | Declare a trusted peer by local name and full device ID; repeatable |
+| `--syncthing-folder MODE ID PATH DEVICES` | Declare a project folder and comma-separated peer names; modes are `send-receive`, `send-only`, and `receive-only` |
+| `--syncthing-versioning MODE` | Set managed folder versioning to `staggered` (default), `trashcan`, or `none` |
 | `--sync SOURCE DEST INTERVAL` | Configure rsync sync |
 | `--scrub DIR DBPATH REDUNDANCY FREQ` | Configure par2 integrity checking |
 | `--notify TYPE TARGET` | Configure notifications |
@@ -1046,6 +1051,8 @@ Samba shares are authenticated and hardened; `TYPE` is `read` or `write`, and
 non-persistent TDB state, not share contents. See
 [Samba Shares](./SAMBA_SHARES.md) for credentials, access control, fast
 updates, removals, and SMB client mounts.
+See [Managed Syncthing](./SYNCTHING.md) for device enrollment, folder
+directions, relay behavior, and recovery boundaries.
 See [Storage operations](./STORAGE_OPERATIONS.md) for sync, parity, schedules,
 mount checks, and logs, and [Notifications](./NOTIFICATIONS.md) for delivery
 targets and failure behavior.

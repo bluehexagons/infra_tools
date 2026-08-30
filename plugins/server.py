@@ -15,7 +15,7 @@ PLUGIN = PluginDefinition(
     name="server",
     module=__name__,
     plugin_kind="composition",
-    dependencies=("common", "core", "security", "web"),
+    dependencies=("common", "core", "security", "sync", "web"),
     system_types=(
         SystemTypeDefinition(
             name="control_plane",
@@ -97,6 +97,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         get_final_steps,
     )
     from plugins.security import get_security_steps, get_web_firewall_steps
+    from plugins.sync import extend_syncthing_steps
     from plugins.web import (
         extend_app_server_steps,
         extend_build_server_steps,
@@ -139,5 +140,6 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_build_server_steps(config, steps)
     extend_antistatic_steps(config, steps)
     extend_gogs_steps(config, steps)
+    extend_syncthing_steps(config, steps)
     steps.extend(get_final_steps(config))
     return steps

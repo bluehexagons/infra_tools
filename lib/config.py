@@ -344,7 +344,7 @@ class SetupConfig:
     enable_syncthing: bool = False
     syncthing_devices: Optional[NestedStrList] = None
     syncthing_folders: Optional[NestedStrList] = None
-    syncthing_versioning: str = "staggered"
+    syncthing_versioning: Optional[str] = "staggered"
     sync_specs: Optional[NestedStrList] = None
     backup_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
@@ -1582,6 +1582,8 @@ class SetupConfig:
         data['install_data_analysis_tools'] = bool(
             self.install_data_analysis_tools
         )
+        data['enable_syncthing'] = bool(self.enable_syncthing)
+        data['syncthing_versioning'] = self.syncthing_versioning or "staggered"
         # Live activation is a one-shot controller operation. Persisting it
         # would make a later deploy retry a sensitive address change without
         # the operator explicitly requesting another handoff.
@@ -1738,13 +1740,30 @@ class SetupConfig:
         elif enable_smbclient is None:
             enable_smbclient = False
 
-        syncthing_devices = getattr(args, 'syncthing_devices', None)
-        syncthing_folders = getattr(args, 'syncthing_folders', None)
+        raw_syncthing_devices = getattr(args, 'syncthing_devices', None)
+        syncthing_devices = (
+            raw_syncthing_devices
+            if isinstance(raw_syncthing_devices, list)
+            else None
+        )
+        raw_syncthing_folders = getattr(args, 'syncthing_folders', None)
+        syncthing_folders = (
+            raw_syncthing_folders
+            if isinstance(raw_syncthing_folders, list)
+            else None
+        )
         enable_syncthing = getattr(args, 'enable_syncthing', None)
+        if enable_syncthing is not None and not isinstance(enable_syncthing, bool):
+            enable_syncthing = None
         if enable_syncthing is None and (syncthing_devices or syncthing_folders):
             enable_syncthing = True
-        elif enable_syncthing is None:
-            enable_syncthing = False
+        syncthing_versioning = getattr(args, 'syncthing_versioning', None)
+        if syncthing_versioning is not None and not isinstance(
+            syncthing_versioning, str
+        ):
+            syncthing_versioning = None
+        if enable_syncthing and syncthing_versioning is None:
+            syncthing_versioning = "staggered"
 
         is_build_server = bool(getattr(args, 'is_build_server', False))
         is_app_server = bool(getattr(args, 'is_app_server', False))
@@ -2122,9 +2141,7 @@ class SetupConfig:
             enable_syncthing=enable_syncthing,
             syncthing_devices=syncthing_devices,
             syncthing_folders=syncthing_folders,
-            syncthing_versioning=getattr(
-                args, 'syncthing_versioning', 'staggered'
-            ),
+            syncthing_versioning=syncthing_versioning,
             sync_specs=getattr(args, 'sync_specs', None),
             backup_specs=getattr(args, 'backup_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),
