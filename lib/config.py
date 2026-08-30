@@ -35,6 +35,8 @@ BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
 EDITORS = ("geany", "vscode")
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 GODOT_BUNDLES = ("web", "publishing")
+SYNCTHING_FOLDER_MODES = ("send-receive", "send-only", "receive-only")
+SYNCTHING_VERSIONING_MODES = ("none", "trashcan", "staggered")
 GODOT_WEB_HTTPS_PORT = 8443
 DEFAULT_AGENT_WEB_PORTS = (80, 443, 8080, 8081)
 LAN_ACCESS_SOURCES = (
@@ -339,6 +341,10 @@ class SetupConfig:
     share_credentials: Optional[NestedStrList] = None
     enable_smbclient: bool = False
     smb_mounts: Optional[NestedStrList] = None
+    enable_syncthing: bool = False
+    syncthing_devices: Optional[NestedStrList] = None
+    syncthing_folders: Optional[NestedStrList] = None
+    syncthing_versioning: str = "staggered"
     sync_specs: Optional[NestedStrList] = None
     backup_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
@@ -423,9 +429,13 @@ class SetupConfig:
             if not self.disable_device_pairing and not self.device_pairing_providers:
                 self.device_pairing_providers = ["t3code"]
 
-        from lib.validation import validate_godot_bundle_settings
+        from lib.validation import (
+            validate_godot_bundle_settings,
+            validate_syncthing_settings,
+        )
 
         validate_godot_bundle_settings(self)
+        validate_syncthing_settings(self)
         selected_godot_bundles = list(dict.fromkeys(self.godot_bundles or []))
         self.godot_bundles = selected_godot_bundles or None
         if self.godot_bundles:
@@ -949,6 +959,20 @@ class SetupConfig:
             for mount_spec in self.smb_mounts:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
                 args.append(f"--mount-smb {escaped_spec}")
+
+        if self.enable_syncthing:
+            args.append("--syncthing")
+            if self.syncthing_versioning != "staggered":
+                args.append(
+                    "--syncthing-versioning "
+                    f"{shlex.quote(self.syncthing_versioning)}"
+                )
+        for device_spec in self.syncthing_devices or []:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in device_spec)
+            args.append(f"--syncthing-device {escaped_spec}")
+        for folder_spec in self.syncthing_folders or []:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in folder_spec)
+            args.append(f"--syncthing-folder {escaped_spec}")
         
         if self.sync_specs:
             for sync_spec in self.sync_specs:
@@ -1450,6 +1474,20 @@ class SetupConfig:
                     redacted_mount_spec[2] = redact_mount_credentials(redacted_mount_spec[2])
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_mount_spec)
                 cmd_parts.append(f"--mount-smb {escaped_spec}")
+
+        if self.enable_syncthing:
+            cmd_parts.append("--syncthing")
+            if self.syncthing_versioning != "staggered":
+                cmd_parts.append(
+                    "--syncthing-versioning "
+                    f"{shlex.quote(self.syncthing_versioning)}"
+                )
+        for device_spec in self.syncthing_devices or []:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in device_spec)
+            cmd_parts.append(f"--syncthing-device {escaped_spec}")
+        for folder_spec in self.syncthing_folders or []:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in folder_spec)
+            cmd_parts.append(f"--syncthing-folder {escaped_spec}")
         
         # Sync
         if self.sync_specs:
@@ -1586,6 +1624,12 @@ class SetupConfig:
         data['git_ca_certificates'] = _normalize_nested_specs(
             data.get('git_ca_certificates')
         )
+        data['syncthing_devices'] = _normalize_nested_specs(
+            data.get('syncthing_devices')
+        )
+        data['syncthing_folders'] = _normalize_nested_specs(
+            data.get('syncthing_folders')
+        )
         system_defaults = get_system_type_definition(system_type)
         if not data.get('agent_tools') and not data.get('agent_tools_removed'):
             data['agent_tools'] = list(system_defaults.default_agent_tools) or None
@@ -1693,6 +1737,14 @@ class SetupConfig:
             enable_smbclient = True
         elif enable_smbclient is None:
             enable_smbclient = False
+
+        syncthing_devices = getattr(args, 'syncthing_devices', None)
+        syncthing_folders = getattr(args, 'syncthing_folders', None)
+        enable_syncthing = getattr(args, 'enable_syncthing', None)
+        if enable_syncthing is None and (syncthing_devices or syncthing_folders):
+            enable_syncthing = True
+        elif enable_syncthing is None:
+            enable_syncthing = False
 
         is_build_server = bool(getattr(args, 'is_build_server', False))
         is_app_server = bool(getattr(args, 'is_app_server', False))
@@ -2067,6 +2119,12 @@ class SetupConfig:
             share_credentials=getattr(args, 'share_credentials', None),
             enable_smbclient=enable_smbclient,
             smb_mounts=smb_mounts,
+            enable_syncthing=enable_syncthing,
+            syncthing_devices=syncthing_devices,
+            syncthing_folders=syncthing_folders,
+            syncthing_versioning=getattr(
+                args, 'syncthing_versioning', 'staggered'
+            ),
             sync_specs=getattr(args, 'sync_specs', None),
             backup_specs=getattr(args, 'backup_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),

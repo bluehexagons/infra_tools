@@ -286,6 +286,11 @@ def can_manage_mdns() -> bool:
     return get_machine_type() != "oci"
 
 
+def can_manage_system_services(machine_type: Optional[str] = None) -> bool:
+    """Check if a target can run persistent systemd services."""
+    return _effective_machine_type(machine_type) != "oci"
+
+
 def can_restart_system() -> bool:
     """Check if system restart is possible.
     

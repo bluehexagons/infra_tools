@@ -64,6 +64,12 @@ class TestMachineStateHelpers(unittest.TestCase):
             with self._patch_machine_type(mt):
                 self.assertTrue(ms.can_restart_system(), f"Expected can_restart_system=True for {mt}")
 
+    def test_system_services_are_not_managed_in_oci(self):
+        with self._patch_machine_type('oci'):
+            self.assertFalse(ms.can_manage_system_services())
+        with self._patch_machine_type('unprivileged'):
+            self.assertTrue(ms.can_manage_system_services())
+
     def test_auto_machine_type_resolves_from_runtime(self):
         with self._patch_machine_type('auto'), \
              patch.object(ms, 'detect_machine_type', return_value='vm'):

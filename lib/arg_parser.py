@@ -13,6 +13,8 @@ from lib.config import (
     GIT_ACCESS_POLICIES,
     GODOT_BUNDLES,
     MACHINE_TYPES,
+    SYNCTHING_FOLDER_MODES,
+    SYNCTHING_VERSIONING_MODES,
     WEB_INTERFACES,
 )
 
@@ -1127,6 +1129,49 @@ def add_setup_arguments(
     parser.add_argument("--mount-smb", dest="smb_mounts",
                         action="append", nargs=5, metavar=("MOUNTPOINT", "IP", "CREDENTIALS", "SHARE", "SUBDIR"),
                         help="Mount SMB share: /mnt/path, ip_address, username or username:password, share_name, /share/subdirectory (can be used multiple times). Auto-enables --smbclient")
+
+    parser.add_argument(
+        "--syncthing",
+        dest="enable_syncthing",
+        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+        default=None if not for_remote else False,
+        help=(
+            "Install a managed Syncthing endpoint with a loopback-only admin UI; "
+            "peer and folder declarations also enable it"
+        ),
+    )
+    parser.add_argument(
+        "--syncthing-device",
+        dest="syncthing_devices",
+        action="append",
+        nargs=2,
+        metavar=("NAME", "DEVICE_ID"),
+        help=(
+            "Declare a trusted Syncthing peer by local name and full device ID; "
+            "repeat as needed"
+        ),
+    )
+    parser.add_argument(
+        "--syncthing-folder",
+        dest="syncthing_folders",
+        action="append",
+        nargs=4,
+        metavar=("MODE", "FOLDER_ID", "PATH", "DEVICES"),
+        help=(
+            f"Share one folder in {', '.join(SYNCTHING_FOLDER_MODES)} mode "
+            "with a comma-separated list of declared device names; repeat as needed"
+        ),
+    )
+    parser.add_argument(
+        "--syncthing-versioning",
+        choices=SYNCTHING_VERSIONING_MODES,
+        default="staggered",
+        metavar="MODE",
+        help=(
+            "Version files replaced or deleted by peers: none, trashcan, or "
+            "staggered (default: staggered)"
+        ),
+    )
     
     parser.add_argument("--sync", dest="sync_specs", 
                        action="append", nargs=3, metavar=("SOURCE", "DESTINATION", "INTERVAL"),
