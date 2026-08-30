@@ -329,19 +329,28 @@ before the guest observes a vCPU, memory-maximum, CPU-model, or disk-hardware
 change; setup reports that requirement without interrupting the guest
 automatically.
 
+If a managed VM disk was moved to another pool or resized outside infra-tools,
+update its `--storage` declaration and rerun setup. As long as the declaration
+retains the same logical disk names, setup bypasses the stale cached layout and
+requires Proxmox to report each disk on the requested pool at or above the
+requested size before saving the new declaration. `--verify-provider` performs
+the same storage check when the declaration itself is unchanged. This adopts
+verified metadata drift only: setup still does not move, resize, attach, or
+detach an existing disk.
+
 For an offline GUI migration, rerun the saved setup command with the new
 `--provision-on` destination. Infra-tools keeps the explicit destination host,
 credentials, and bridge instead of restoring the cached source binding. It
 requires the old source VM to be stopped or absent and the destination to have
 the saved IPv4 address, VM name, and managed-disk identities. If storage pools
-changed, repeat `--storage` with the new pools and unchanged logical names and
-sizes. Every rebind verifies the destination bridge, pool, and minimum size of
-each declared disk. A missing destination is rejected instead of creating a
-new VM; a matching stopped destination is started only after those checks and
-allowed time for SSH to return. The saved provider binding changes only after
-remote setup succeeds. A replacement clone can follow this path while the
-original remains stopped; a coexisting clone needs a unique address, hostname,
-and saved setup identity.
+or live capacities changed, repeat `--storage` with the new values and
+unchanged logical names. Every rebind verifies the destination bridge, pool,
+and minimum size of each declared disk. A missing destination is rejected
+instead of creating a new VM; a matching stopped destination is started only
+after those checks and allowed time for SSH to return. The saved provider
+binding changes only after remote setup succeeds. A replacement clone can
+follow this path while the original remains stopped; a coexisting clone needs
+a unique address, hostname, and saved setup identity.
 
 Existing-guest setup does not replace, resize, attach, or detach root/data
 volumes, and does not mutate bridges, cache declarations, base images, or image

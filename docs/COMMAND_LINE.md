@@ -198,7 +198,8 @@ Proxmox operations, maintenance, and agent commands.
 `--verify-provider` is a setup-only check and requires `--provision-on`. Use it
 when a cached provisioned guest should be compared with Proxmox even though
 the saved declaration has not changed; supported provider-side drift, such as
-the guest vCPU count, is reconciled and verified.
+the guest vCPU count, is reconciled and verified. Managed disks are also
+verified against the cached pool and minimum-size declaration.
 
 After moving an infra-tools-provisioned QEMU VM with the Proxmox GUI, rerun its
 saved setup command with the destination in `--provision-on`. A changed
@@ -211,9 +212,10 @@ storage pools, and minimum disk sizes are verified on every rebind before any
 provider-side settings are reconciled; a verified stopped destination is
 started and allowed time for SSH to return. Supply the moved VM's actual
 `--bridge` when it changed. Storage pool names may also be updated with
-`--storage` when the logical disk names and declared sizes are unchanged. A
-different disk set or size remains an explicit storage operation and is
-rejected by setup.
+`--storage` when the logical disk names are unchanged. A size change is accepted
+only when the live disk is already at least that large; setup verifies and
+adopts the declaration but does not resize the disk. A different disk set
+remains an explicit storage operation and is rejected by setup.
 
 A GUI clone that replaces the original can use the same rebind path only while
 the saved source VM is stopped. A clone intended to coexist with its source

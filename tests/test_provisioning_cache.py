@@ -298,7 +298,7 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         self.assertEqual(current.hosted_user, "admin")
         self.assertEqual(current.hosted_key, "/keys/old")
 
-    def test_provider_rebind_allows_only_storage_pool_remapping(self) -> None:
+    def test_existing_vm_storage_drift_is_live_verifiable(self) -> None:
         cached = _config(
             hosted_node="10.0.0.10",
             hosted_bridge="vmbr0",
@@ -308,52 +308,64 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
                 ["template", "local"],
             ],
         )
-        moved = _config(
-            hosted_node="10.0.0.11",
+        updated = _config(
+            hosted_node="10.0.0.10",
             hosted_bridge="vmbr1",
             container_storage=[
-                ["root", "fast-zfs", "32G"],
-                ["data", "archive", "64G"],
+                ["root", "fast-zfs", "64G"],
+                ["data", "archive", "128G"],
                 ["template", "fast-zfs"],
             ],
         )
         args = _args(
-            hosted_node="10.0.0.11",
+            hosted_node="10.0.0.10",
             hosted_bridge="vmbr1",
-            container_storage=moved.container_storage,
+            container_storage=updated.container_storage,
         )
 
         self.assertEqual(
             infra_tools._unsupported_cached_provisioning_changes(
-                moved,
+                updated,
                 cached,
                 args,
-                provider_rebind=True,
+            ),
+            ["--bridge"],
+        )
+
+        updated.hosted_bridge = cached.hosted_bridge
+        args.hosted_bridge = None
+        self.assertEqual(
+            infra_tools._unsupported_cached_provisioning_changes(
+                updated,
+                cached,
+                args,
             ),
             [],
         )
 
-        moved.container_storage = [["root", "fast-zfs", "64G"]]
-        args.container_storage = moved.container_storage
+        updated.container_storage = [["root", "fast-zfs", "64G"]]
+        args.container_storage = updated.container_storage
         self.assertEqual(
             infra_tools._unsupported_cached_provisioning_changes(
-                moved,
+                updated,
                 cached,
                 args,
-                provider_rebind=True,
             ),
             ["--storage"],
         )
 
-    def test_unsupported_existing_vm_change_stops_before_cache_update(self) -> None:
+    def test_existing_vm_disk_set_change_stops_before_cache_update(self) -> None:
         current = _config(
-            container_storage=[["root", "fast-lvm", "64G"]],
+            container_storage=[
+                ["root", "fast-lvm", "64G"],
+                ["data", "bulk", "128G"],
+            ],
         )
         cached = _config(
             container_storage=[["root", "local-lvm", "32G"]],
         )
         args = _args(
-            container_storage=[["root", "fast-lvm", "64G"]],
+            container_storage=current.container_storage,
         )
 
         with (
@@ -792,6 +804,68 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             "root",
             "/keys/proxmox",
             dry_run=False,
+        )
+
+    def test_existing_vm_storage_drift_is_verified_before_cache_update(
+        self,
+    ) -> None:
+        from lib.proxmox_vm import VMAlreadyExists
+
+        current = _config(
+            hosted_node="10.0.0.10",
+            hosted_user="root",
+            hosted_key="/keys/proxmox",
+            container_memory="4G",
+            container_storage=[["root", "fast-lvm", "64G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        cached = _config(
+            hosted_node="10.0.0.10",
+            hosted_user="root",
+            hosted_key="/keys/proxmox",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        args = _args(container_storage=current.container_storage)
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=current), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch(
+                 "infra_tools._prepare_runtime_config_for_cli",
+                 side_effect=lambda config: config,
+             ), \
+             patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.print_setup_summary"), \
+             patch("infra_tools.store_cli_credentials"), \
+             patch("infra_tools.save_setup_command") as mock_save, \
+             patch("infra_tools.register_proxmox_setup_host"), \
+             patch("infra_tools.run_remote_setup", return_value=0), \
+             patch("infra_tools.ensure_guest_ipv4_route"), \
+             patch(
+                 "lib.proxmox_vm.provision_vm",
+                 side_effect=VMAlreadyExists(),
+             ) as mock_provision, \
+             patch("infra_tools.refresh_managed_guest_host_keys"):
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 0)
+        mock_provision.assert_called_once_with(
+            current,
+            image=current.vm_image,
+            allow_existing_data_disks=True,
+            require_existing_vm=True,
+            verify_existing_storage=True,
+        )
+        self.assertTrue(mock_save.called)
+        self.assertEqual(
+            mock_save.call_args.args[0].container_storage,
+            [["root", "fast-lvm", "64G"]],
         )
 
     def test_migrated_vm_is_verified_and_rebound_to_explicit_destination(

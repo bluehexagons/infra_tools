@@ -571,7 +571,7 @@ class TestCachedProvisioningChangeSafety(unittest.TestCase):
 
         self.assertEqual(changes, [])
 
-    def test_existing_vm_storage_change_is_rejected_before_cache_update(self) -> None:
+    def test_existing_vm_storage_change_is_deferred_to_live_verification(self) -> None:
         current = SetupConfig(
             host="10.0.0.50",
             username="agent",
@@ -593,7 +593,7 @@ class TestCachedProvisioningChangeSafety(unittest.TestCase):
             Namespace(container_storage=[["root", "fast-lvm", "64G"]]),
         )
 
-        self.assertEqual(changes, ["--storage"])
+        self.assertEqual(changes, [])
 
 
 if __name__ == "__main__":

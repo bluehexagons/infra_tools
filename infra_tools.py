@@ -1218,15 +1218,19 @@ def _storage_declaration_sizes(
     return sizes or None
 
 
-def _storage_pool_only_rebind(
+def _storage_declaration_can_be_verified(
     config: SetupConfig,
     cached_config: SetupConfig,
 ) -> bool:
-    """Return whether a rebind changes only provider storage pool names."""
+    """Return whether live provider state can verify a storage declaration."""
 
     desired = _storage_declaration_sizes(config.container_storage)
     cached = _storage_declaration_sizes(cached_config.container_storage)
-    return desired is not None and desired == cached
+    return (
+        desired is not None
+        and cached is not None
+        and set(desired) == set(cached)
+    )
 
 
 def _unsupported_cached_provisioning_changes(
@@ -1249,16 +1253,16 @@ def _unsupported_cached_provisioning_changes(
             field
             for field in changed_fields
             if field not in _RECONCILABLE_VM_PROVISIONING_CHANGES
+            and not (
+                field == "container_storage"
+                and _storage_declaration_can_be_verified(config, cached_config)
+            )
         ]
         if provider_rebind:
             changed_fields = [
                 field
                 for field in changed_fields
                 if field != "hosted_bridge"
-                and not (
-                    field == "container_storage"
-                    and _storage_pool_only_rebind(config, cached_config)
-                )
             ]
     return [_PROVISIONING_FIELD_FLAGS[field] for field in changed_fields]
 
@@ -1594,6 +1598,19 @@ def run_setup_command(args: argparse.Namespace) -> int:
                 "a replacement guest."
             )
             return 1
+    verify_existing_storage = bool(
+        cached_provisioning is not None
+        and config.machine_type == "vm"
+        and (
+            provider_rebind
+            or getattr(args, "verify_provider", False)
+            or (
+                getattr(args, "container_storage", None) is not None
+                and config.container_storage
+                != cached_provisioning.container_storage
+            )
+        )
+    )
     reuse_cached_provisioning = _reuse_cached_provisioning_metadata(
         config,
         args,
@@ -1667,6 +1684,14 @@ def run_setup_command(args: argparse.Namespace) -> int:
                         require_existing_name=True,
                         start_existing_vm=True,
                         verify_existing_bridge=True,
+                        verify_existing_storage=True,
+                    )
+                elif verify_existing_storage:
+                    provision_vm(
+                        config,
+                        image=config.vm_image,
+                        allow_existing_data_disks=allow_existing_data_disks,
+                        require_existing_vm=True,
                         verify_existing_storage=True,
                     )
                 else:
