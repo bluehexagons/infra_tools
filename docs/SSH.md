@@ -15,8 +15,11 @@ is captured because OpenSSH uses the controlling terminal for authentication.
 Interactive SSH subprocesses do not use the automation wall-clock timeout,
 because it cannot distinguish time spent at that prompt from remote execution.
 A newly provisioned guest can therefore wait for its setup key without the
-operator watching the entire provisioning phase. SSH connection establishment
-still has its own timeout, and the command remains interruptible with Ctrl-C.
+operator watching the entire provisioning phase. If the SSH server closes an
+interactive connection while setup is waiting at the remote-sudo verification
+prompt, setup opens one fresh connection so the operator can enter the key
+passphrase again. SSH connection establishment still has its own timeout, and
+the command remains interruptible with Ctrl-C.
 
 Commands started without a terminal—such as piped setup, automation, and
 parallel host checks—cannot safely ask several processes for a passphrase. In

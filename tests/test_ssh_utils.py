@@ -176,6 +176,37 @@ class TestSshUtils(unittest.TestCase):
 
         self.assertIsNone(mock_run.call_args.kwargs["timeout"])
 
+    @patch("lib.ssh_utils.ssh_batch_mode", return_value=False)
+    @patch("lib.ssh_utils.subprocess.run")
+    def test_remote_sudo_retries_interactive_ssh_connection_failure(
+        self, mock_run, _mock_batch_mode
+    ):
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(
+                [], 255, "", "Connection closed by 192.0.2.40 port 22\n"
+            ),
+            subprocess.CompletedProcess([], 0, "", ""),
+        ]
+
+        with patch("lib.ssh_utils.build_ssh_command", return_value=["ssh"]):
+            self.assertTrue(ensure_remote_sudo("192.0.2.40", "agent"))
+
+        self.assertEqual(mock_run.call_count, 2)
+
+    @patch("lib.ssh_utils.ssh_batch_mode", return_value=True)
+    @patch("lib.ssh_utils.subprocess.run")
+    def test_remote_sudo_does_not_retry_noninteractive_ssh_failure(
+        self, mock_run, _mock_batch_mode
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(
+            [], 255, "", "Connection closed by 192.0.2.40 port 22\n"
+        )
+
+        with patch("lib.ssh_utils.build_ssh_command", return_value=["ssh"]):
+            self.assertFalse(ensure_remote_sudo("192.0.2.40", "agent"))
+
+        mock_run.assert_called_once()
+
     @patch("lib.ssh_utils.ensure_workspace_dir")
     @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")
     def test_build_scp_command(self, _mock_known_hosts, _mock_ensure_workspace):

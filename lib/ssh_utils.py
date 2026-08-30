@@ -170,17 +170,26 @@ def ensure_remote_sudo(
         server_alive_interval=30,
         control_path=control_path,
     )
-    try:
-        result = subprocess.run(
-            probe,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=ssh_process_timeout(timeout, batch_mode=batch_mode),
+    attempts = 1 if batch_mode else 2
+    for attempt in range(attempts):
+        try:
+            result = subprocess.run(
+                probe,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=ssh_process_timeout(timeout, batch_mode=batch_mode),
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"Error: could not verify remote sudo for {username}@{host}: {exc}")
+            return False
+
+        if result.returncode != 255 or attempt + 1 == attempts:
+            break
+        print(
+            "Warning: interactive SSH authentication ended before remote sudo "
+            "verification; retrying once."
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"Error: could not verify remote sudo for {username}@{host}: {exc}")
-        return False
 
     if result.returncode == 0:
         return True
