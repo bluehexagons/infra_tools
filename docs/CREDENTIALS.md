@@ -113,7 +113,9 @@ secret auth files.
 ## Agent authentication files
 
 The supported authentication payloads seed the target user's canonical
-locations only when that credential is missing:
+locations when that credential is missing. A staged, current Codex credential
+also replaces an existing Codex credential whose metadata definitively reports
+that refresh is required:
 
 | Tool | Target path |
 | --- | --- |
@@ -130,10 +132,13 @@ for the token. A specified file can use any controller-local path, but it is
 still installed at the canonical target path.
 
 Credential files are mutable, target-owned state. Codex and other tools may
-refresh or rotate them while they run, so an ordinary setup rerun never
-replaces an existing target credential with the staged controller copy. The
-same rule applies to an existing selected GitHub host entry. Use the explicit
-`infra-tools agent auth set` command when replacement or rotation is intended.
+refresh or rotate them while they run, so an ordinary setup rerun preserves an
+existing target credential by default. The narrow exception is a Codex target
+with `refresh_required` metadata when the staged source is unambiguously
+current and has no freshness warning. The same preservation rule still applies
+to an existing selected GitHub host entry and to Claude Code and OpenCode. Use
+the explicit `infra-tools agent auth set` command for every other intentional
+replacement or rotation.
 
 These are the standard Linux paths used by infra-tools. Vendor settings that
 relocate a tool's home or data directory are not discovered by the active
@@ -213,7 +218,8 @@ example, `codex-auth.json` becomes `~/.codex/auth.json`.
 The source must be a regular, non-symlink file, must not be group- or
 world-writable, and must be no larger than 4 MiB. The source is not removed
 from the controller. A missing target file is seeded for the target user with
-mode `0600`; an existing target file is retained.
+mode `0600`; an existing target file is retained except for the narrow
+stale-Codex refresh case described above.
 
 Use `--agent-auth-file gh` as the alternative to `--git-auth`,
 `--git-auth-file`, or a GitHub token. Do not supply two GitHub credential
@@ -260,7 +266,7 @@ hardware-backed credential automatically.
 | Tool | Active-source behavior | File-copy guidance |
 | --- | --- | --- |
 | GitHub CLI (`gh`) | Uses the selected `hosts.yml` token, or asks the installed controller `gh` for `gh auth token` when the token is keyring-backed | `hosts.yml` with a token or a one-line token file works; copying a keyring-only `hosts.yml` is not sufficient |
-| Codex | Reads `~/.codex/auth.json` only | Treat ChatGPT auth as renewable per-machine state. Seed a dedicated file once, then let that VM write refreshes back; do not repeatedly distribute one active `auth.json` across concurrently running machines. If Codex uses `cli_auth_credentials_store = "keyring"` or `"auto"` and no file exists, configure the file backend and authenticate, or provide a separate auth file |
+| Codex | Reads `~/.codex/auth.json` only | Treat ChatGPT auth as renewable per-machine state. Prefer a dedicated file and let that VM write refreshes back. Setup replaces a definitively refresh-required target only from an unambiguously current staged source; do not distribute one active `auth.json` across concurrently running machines. If Codex uses `cli_auth_credentials_store = "keyring"` or `"auto"` and no file exists, configure the file backend and authenticate, or provide a separate auth file |
 | Claude Code | Reads `~/.claude/.credentials.json` when that file exists | Linux and Windows use a credentials file, but macOS commonly uses Keychain. A macOS keychain session cannot be made portable by copying this file; use a separately supplied token/file or authenticate on the VM |
 | OpenCode | Reads `~/.local/share/opencode/auth.json` when that file exists | The current auth file is plain JSON and is seeded as-is when missing. That layout appears portable, but OpenCode does not provide a general cross-machine portability guarantee, so test the target and use separate files for separate identities |
 
@@ -453,7 +459,8 @@ operator or provisioning service.
   directories.
 - Use the smallest provider scope that supports the VM's work. Treat a
   read-write token as read-write even if the setup declaration says `read`.
-- Ordinary setup is seed-only and preserves credentials refreshed on the VM.
+- Ordinary setup preserves target credentials except when it can safely replace
+  refresh-required Codex auth with a current staged source.
 - Rotate credentials with `agent auth set` when a token expires, a VM changes
   ownership, or a VM is retired. Revoke the provider token as well when it may
   have been exposed.
@@ -485,9 +492,10 @@ auth option and, if needed, `--agent-config active`, then rotate with
 **Codex reports an expired authentication token.** Run `infra-tools agent
 doctor HOST USER --tool codex --json` or `infra-tools agent auth status HOST
 USER --tool codex --json`. If the cached access token is expired and
-`last_refresh` is overdue, authenticate that VM independently or explicitly
-replace it with `agent auth set`. Updating a controller source does not replace
-an existing target file during an ordinary setup rerun.
+`last_refresh` is overdue, rerun setup with a current staged Codex source,
+authenticate that VM independently, or explicitly replace it with `agent auth
+set`. Setup replaces the target only when its metadata says refresh is required
+and the staged source is unambiguously current.
 
 **An agent installer reports permission denied under `~/.local/bin`.** Current
 setup repairs ownership of the target user's `.local` tree before running

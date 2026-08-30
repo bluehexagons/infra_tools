@@ -1393,6 +1393,103 @@ class TestAgentPayloadInstallation(unittest.TestCase):
                     '{"token":"target-refreshed-token"}\n',
                 )
 
+    def test_outdated_codex_credentials_are_refreshed_on_setup(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, 'source-auth.json')
+            home = os.path.join(directory, 'home')
+            destination = os.path.join(home, '.codex', 'auth.json')
+            os.makedirs(os.path.dirname(destination))
+            source_content = json.dumps(
+                {
+                    'auth_mode': 'chatgpt',
+                    'last_refresh': '2100-01-01T00:00:00Z',
+                    'tokens': {
+                        'access_token': _test_jwt({'exp': 4133980800}),
+                        'refresh_token': 'fresh-refresh-token',
+                    },
+                }
+            ) + '\n'
+            target_content = json.dumps(
+                {
+                    'auth_mode': 'chatgpt',
+                    'last_refresh': '2020-01-01T00:00:00Z',
+                    'tokens': {
+                        'access_token': _test_jwt({'exp': 1577923200}),
+                        'refresh_token': 'expired-refresh-token',
+                    },
+                }
+            ) + '\n'
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write(source_content)
+            with open(destination, 'w', encoding='utf-8') as file_obj:
+                file_obj.write(target_content)
+
+            with (
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_user_directory_chain'),
+                patch('common.agent_steps._chown_path'),
+            ):
+                copied = _copy_secret_file(
+                    config,
+                    source,
+                    destination,
+                    'Codex',
+                    credential_tool='codex',
+                )
+
+            self.assertTrue(copied)
+            with open(destination, encoding='utf-8') as file_obj:
+                self.assertEqual(file_obj.read(), source_content)
+            self.assertEqual(os.stat(destination).st_mode & 0o777, 0o600)
+
+    def test_outdated_codex_source_does_not_replace_target(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, 'source-auth.json')
+            home = os.path.join(directory, 'home')
+            destination = os.path.join(home, '.codex', 'auth.json')
+            os.makedirs(os.path.dirname(destination))
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('{"token":"outdated-source-token"}\n')
+            target_content = '{"token":"outdated-target-token"}\n'
+            with open(destination, 'w', encoding='utf-8') as file_obj:
+                file_obj.write(target_content)
+
+            outdated_metadata = {
+                'status': 'refresh_required',
+                'warnings': ['refresh_overdue'],
+                'last_refresh': '2020-01-01T00:00:00Z',
+            }
+            with (
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_user_directory_chain'),
+                patch('common.agent_steps._chown_path'),
+                patch(
+                    'common.agent_steps.inspect_codex_auth_file',
+                    side_effect=[outdated_metadata, outdated_metadata],
+                ),
+            ):
+                copied = _copy_secret_file(
+                    config,
+                    source,
+                    destination,
+                    'Codex',
+                    credential_tool='codex',
+                )
+
+            self.assertFalse(copied)
+            with open(destination, encoding='utf-8') as file_obj:
+                self.assertEqual(file_obj.read(), target_content)
+
     def test_git_identity_fills_missing_fields_from_staged_controller_values(self):
         config = SetupConfig(
             host='host',

@@ -62,4 +62,6 @@ infra-tools agent auth set HOST USER --tool codex --interactive
 Inspect status first and replace a credential only when explicitly requested.
 Use `--active` or a protected controller-local `--file` when appropriate.
 Never print credential files or place them in a repository. Ordinary setup is
-seed-only; `auth set` intentionally replaces the selected target credential.
+preserve-first, but may replace refresh-required Codex auth from an
+unambiguously current staged source. `auth set` intentionally replaces the
+selected target credential in every other rotation case.

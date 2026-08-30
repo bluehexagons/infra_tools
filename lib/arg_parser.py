@@ -943,7 +943,8 @@ def add_setup_arguments(
             dest="agent_auth_source",
             choices=("active", "none"),
             help=(
-                "Seed missing active agent credentials, or none to disable "
+                "Seed missing active agent credentials, safely refresh "
+                "known-outdated Codex credentials, or use none to disable "
                 "profile defaults"
             ),
         )
@@ -954,8 +955,9 @@ def add_setup_arguments(
             nargs=2,
             metavar=("TOOL", "PATH"),
             help=(
-                "Seed one missing selected agent credential file; repeat for "
-                "different tools"
+                "Stage one selected agent credential file, preserving existing "
+                "auth except for safe stale-Codex refresh; repeat for different "
+                "tools"
             ),
         )
         parser.add_argument(

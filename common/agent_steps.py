@@ -593,7 +593,7 @@ def _copy_secret_file(
     *,
     credential_tool: str | None = None,
 ) -> bool:
-    """Seed a missing credential without replacing target-maintained auth state."""
+    """Seed credentials, refreshing only known-stale Codex auth state."""
 
     if not os.path.isfile(source):
         print(f"  No {label} credential payload found")
@@ -610,12 +610,50 @@ def _copy_secret_file(
         os.chmod(destination, 0o600)
         _chown_path(config, destination)
         if credential_tool == "codex":
-            warning = codex_auth_warning(inspect_codex_auth_file(destination))
+            target_metadata = inspect_codex_auth_file(destination)
+            warning = codex_auth_warning(target_metadata)
             if warning:
                 print(f"  Warning: existing target: {warning}")
+            source_metadata = inspect_codex_auth_file(source)
+            if (
+                target_metadata.get("status") == "refresh_required"
+                and source_metadata.get("status") == "current"
+                and codex_auth_warning(source_metadata) is None
+            ):
+                descriptor, temporary = tempfile.mkstemp(
+                    dir=destination_parent,
+                    prefix=".infra-tools-auth-",
+                )
+                try:
+                    os.fchmod(descriptor, 0o600)
+                    with (
+                        open(source, "rb") as source_file,
+                        os.fdopen(descriptor, "wb") as destination_file,
+                    ):
+                        descriptor = -1
+                        shutil.copyfileobj(source_file, destination_file)
+                        destination_file.flush()
+                        os.fsync(destination_file.fileno())
+                    _reject_symlinked_agent_destination(destination)
+                    if os.path.islink(destination) or not os.path.isfile(
+                        destination
+                    ):
+                        raise RuntimeError(
+                            f"Refusing unsafe agent credential: {destination}"
+                        )
+                    os.replace(temporary, destination)
+                finally:
+                    if descriptor >= 0:
+                        os.close(descriptor)
+                    if os.path.exists(temporary):
+                        os.unlink(temporary)
+                os.chmod(destination, 0o600)
+                _chown_path(config, destination)
+                print("  Refreshed outdated Codex credentials")
+                return True
         print(
             f"  Existing {label} credentials retained; setup seeds missing "
-            "credentials only"
+            "credentials and refreshes only known-outdated Codex credentials"
         )
         return False
 
@@ -871,13 +909,13 @@ def _merge_github_credentials(config: SetupConfig, source: str) -> bool:
 
 
 def copy_agent_tooling_payload(config: SetupConfig) -> None:
-    """Apply uploaded config, seed missing credentials, and remove the payload."""
+    """Apply config, reconcile credentials, and remove the uploaded payload."""
     if not os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
         print("  No agent configuration payload found")
         return
 
     if is_dry_run():
-        print("  [DRY-RUN] Would apply agent config and seed missing credentials")
+        print("  [DRY-RUN] Would apply agent config and reconcile credentials")
         return
 
     user_home = _user_home(config)

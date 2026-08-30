@@ -426,8 +426,8 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--git-host HOST` | Select the Git host for credentials; GitHub auth currently uses `github.com` |
 | `--git-auth active\|none` | Seed missing active GitHub CLI host credentials, or disable a profile auth default |
 | `--git-auth-file PATH` | Seed a missing selected-host `hosts.yml` entry or one-line GitHub token from a controller-local file |
-| `--agent-auth active\|none` | Seed missing selected agent credentials, or disable a profile auth default |
-| `--agent-auth-file TOOL PATH` | Seed one missing selected agent credential from a controller-local file at its canonical target path; `gh` accepts a hosts file or one-line token; repeatable |
+| `--agent-auth active\|none` | Seed missing selected agent credentials, refresh known-outdated Codex credentials from a current source, or disable a profile auth default |
+| `--agent-auth-file TOOL PATH` | Stage one selected agent credential from a controller-local file at its canonical target path; `gh` accepts a hosts file or one-line token; setup otherwise preserves existing credentials, except for safe stale-Codex refresh; repeatable |
 | `--agent-config active` | Copy known non-secret config from the active controller; does not copy auth files |
 | `--interactive` | Prompt for tools, HTTPS repositories, Git policy, and credential sources |
 | `--repo GIT_URL` | Clone an HTTPS repository below the selected agent workspace; repeatable |
@@ -520,14 +520,14 @@ dependencies.
 Credential seeding and config copy are intentionally tool-scoped and transient:
 
 - `--git-auth`/`--git-auth-file` seed only a missing selected GitHub host entry, preserve target-managed credentials on rerun, and run `gh auth setup-git`.
-- `--agent-auth`/`--agent-auth-file` seed missing Codex, Claude Code, or OpenCode credentials without requiring those tools on the controller; active `gh` requires controller `gh` only when its token is keyring-backed.
+- `--agent-auth`/`--agent-auth-file` seed missing Codex, Claude Code, or OpenCode credentials without requiring those tools on the controller. They also replace refresh-required Codex auth when the staged source is unambiguously current; active `gh` requires controller `gh` only when its token is keyring-backed.
 - `--agent-config active` copies known non-secret configuration from the active controller user.
 - Codex and OpenCode receive only non-secret managed workflow skills; T3 Code
   adds its focused service and HTTPS-gateway guidance. infra-tools does not copy
   T3 Code credentials.
 
 The root-only upload payload is removed after selected config is applied and
-missing credentials are seeded. Repositories are never cloned or cached on the
+credentials are reconciled. Repositories are never cloned or cached on the
 controller: the target VM performs each HTTPS clone after GitHub credentials
 are configured.
 Public repositories on any reachable Git host work without credentials. Agent
@@ -702,8 +702,9 @@ input is filtered to `github.com` and is installed with an atomic mode-`0600`
 replacement. Status reports only tool
 installation, credential presence/metadata, safe Codex refresh and cached-token
 dates, and the GitHub authentication check; it never prints credential
-contents, token strings, or Codex account IDs. Normal setup is seed-only;
-`auth set` is the deliberate replacement path.
+contents, token strings, or Codex account IDs. Normal setup preserves existing
+credentials except for a safe refresh of known-outdated Codex auth; `auth set`
+is the deliberate replacement path for every other case.
 
 The normal restart policy defers for active login sessions, coding agents,
 build and Git processes, terminal multiplexers, maintenance holds, and
