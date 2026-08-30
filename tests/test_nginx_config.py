@@ -18,6 +18,7 @@ from lib.nginx_config import (
     _reconcile_deployment_sites,
     create_nginx_sites_for_groups,
     GENERATED_CONFIG_MARKER,
+    generate_self_signed_cert,
     generate_merged_nginx_config,
     SSL_PROTOCOLS,
 )
@@ -53,6 +54,23 @@ class TestGetSslCertPath(unittest.TestCase):
 
         self.assertEqual(cert, le_cert)
         self.assertEqual(key, le_key)
+
+    @patch("lib.nginx_config.run")
+    @patch("lib.nginx_config.os.path.exists", return_value=False)
+    def test_self_signed_ip_certificate_includes_ip_san(self, _exists, mock_run):
+        generate_self_signed_cert("192.168.0.51")
+
+        command = mock_run.call_args_list[-1].args[0]
+        self.assertIn("-subj /CN=192.168.0.51", command)
+        self.assertIn("-addext subjectAltName=IP:192.168.0.51", command)
+
+    @patch("lib.nginx_config.run")
+    @patch("lib.nginx_config.os.path.exists", return_value=False)
+    def test_self_signed_domain_certificate_includes_dns_san(self, _exists, mock_run):
+        generate_self_signed_cert("git.example.test")
+
+        command = mock_run.call_args_list[-1].args[0]
+        self.assertIn("-addext subjectAltName=DNS:git.example.test", command)
 
 
 class TestMakeCacheMaps(unittest.TestCase):

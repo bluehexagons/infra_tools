@@ -7,8 +7,9 @@ system account with `git-shell`; it cannot be used as a general login account.
 
 ## Choose a deployment mode
 
-Hostname mode is the usual choice. Gogs listens on localhost and nginx serves
-the public URL:
+Hostname mode is the usual choice. The port in `--gogs DOMAIN:PORT` is the
+public Gogs HTTPS port. Gogs listens on a separate infra-tools-managed
+loopback port and nginx serves the public URL:
 
 ```bash
 infra-tools setup server_web git.example.com deploy \
@@ -16,11 +17,12 @@ infra-tools setup server_web git.example.com deploy \
   --ssl --ssl-email admin@example.com
 ```
 
-With `--ssl`, infra-tools obtains and renews a Let's Encrypt certificate. With
+The example is available at `https://git.example.com:3000/`; Gogs does not
+claim port 443. With `--ssl`, infra-tools obtains and renews a Let's Encrypt
+certificate. Port 80 remains the ACME challenge and redirect listener. With
 `--cloudflare`, the nginx-to-Gogs connection remains private and the tunnel
-serves the hostname; public HTTP/HTTPS firewall ports are not opened. Direct
-hostname deployments redirect ordinary port-80 requests to HTTPS, while the
-Cloudflare-only HTTP origin remains unreachable outside the tunnel.
+serves standard external HTTPS; public HTTP/HTTPS firewall ports are not
+opened and Gogs does not create a local port-443 listener.
 
 For a lab or private-network service, omit the hostname. With no source rules,
 Gogs stays on loopback and setup prints an SSH tunnel command:
@@ -32,28 +34,36 @@ infra-tools setup server_web 192.168.1.10 deploy \
 ssh -L 3000:127.0.0.1:3000 deploy@192.168.1.10
 ```
 
-To make plaintext HTTP reachable on a trusted private network, repeat
+To make HTTPS reachable directly on a private network, enable SSL and repeat
 `--gogs-source` for the exact IPv4 hosts or networks that need access:
 
 ```bash
 infra-tools setup server_web 192.168.1.10 deploy \
   --gogs :3000 /srv/gogs-data \
+  --ssl \
   --gogs-source 192.168.1.0/24 \
   --gogs-source 10.0.0.0/8
 ```
 
+Because a private IP cannot use the normal public-domain certificate flow,
+hostless `--ssl` creates a self-signed certificate with the target IP in its
+subject alternative name. Trust `/etc/nginx/ssl/192.168.1.10.crt` explicitly
+on each client, or use a hostname with Let's Encrypt to avoid certificate
+warnings. The resulting URL is `https://192.168.1.10:3000/`.
+
 Source-restricted mode requires active UFW. Setup stops the existing Gogs
 service, installs and verifies replacement source rules, removes obsolete
-infra-tools-managed rules, and only then writes a non-loopback listener. In
-`v2.0.0`, it refuses public IPv4 sources, IPv6 sources, and unmanaged allow
-rules for the same port. A source rule does not encrypt traffic; use hostname
-mode with `--ssl` or `--cloudflare` across untrusted networks. Hostname mode
-requires one of those encrypted ingress options. Switching between hostless,
-hostname, and Cloudflare modes removes obsolete managed direct-access rules,
-including dormant rules while UFW is installed but inactive.
+infra-tools-managed rules, and only then writes the listener. It refuses
+public IPv4 sources, IPv6 sources, and unmanaged allow rules for the same
+port. Omit `--ssl` only when plaintext HTTP is intentional on a trusted
+network. Hostname mode requires `--ssl` or `--cloudflare`. Switching between
+hostless, hostname, direct TLS, and Cloudflare modes removes obsolete managed
+firewall rules and Gogs nginx sites, including the former port-443 listener.
 
-The port defaults to 3000, so `--gogs 3000` is also valid. The optional data
-path must be absolute and defaults to `/var/lib/gogs`.
+The direct public HTTP/HTTPS port defaults to 3000, so `--gogs 3000` is also
+valid. With `--cloudflare`, that value is the private backend port instead.
+Port 80 is reserved for nginx ingress and certificate validation. The optional
+data path must be absolute and defaults to `/var/lib/gogs`.
 
 ## First login and Git access
 
@@ -73,23 +83,24 @@ password. In either case, setup records the initial value in the root-only file
 existing administrator account and does not rotate its password. Use a unique,
 high-entropy value and enable MFA for administrator accounts.
 
-Hostname deployments throttle password and MFA submission endpoints to five
-requests per minute per client with a small burst. Nginx also emits a
+Reverse-proxied deployments, including hostless `--ssl`, throttle password and
+MFA submission endpoints to five requests per minute per client with a small
+burst. Nginx also emits a
 privacy-preserving marker for failed current-API web authentication and all
 HTTP Basic authentication; five failures within ten minutes produce a one-hour
 Fail2ban source ban. This covers Git/LFS and API Basic Auth without throttling
 successful high-volume transfers.
 Both the current Gogs API sign-in paths and the login/MFA paths used by older
 managed releases receive the request limit. Cloudflare deployments derive the
-client address from the trusted tunnel header. Direct hostless mode does not
-pass through Nginx, so retain its private source restriction or use the default
-SSH tunnel.
+client address from the trusted tunnel header. Plain-HTTP hostless mode does
+not pass through Nginx, so retain its private source restriction or use the
+default SSH tunnel.
 
 The web UI manages repository users and their SSH keys. Clone over HTTPS using
-the configured hostname, or over SSH through the `git` account:
+the configured public port, or over SSH through the `git` account:
 
 ```bash
-git clone https://git.example.com/team/project.git
+git clone https://git.example.com:3000/team/project.git
 git clone git@git.example.com:team/project.git
 ```
 
@@ -162,7 +173,7 @@ normal repository clones:
 ```bash
 infra-tools setup server_dev 192.168.1.41 agent \
   --git-lfs \
-  --repo https://git.example.com/team/assets.git
+  --repo https://git.example.com:3000/team/assets.git
 ```
 
 `--git-lfs` does not alter repository URLs or credentials. A loopback-only
@@ -254,7 +265,7 @@ or export, not as the live SQLite, repository, or LFS-object filesystem.
 
 ## Troubleshooting
 
-- A hostname setup that fails nginx validation fails setup and leaves Gogs
+- An SSL or hostname setup that fails nginx validation fails setup and leaves Gogs
   stopped unless a prior verified release can be restored; run `sudo nginx -t`
   and inspect the generated `gogs_<hostname>` site before retrying.
 - A hostless source setup fails closed when UFW is inactive or another rule

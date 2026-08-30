@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import shlex
 import shutil
@@ -190,9 +191,16 @@ def generate_self_signed_cert(domain: str) -> PathPair:
     
     cert_dir = os.path.dirname(cert_file)
     run(f"mkdir -p {cert_dir}")
+    try:
+        ipaddress.ip_address(domain)
+    except ValueError:
+        subject_alt_name = f"DNS:{domain}"
+    else:
+        subject_alt_name = f"IP:{domain}"
     run(f"openssl req -x509 -nodes -days 365 -newkey rsa:2048 "
              f"-keyout {shlex.quote(key_file)} -out {shlex.quote(cert_file)} "
-             f"-subj '/CN={domain}'")
+             f"-subj {shlex.quote(f'/CN={domain}')} "
+             f"-addext {shlex.quote(f'subjectAltName={subject_alt_name}')}")
     
     return (cert_file, key_file)
 

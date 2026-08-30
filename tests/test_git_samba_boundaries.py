@@ -89,6 +89,7 @@ class TestGogsConfigPermissions(unittest.TestCase):
                     config,
                     domain="",
                     port=3000,
+                    backend_port=3000,
                     data_path="/srv/data/gogs",
                     git_home="/home/git",
                     config_path=config_path,

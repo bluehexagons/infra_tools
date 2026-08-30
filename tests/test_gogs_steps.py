@@ -37,6 +37,28 @@ class TestParseGogsSpec(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid Gogs port: nope"):
             gogs_steps.parse_gogs_spec("git.example.com:nope", strict=True)
 
+    def test_ssl_uses_dedicated_loopback_backend_port(self):
+        config = SetupConfig(
+            host="192.168.0.51",
+            username="admin",
+            system_type="server_web",
+            gogs=[":3000"],
+            enable_ssl=True,
+        )
+
+        self.assertEqual(gogs_steps._gogs_backend_port(config, 3000), 13000)
+
+    def test_ssl_backend_avoids_same_public_port(self):
+        config = SetupConfig(
+            host="192.168.0.51",
+            username="admin",
+            system_type="server_web",
+            gogs=[":13000"],
+            enable_ssl=True,
+        )
+
+        self.assertEqual(gogs_steps._gogs_backend_port(config, 13000), 13001)
+
     def test_parser_and_config_preserve_repeatable_sources(self):
         parser = argparse.ArgumentParser()
         add_setup_arguments(parser, for_remote=True, include_host=False)
@@ -345,9 +367,13 @@ class TestGenerateGogsConfig(unittest.TestCase):
                 data_path="/srv/gogs",
                 domain="git.example.com",
                 port=3000,
+                backend_port=13000,
             )
 
-        self.assertIn("EXTERNAL_URL = https://git.example.com/", content)
+        self.assertIn("EXTERNAL_URL = https://git.example.com:3000/", content)
+        self.assertIn("HTTP_ADDR = 127.0.0.1", content)
+        self.assertIn("HTTP_PORT = 13000", content)
+        self.assertIn("LOCAL_ROOT_URL = http://127.0.0.1:13000/", content)
         self.assertIn("SSH_DOMAIN = git.example.com", content)
         self.assertIn("SSH_ROOT_PATH = /home/git/.ssh", content)
         self.assertIn("ROOT = /srv/gogs/repositories", content)
@@ -408,6 +434,32 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertIn("HTTP_ADDR = 0.0.0.0", content)
         self.assertIn("EXTERNAL_URL = http://10.0.0.41:3000/", content)
 
+    def test_hostless_ssl_uses_public_tls_url_and_loopback_backend(self):
+        config = SetupConfig(
+            host="10.0.0.41",
+            username="admin",
+            system_type="server_web",
+            gogs=[":3000", "/srv/gogs"],
+            gogs_sources=["192.168.0.0/24"],
+            enable_ssl=True,
+        )
+        with patch(
+            "web.gogs_steps._load_or_create_gogs_secret_key",
+            return_value="secret",
+        ):
+            content = gogs_steps.generate_gogs_app_ini(
+                config,
+                git_home="/home/git",
+                data_path="/srv/gogs",
+                domain="",
+                port=3000,
+                backend_port=13000,
+            )
+
+        self.assertIn("EXTERNAL_URL = https://10.0.0.41:3000/", content)
+        self.assertIn("HTTP_ADDR = 127.0.0.1", content)
+        self.assertIn("HTTP_PORT = 13000", content)
+
     def test_generate_service_uses_explicit_config_path(self):
         content = gogs_steps.generate_gogs_service("/srv/gogs/custom/conf/app.ini")
         self.assertIn("WorkingDirectory=/opt/gogs/current", content)
@@ -419,31 +471,54 @@ class TestGenerateGogsConfig(unittest.TestCase):
     def test_direct_nginx_http_redirects_to_https(self):
         content = gogs_steps.generate_gogs_nginx_config(
             "git.example.test",
-            3000,
+            13000,
+            public_tls_port=3000,
             forwarded_proto="$scheme",
+            redirect_plain_http=True,
         )
 
         self.assertEqual(content.count("listen 80;"), 1)
-        self.assertIn("return 301 https://$host$request_uri;", content)
-        self.assertIn("proxy_pass http://127.0.0.1:3000;", content)
+        self.assertIn("return 301 https://$host:3000$request_uri;", content)
+        self.assertIn("listen 3000 ssl;", content)
+        self.assertNotIn("listen 443 ssl;", content)
+        self.assertIn("proxy_pass http://127.0.0.1:13000;", content)
 
     def test_cloudflare_http_origin_proxies_without_redirect(self):
         content = gogs_steps.generate_gogs_nginx_config(
             "git.example.test",
             3000,
+            public_tls_port=None,
             forwarded_proto="https",
+            cloudflare_origin=True,
         )
 
         self.assertIn("listen 80;", content)
+        self.assertNotIn("listen 443", content)
         self.assertNotIn("return 301", content)
         self.assertIn("proxy_set_header X-Forwarded-Proto https;", content)
+
+    def test_hostless_ssl_listens_on_requested_ipv4_port(self):
+        content = gogs_steps.generate_gogs_nginx_config(
+            "10.0.0.41",
+            13000,
+            public_tls_port=3000,
+            forwarded_proto="$scheme",
+            enable_ipv6=False,
+        )
+
+        self.assertIn("listen 0.0.0.0:3000 ssl;", content)
+        self.assertNotIn("listen 443", content)
+        self.assertNotIn("listen [::]", content)
+        self.assertIn("proxy_pass http://127.0.0.1:13000;", content)
 
     def test_nginx_throttles_login_and_records_only_auth_failures(self):
         content = gogs_steps.generate_gogs_nginx_config(
             "git.example.test",
             3000,
+            public_tls_port=None,
             forwarded_proto="https",
             client_ip="$http_cf_connecting_ip",
+            cloudflare_origin=True,
         )
 
         self.assertIn("rate=5r/m", content)
@@ -631,6 +706,7 @@ class TestGogsNginx(unittest.TestCase):
         invalid = SimpleNamespace(returncode=1, stdout="", stderr="invalid")
         with (
             patch("web.gogs_steps.generate_self_signed_cert"),
+            patch("web.gogs_steps._remove_stale_gogs_nginx_sites"),
             patch("web.gogs_steps.os.path.exists", return_value=True),
             patch("web.gogs_steps.run", side_effect=[completed, invalid]),
             patch.object(gogs_steps, "open", create=True),
@@ -641,7 +717,12 @@ class TestGogsNginx(unittest.TestCase):
             ),
         ):
             with self.assertRaisesRegex(RuntimeError, "nginx configuration test"):
-                gogs_steps._write_gogs_nginx_config(config, "git.example.test", 3000)
+                gogs_steps._write_gogs_nginx_config(
+                    config,
+                    "git.example.test",
+                    3000,
+                    13000,
+                )
 
     def test_failed_certificate_issuance_fails_setup(self):
         config = SetupConfig(
@@ -654,6 +735,7 @@ class TestGogsNginx(unittest.TestCase):
         completed = SimpleNamespace(returncode=0, stdout="", stderr="")
         with (
             patch("web.gogs_steps.generate_self_signed_cert"),
+            patch("web.gogs_steps._remove_stale_gogs_nginx_sites"),
             patch("web.gogs_steps.os.path.exists", return_value=True),
             patch("web.gogs_steps.run", return_value=completed),
             patch("web.gogs_steps.install_certbot"),
@@ -664,7 +746,12 @@ class TestGogsNginx(unittest.TestCase):
             patch.object(gogs_steps, "open", create=True),
         ):
             with self.assertRaisesRegex(RuntimeError, "TLS certificate"):
-                gogs_steps._write_gogs_nginx_config(config, "git.example.test", 3000)
+                gogs_steps._write_gogs_nginx_config(
+                    config,
+                    "git.example.test",
+                    3000,
+                    13000,
+                )
 
 
 class TestGogsRequiredSetupSteps(unittest.TestCase):

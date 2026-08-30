@@ -44,7 +44,8 @@ GOGS_ADMIN_CREDENTIALS_FILE = "/opt/infra_tools/state/gogs_admin_credentials.jso
 GOGS_GITHUB_REPO = "gogs/gogs"
 GOGS_SSH_DROPIN_DIR = "/etc/ssh/sshd_config.d"
 GOGS_SSH_DROPIN_FILE = f"{GOGS_SSH_DROPIN_DIR}/99-gogs-git-user.conf"
-DEFAULT_GOGS_HTTP_PORT = 3000
+DEFAULT_GOGS_PUBLIC_PORT = 3000
+DEFAULT_GOGS_PROXY_BACKEND_PORT = 13000
 DEFAULT_GOGS_DATA_PATH = "/var/lib/gogs"
 GOGS_AUTH_FAILURE_LOG = "/var/log/nginx/infra-tools-gogs-auth-failures.log"
 _GOGS_RULE_COMMENT_PREFIX = "infra_tools Gogs"
@@ -73,28 +74,28 @@ def parse_gogs_spec(spec: str, *, strict: bool = False) -> tuple[str, int]:
         port = int(normalized)
         if strict and not 1 <= port <= 65535:
             raise ValueError(f"Invalid Gogs port: {normalized}")
-        return "", port if 1 <= port <= 65535 else DEFAULT_GOGS_HTTP_PORT
+        return "", port if 1 <= port <= 65535 else DEFAULT_GOGS_PUBLIC_PORT
 
     if ":" not in normalized:
-        return normalized, DEFAULT_GOGS_HTTP_PORT
+        return normalized, DEFAULT_GOGS_PUBLIC_PORT
 
     domain, _, raw_port = normalized.rpartition(":")
     domain = domain.strip()
     raw_port = raw_port.strip()
     if not raw_port:
-        return domain, DEFAULT_GOGS_HTTP_PORT
+        return domain, DEFAULT_GOGS_PUBLIC_PORT
 
     try:
         port = int(raw_port)
     except ValueError as exc:
         if strict:
             raise ValueError(f"Invalid Gogs port: {raw_port}") from exc
-        return domain, DEFAULT_GOGS_HTTP_PORT
+        return domain, DEFAULT_GOGS_PUBLIC_PORT
 
     if strict and not 1 <= port <= 65535:
         raise ValueError(f"Invalid Gogs port: {raw_port}")
     if not 1 <= port <= 65535:
-        return domain, DEFAULT_GOGS_HTTP_PORT
+        return domain, DEFAULT_GOGS_PUBLIC_PORT
     return domain, port
 
 
@@ -108,12 +109,25 @@ def _gogs_public_host(config: SetupConfig, domain: str) -> str:
     return domain or config.host
 
 
+def _gogs_uses_reverse_proxy(config: SetupConfig, domain: str) -> bool:
+    return bool(domain or config.enable_ssl or config.enable_cloudflare)
+
+
+def _gogs_backend_port(config: SetupConfig, public_port: int) -> int:
+    """Return the loopback HTTP port used behind direct TLS."""
+    if config.enable_ssl:
+        if public_port == DEFAULT_GOGS_PROXY_BACKEND_PORT:
+            return DEFAULT_GOGS_PROXY_BACKEND_PORT + 1
+        return DEFAULT_GOGS_PROXY_BACKEND_PORT
+    return public_port
+
+
 def _gogs_external_url(config: SetupConfig, domain: str, port: int) -> str:
-    scheme = "https" if domain and (config.enable_ssl or config.enable_cloudflare) else "http"
+    scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
     host = domain or (
         config.host if config.effective_gogs_sources() else "127.0.0.1"
     )
-    if domain:
+    if domain and config.enable_cloudflare:
         return f"{scheme}://{host}/"
     default_port = 443 if scheme == "https" else 80
     port_suffix = f":{port}" if port != default_port else ""
@@ -344,13 +358,16 @@ def generate_gogs_app_ini(
     data_path: str,
     domain: str,
     port: int,
+    backend_port: int | None = None,
 ) -> str:
     """Return app.ini contents for a minimal self-hosted Gogs service."""
     public_host = _gogs_public_host(config, domain)
     external_url = _gogs_external_url(config, domain, port)
+    resolved_backend_port = backend_port if backend_port is not None else port
     http_addr = (
         "0.0.0.0"
-        if config.effective_gogs_sources() and not domain
+        if config.effective_gogs_sources()
+        and not _gogs_uses_reverse_proxy(config, domain)
         else "127.0.0.1"
     )
     secret_key = _load_or_create_gogs_secret_key()
@@ -363,8 +380,8 @@ EXTERNAL_URL = {external_url}
 DOMAIN = {public_host}
 PROTOCOL = http
 HTTP_ADDR = {http_addr}
-HTTP_PORT = {port}
-LOCAL_ROOT_URL = http://127.0.0.1:{port}/
+HTTP_PORT = {resolved_backend_port}
+LOCAL_ROOT_URL = http://127.0.0.1:{resolved_backend_port}/
 APP_DATA_PATH = {data_path}/data
 DISABLE_SSH = false
 SSH_DOMAIN = {public_host}
@@ -446,41 +463,87 @@ WantedBy=multi-user.target
 
 
 def generate_gogs_nginx_config(
-    domain: str,
-    port: int,
+    server_name: str,
+    backend_port: int,
     *,
+    public_tls_port: int | None,
     forwarded_proto: str,
     client_ip: str = "$remote_addr",
+    cloudflare_origin: bool = False,
+    redirect_plain_http: bool = False,
+    loopback_only: bool = False,
+    enable_ipv6: bool = True,
 ) -> str:
     """Return an nginx site config that proxies to Gogs."""
-    cert_file, key_file = get_ssl_cert_path(domain)
-    zone_suffix = hashlib.sha256(domain.encode("utf-8")).hexdigest()[:12]
+    cert_file, key_file = get_ssl_cert_path(server_name)
+    zone_suffix = hashlib.sha256(server_name.encode("utf-8")).hexdigest()[:12]
     login_zone = f"infra_tools_gogs_login_{zone_suffix}"
     login_failure = f"infra_tools_gogs_login_failure_{zone_suffix}"
     basic_failure = f"infra_tools_gogs_basic_failure_{zone_suffix}"
     auth_failure = f"infra_tools_gogs_auth_failure_{zone_suffix}"
     log_format = f"infra_tools_gogs_auth_{zone_suffix}"
-    if forwarded_proto == "https":
-        http_listener = "    listen 80;\n    listen [::]:80;\n"
-        http_redirect = ""
-    else:
-        http_listener = ""
-        http_redirect = f"""server {{
+    if cloudflare_origin:
+        http_server = f"""server {{
     listen 80;
     listen [::]:80;
-    server_name {domain};
+    server_name {server_name};
+    client_max_body_size 512m;
+    access_log {GOGS_AUTH_FAILURE_LOG} {log_format} if=${auth_failure};
+
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
+
+    location ~ ^/(?:api/web/user/(?:sign-in|mfa(?:/recovery)?)|user/login(?:/two_factor(?:_recovery_code)?)?)$ {{
+        limit_req zone={login_zone} burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:{backend_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP {client_ip};
+        proxy_set_header X-Forwarded-For {client_ip};
+        proxy_set_header X-Forwarded-Proto {forwarded_proto};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+    }}
+
+    location / {{
+        proxy_pass http://127.0.0.1:{backend_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP {client_ip};
+        proxy_set_header X-Forwarded-For {client_ip};
+        proxy_set_header X-Forwarded-Proto {forwarded_proto};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+    }}
+}}
+
+"""
+    elif redirect_plain_http and public_tls_port is not None:
+        port_suffix = "" if public_tls_port == 443 else f":{public_tls_port}"
+        http_server = f"""server {{
+    listen 80;
+    listen [::]:80;
+    server_name {server_name};
 
     location /.well-known/acme-challenge/ {{
         root /var/www/letsencrypt;
     }}
 
     location / {{
-        return 301 https://$host$request_uri;
+        return 301 https://$host{port_suffix}$request_uri;
     }}
 }}
 
 """
-    proxy_settings = f"""        proxy_pass http://127.0.0.1:{port};
+    else:
+        http_server = ""
+    proxy_settings = f"""        proxy_pass http://127.0.0.1:{backend_port};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP {client_ip};
         proxy_set_header X-Forwarded-For {client_ip};
@@ -491,30 +554,22 @@ def generate_gogs_nginx_config(
         proxy_request_buffering off;
         proxy_read_timeout 300s;
 """
-    return f"""limit_req_zone {client_ip} zone={login_zone}:10m rate=5r/m;
-
-map "$request_method:$status:$uri" ${login_failure} {{
-    default 0;
-    ~^POST:401:/api/web/user/(?:sign-in|mfa|mfa/recovery)$ 1;
-}}
-
-map "$http_authorization:$status" ${basic_failure} {{
-    default 0;
-    ~^.+:401$ 1;
-}}
-
-map "${login_failure}:${basic_failure}" ${auth_failure} {{
-    default 0;
-    ~1 1;
-}}
-
-log_format {log_format} '{client_ip} [$time_local] infra-tools-auth-failure';
-
-{http_redirect}server {{
-{http_listener}    listen 443 ssl;
-    listen [::]:443 ssl;
+    if public_tls_port is None:
+        tls_server = ""
+    else:
+        if loopback_only:
+            listeners = f"    listen 127.0.0.1:{public_tls_port} ssl;"
+        elif enable_ipv6:
+            listeners = (
+                f"    listen {public_tls_port} ssl;\n"
+                f"    listen [::]:{public_tls_port} ssl;"
+            )
+        else:
+            listeners = f"    listen 0.0.0.0:{public_tls_port} ssl;"
+        tls_server = f"""server {{
+{listeners}
     http2 on;
-    server_name {domain};
+    server_name {server_name};
 
     ssl_certificate {cert_file};
     ssl_certificate_key {key_file};
@@ -537,23 +592,83 @@ log_format {log_format} '{client_ip} [$time_local] infra-tools-auth-failure';
 {proxy_settings}    }}
 }}
 """
+    return f"""limit_req_zone {client_ip} zone={login_zone}:10m rate=5r/m;
+
+map "$request_method:$status:$uri" ${login_failure} {{
+    default 0;
+    ~^POST:401:/api/web/user/(?:sign-in|mfa|mfa/recovery)$ 1;
+}}
+
+map "$http_authorization:$status" ${basic_failure} {{
+    default 0;
+    ~^.+:401$ 1;
+}}
+
+map "${login_failure}:${basic_failure}" ${auth_failure} {{
+    default 0;
+    ~1 1;
+}}
+
+log_format {log_format} '{client_ip} [$time_local] infra-tools-auth-failure';
+
+{http_server}{tls_server}
+"""
 
 
-def _write_gogs_nginx_config(config: SetupConfig, domain: str, port: int) -> None:
-    generate_self_signed_cert(domain)
-    config_name = f"gogs_{domain.replace('.', '_').replace('-', '_')}"
+def _gogs_nginx_config_name(server_name: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_]+", "_", server_name).strip("_")
+    return f"gogs_{slug or 'default'}"
+
+
+def _remove_stale_gogs_nginx_sites(desired_name: str | None = None) -> bool:
+    removed = False
+    for directory in ("/etc/nginx/sites-enabled", "/etc/nginx/sites-available"):
+        try:
+            names = os.listdir(directory)
+        except FileNotFoundError:
+            continue
+        for name in names:
+            if not name.startswith("gogs_") or name == desired_name:
+                continue
+            path = os.path.join(directory, name)
+            if os.path.isdir(path) and not os.path.islink(path):
+                raise RuntimeError(f"Refusing unexpected Gogs nginx directory: {path}")
+            os.remove(path)
+            removed = True
+            print(f"  ✓ Removed stale Gogs nginx config: {path}")
+    return removed
+
+
+def _write_gogs_nginx_config(
+    config: SetupConfig,
+    domain: str,
+    public_port: int,
+    backend_port: int,
+) -> None:
+    server_name = domain or config.host
+    public_tls_port = public_port if config.enable_ssl else None
+    if public_tls_port is not None:
+        generate_self_signed_cert(server_name)
+    config_name = _gogs_nginx_config_name(server_name)
     config_file = f"/etc/nginx/sites-available/{config_name}"
     enabled_link = f"/etc/nginx/sites-enabled/{config_name}"
     forwarded_proto = "https" if config.enable_cloudflare else "$scheme"
     client_ip = "$http_cf_connecting_ip" if config.enable_cloudflare else "$remote_addr"
+    loopback_only = not domain and not config.effective_gogs_sources()
     run("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
+    _remove_stale_gogs_nginx_sites(config_name)
     with open(config_file, "w", encoding="utf-8") as file_obj:
         file_obj.write(
             generate_gogs_nginx_config(
-                domain,
-                port,
+                server_name,
+                backend_port,
+                public_tls_port=public_tls_port,
                 forwarded_proto=forwarded_proto,
                 client_ip=client_ip,
+                cloudflare_origin=config.enable_cloudflare,
+                redirect_plain_http=bool(domain and config.enable_ssl),
+                loopback_only=loopback_only,
+                enable_ipv6=bool(domain),
             )
         )
     if not os.path.exists(enabled_link):
@@ -564,17 +679,22 @@ def _write_gogs_nginx_config(config: SetupConfig, domain: str, port: int) -> Non
     run("systemctl reload nginx")
     print("  ✓ nginx configured for Gogs")
 
-    if config.enable_ssl:
+    if config.enable_ssl and domain:
         install_certbot(config)
         if not obtain_letsencrypt_certificate([domain], config.ssl_email, domain):
             raise RuntimeError("Could not obtain the requested Gogs TLS certificate")
         with open(config_file, "w", encoding="utf-8") as file_obj:
             file_obj.write(
                 generate_gogs_nginx_config(
-                    domain,
-                    port,
+                    server_name,
+                    backend_port,
+                    public_tls_port=public_tls_port,
                     forwarded_proto=forwarded_proto,
                     client_ip=client_ip,
+                    cloudflare_origin=config.enable_cloudflare,
+                    redirect_plain_http=True,
+                    loopback_only=loopback_only,
+                    enable_ipv6=True,
                 )
             )
         setup_certificate_renewal()
@@ -585,6 +705,10 @@ def _write_gogs_nginx_config(config: SetupConfig, domain: str, port: int) -> Non
             )
         run("systemctl reload nginx")
         print("  ✓ Let's Encrypt enabled for Gogs")
+    elif config.enable_ssl:
+        print(
+            f"  ✓ Self-signed TLS enabled for Gogs on {server_name}:{public_port}"
+        )
 
     if config.enable_cloudflare:
         run_cloudflare_tunnel_setup(config)
@@ -664,11 +788,19 @@ def _reconcile_gogs_direct_firewall(config: SetupConfig, port: int) -> None:
     domain = ""
     if config.gogs:
         domain, _configured_port = parse_gogs_spec(str(config.gogs[0]))
-    sources = config.effective_gogs_sources() if not domain else []
+    sources = (
+        config.effective_gogs_sources()
+        if not domain
+        else (
+            config.effective_access_sources()
+            if not config.enable_cloudflare
+            else []
+        )
+    )
     if not active:
         if sources:
             raise RuntimeError(
-                "Hostless Gogs source exposure requires an active UFW firewall"
+                "Source-restricted Gogs exposure requires an active UFW firewall"
             )
         available = run("command -v ufw", check=False, capture_output=True)
         if available.returncode != 0:
@@ -698,7 +830,7 @@ def _reconcile_gogs_direct_firewall(config: SetupConfig, port: int) -> None:
         if conflicting:
             raise RuntimeError(
                 f"Unmanaged UFW allow rules already expose Gogs port {port}; "
-                "remove them before using --gogs-source"
+                "remove them before using source-restricted Gogs access"
             )
 
     desired_comments: set[str] = set()
@@ -736,10 +868,11 @@ def _maybe_configure_firewall(config: SetupConfig, domain: str, port: int) -> No
             return
         if config.effective_access_sources():
             print(
-                "  ✓ Gogs web access follows the generic access-source filter"
+                f"  ✓ Firewall restricts Gogs {port}/tcp to "
+                f"{', '.join(config.effective_access_sources())}"
             )
             return
-        for rule_port in (80, 443):
+        for rule_port in sorted({80, port}):
             rule = run(
                 f"ufw allow {rule_port}/tcp comment 'gogs web'",
                 check=False,
@@ -748,7 +881,10 @@ def _maybe_configure_firewall(config: SetupConfig, domain: str, port: int) -> No
                 raise RuntimeError(
                     f"Could not install the Gogs web firewall rule for {rule_port}/tcp"
                 )
-        print("  ✓ Firewall allows Gogs web access on 80/tcp and 443/tcp")
+        print(
+            "  ✓ Firewall allows Gogs web access on "
+            + " and ".join(f"{rule_port}/tcp" for rule_port in sorted({80, port}))
+        )
         return
 
     sources = config.effective_gogs_sources()
@@ -1004,6 +1140,7 @@ def _complete_gogs_setup(
     *,
     domain: str,
     port: int,
+    backend_port: int,
     data_path: str,
     git_home: str,
     config_path: str,
@@ -1018,6 +1155,7 @@ def _complete_gogs_setup(
             data_path=data_path,
             domain=domain,
             port=port,
+            backend_port=backend_port,
         ),
         mode=0o600,
     )
@@ -1025,9 +1163,16 @@ def _complete_gogs_setup(
     write_gogs_state(tag_name, data_path, config_path, archive_sha256)
     _configure_git_ssh_access()
 
-    if domain:
+    if _gogs_uses_reverse_proxy(config, domain):
         install_nginx(config)
-        _write_gogs_nginx_config(config, domain, port)
+        _write_gogs_nginx_config(config, domain, port, backend_port)
+    elif _remove_stale_gogs_nginx_sites():
+        result = run("nginx -t", check=False)
+        if result.returncode != 0:
+            raise RuntimeError(
+                "nginx configuration test failed after removing the Gogs proxy"
+            )
+        run("systemctl reload nginx")
 
     cleanup_service(GOGS_SERVICE)
     service_file = f"/etc/systemd/system/{GOGS_SERVICE}.service"
@@ -1044,7 +1189,7 @@ def _complete_gogs_setup(
     else:
         raise RuntimeError("Gogs service failed to start")
 
-    _wait_for_gogs_ready(port)
+    _wait_for_gogs_ready(backend_port)
     _ensure_gogs_admin_account(config, config_path, data_path)
     _run_gogs_post_setup_commands(config_path)
     check_gogs_storage_health(data_path)
@@ -1100,9 +1245,18 @@ def setup_gogs(config: SetupConfig) -> None:
         return
 
     domain, port = parse_gogs_spec(str(config.gogs[0]), strict=True)
+    backend_port = _gogs_backend_port(config, port)
     data_path = _gogs_data_path(config)
-    if domain:
-        listen_label = f"{domain} -> 127.0.0.1:{port}"
+    if config.enable_cloudflare:
+        listen_label = (
+            f"https://{domain or config.host} via Cloudflare "
+            f"-> 127.0.0.1:{backend_port}"
+        )
+    elif config.enable_ssl:
+        public_host = domain or config.host
+        listen_label = f"https://{public_host}:{port} -> 127.0.0.1:{backend_port}"
+    elif domain:
+        listen_label = f"{domain}:{port} -> 127.0.0.1:{backend_port}"
     elif config.effective_gogs_sources():
         listen_label = f"private sources -> :{port}"
     else:
@@ -1129,6 +1283,7 @@ def setup_gogs(config: SetupConfig) -> None:
             config,
             domain=domain,
             port=port,
+            backend_port=backend_port,
             data_path=data_path,
             git_home=git_home,
             config_path=config_path,

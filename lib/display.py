@@ -100,9 +100,8 @@ def print_service_access_summary(
     lines.append(("SSH", f"ssh {config.username}@{config.host}", "shell access"))
 
     if config.system_type == "server_web":
-        scheme = "https" if config.enable_ssl else "http"
         lines.append(
-            ("Web server", _http_url(config.host, scheme=scheme), "web interface")
+            ("Web server", _http_url(config.host, scheme="http"), "web interface")
         )
 
     if "web" in (config.godot_bundles or []):
@@ -152,15 +151,18 @@ def print_service_access_summary(
     if config.gogs:
         gogs_spec = str(config.gogs[0])
         scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
-        gogs_url, _loopback_only = _service_url(
-            config,
-            gogs_spec,
-            3000,
-            scheme=scheme,
-            source_restricted=bool(config.effective_gogs_sources()),
-        )
+        domain, port = _split_service_spec(gogs_spec, 3000)
+        if domain:
+            public_port = None if config.enable_cloudflare else port
+            gogs_url = _http_url(domain, public_port, scheme=scheme)
+        else:
+            access_host = (
+                config.host
+                if config.effective_gogs_sources()
+                else "127.0.0.1"
+            )
+            gogs_url = _http_url(access_host, port, scheme=scheme)
         lines.append(("Gogs web", gogs_url, "web interface"))
-        domain, _port = _split_service_spec(gogs_spec, 3000)
         lines.append(
             ("Gogs Git over SSH", f"git@{domain or config.host}", "Git access")
         )

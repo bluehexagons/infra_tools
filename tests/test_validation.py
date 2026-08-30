@@ -246,6 +246,25 @@ class TestValidateGogsSettings(unittest.TestCase):
             )
         )
 
+    def test_valid_hostless_ssl_private_sources_pass(self):
+        validate_gogs_settings(
+            self._make_config(
+                gogs=[':3000', '/srv/gogs'],
+                gogs_sources=['192.168.0.0/24'],
+                enable_ssl=True,
+            )
+        )
+
+    def test_port_80_is_reserved_for_nginx_ingress(self):
+        with self.assertRaisesRegex(ValueError, "port 80 is reserved"):
+            validate_gogs_settings(
+                self._make_config(
+                    gogs=[':80', '/srv/gogs'],
+                    gogs_sources=['192.168.0.0/24'],
+                    enable_ssl=True,
+                )
+            )
+
     def test_invalid_argument_count_fails(self):
         with self.assertRaisesRegex(ValueError, "--gogs requires DOMAIN\\[:PORT\\] and optional DATA_PATH"):
             validate_gogs_settings(

@@ -1009,7 +1009,7 @@ def add_setup_arguments(
     parser.add_argument("--ssl", dest="enable_ssl", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
-                       help="Enable Let's Encrypt SSL/TLS certificates for deployed domains")
+                       help="Enable SSL/TLS: Let's Encrypt for deployed domains and a self-signed certificate for hostless Gogs")
     parser.add_argument("--ssl-email", dest="ssl_email",
                        help="Email address for Let's Encrypt registration (optional)")
     parser.add_argument("--cloudflare", dest="enable_cloudflare", 
@@ -1150,7 +1150,9 @@ def add_setup_arguments(
         metavar="GOGS",
         help="Deploy Gogs as a minimal self-hosted Git service. "
              "Usage: --gogs DOMAIN[:PORT] [DATA_PATH]. DOMAIN is the optional public "
-             "hostname, PORT defaults to 3000, and DATA_PATH defaults to /var/lib/gogs. "
+             "hostname, PORT is the direct public HTTP/HTTPS port and defaults to "
+             "3000 (with --cloudflare it remains the private backend port), and "
+             "DATA_PATH defaults to /var/lib/gogs. "
              "Hostless specs bind to loopback unless --gogs-source is repeated.",
     )
     parser.add_argument(

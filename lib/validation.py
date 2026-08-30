@@ -340,7 +340,12 @@ def validate_gogs_settings(config: "SetupConfig") -> None:
     from web.gogs_steps import DEFAULT_GOGS_DATA_PATH, parse_gogs_spec
     from lib.validators import validate_host
 
-    domain, _port = parse_gogs_spec(spec, strict=True)
+    domain, port = parse_gogs_spec(spec, strict=True)
+    if port == 80:
+        raise ValueError(
+            "Gogs port 80 is reserved for nginx HTTP ingress and TLS certificate "
+            "validation; choose another --gogs port"
+        )
     if domain and not validate_host(domain):
         raise ValueError(f"Invalid Gogs domain: {domain}")
     if domain:
@@ -363,8 +368,7 @@ def validate_gogs_settings(config: "SetupConfig") -> None:
             raise ValueError("--gogs-source currently supports only private IPv4 sources")
         if network.is_global:
             raise ValueError(
-                "--gogs-source must be private or otherwise non-global; hostless "
-                "Gogs uses plaintext HTTP"
+                "--gogs-source must be private or otherwise non-global"
             )
         canonical_source = str(network)
         if canonical_source in normalized_sources:

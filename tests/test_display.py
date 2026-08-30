@@ -139,13 +139,49 @@ class TestRdpDisplay(unittest.TestCase):
         self.assertNotIn("http://192.168.0.41:3774/", rendered)
         self.assertNotIn("compatibility", rendered)
         self.assertNotIn("0.0.0.0", rendered)
-        self.assertIn("Gogs web: http://git.example.com/", rendered)
+        self.assertIn("Gogs web: http://git.example.com:3000/", rendered)
         self.assertIn("Gogs Git over SSH: git@git.example.com", rendered)
         self.assertIn("Git access", rendered)
         self.assertIn("Antistatic lobby: http://lobby.example.com/", rendered)
         self.assertIn("Antistatic DB: http://192.168.0.41:8081/", rendered)
         self.assertIn("RDP: 192.168.0.41:3389", rendered)
         self.assertIn("Samba/SMB: //192.168.0.41", rendered)
+
+    def test_access_summary_uses_gogs_tls_port(self) -> None:
+        config = SetupConfig(
+            host="192.168.0.51",
+            username="gitadmin",
+            system_type="server_web",
+            gogs=[":3000", "/srv/gogs"],
+            gogs_sources=["192.168.0.0/24"],
+            enable_ssl=True,
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_service_access_summary(config)
+
+        rendered = output.getvalue()
+        self.assertIn("Web server: http://192.168.0.51/", rendered)
+        self.assertIn("Gogs web: https://192.168.0.51:3000/", rendered)
+        self.assertNotIn("Gogs web: https://192.168.0.51/", rendered)
+
+    def test_access_summary_omits_cloudflare_backend_port(self) -> None:
+        config = SetupConfig(
+            host="192.168.0.51",
+            username="gitadmin",
+            system_type="server_web",
+            gogs=["git.example.test:3000", "/srv/gogs"],
+            enable_cloudflare=True,
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_service_access_summary(config)
+
+        rendered = output.getvalue()
+        self.assertIn("Gogs web: https://git.example.test/", rendered)
+        self.assertNotIn("git.example.test:3000", rendered)
 
     def test_access_summary_marks_loopback_web_interfaces(self) -> None:
         config = SetupConfig(
