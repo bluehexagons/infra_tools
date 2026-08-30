@@ -238,6 +238,8 @@ def _disk_option(value: str, name: str) -> Optional[str]:
 def _existing_managed_disks(
     vm: _ExistingVM,
     desired: dict[str, VMDiskHardware],
+    *,
+    allow_missing: Optional[set[str]] = None,
 ) -> dict[str, tuple[str, str]]:
     """Map declared logical disks to provider devices without adopting extras."""
 
@@ -264,7 +266,12 @@ def _existing_managed_disks(
             )
         managed[logical_name] = (device, value)
 
-    missing = [name for name in desired if name not in managed]
+    allowed_missing = allow_missing or set()
+    missing = [
+        name
+        for name in desired
+        if name not in managed and name not in allowed_missing
+    ]
     if missing:
         raise ProvisionError(
             f"VM {vm.vmid} is missing declared disk identities: "
@@ -756,6 +763,7 @@ def _reconcile_existing_vm(
     require_existing_name: bool = False,
     start_existing: bool = False,
     allow_managed_data_disks: bool = False,
+    attach_missing_data_disks: Optional[set[str]] = None,
     allow_memory_overcommit: bool = False,
     dry_run: bool = False,
 ) -> bool:
@@ -799,6 +807,18 @@ def _reconcile_existing_vm(
                 or not isinstance(hardware.backup, bool)
             ):
                 raise ProvisionError("Invalid per-device VM disk hardware settings")
+    authorized_attachments = set(attach_missing_data_disks or set())
+    if "root" in authorized_attachments:
+        raise ProvisionError("The existing VM root disk cannot be created additively")
+    if authorized_attachments and (
+        desired_disk_hardware is None
+        or desired_storage_layout is None
+        or not authorized_attachments.issubset(desired_disk_hardware)
+        or not authorized_attachments.issubset(desired_storage_layout)
+    ):
+        raise ProvisionError(
+            "Additive VM disks require complete storage and hardware declarations"
+        )
     existing = _list_existing_vms(node_ip, user, ssh_opts)
     ip_matches = [vm for vm in existing if target_ip in vm.ipv4_addresses]
     if len(ip_matches) > 1:
@@ -857,19 +877,29 @@ def _reconcile_existing_vm(
         )
 
     managed_disks = (
-        _existing_managed_disks(matched, desired_disk_hardware)
+        _existing_managed_disks(
+            matched,
+            desired_disk_hardware,
+            allow_missing=authorized_attachments,
+        )
         if desired_disk_hardware is not None
         else {}
     )
     if desired_storage_layout is not None:
-        if set(desired_storage_layout) != set(managed_disks):
+        if (
+            desired_disk_hardware is None
+            or set(desired_storage_layout) != set(desired_disk_hardware)
+        ):
             raise ProvisionError(
                 "VM storage verification requires every declared disk"
             )
         _verify_existing_storage_layout(
             matched,
             managed_disks,
-            desired_storage_layout,
+            {
+                name: desired_storage_layout[name]
+                for name in managed_disks
+            },
         )
     if desired_bridge is not None:
         _verify_existing_bridge(matched, desired_bridge)
@@ -903,6 +933,91 @@ def _reconcile_existing_vm(
         raise ProvisionError(
             f"VM {matched.vmid} is not reachable because it is not running; "
             "start or repair it before retrying provisioning"
+        )
+
+    missing_attachments = [
+        name
+        for name in (desired_storage_layout or {})
+        if name not in managed_disks
+    ]
+    attached_disks: list[tuple[str, str]] = []
+    if missing_attachments:
+        assert desired_storage_layout is not None
+        assert desired_disk_hardware is not None
+        _preflight_data_disk_capacity(
+            [desired_storage_layout[name] for name in missing_attachments],
+            node_ip,
+            user,
+            ssh_opts,
+        )
+        used_devices = {device for device, _value in matched.scsi_disks}
+        for logical_name in missing_attachments:
+            available_device = next(
+                (
+                    f"scsi{index}"
+                    for index in range(1, 31)
+                    if f"scsi{index}" not in used_devices
+                ),
+                None,
+            )
+            if available_device is None:
+                raise ProvisionError(
+                    f"VM {matched.vmid} has no free SCSI slot for disk "
+                    f"'{logical_name}'"
+                )
+            disk = desired_storage_layout[logical_name]
+            hardware = desired_disk_hardware[logical_name]
+            disk_value = _disk_hardware_value(
+                f"{disk.pool}:{_parse_disk_size_gib(disk.size)}",
+                discard=hardware.discard,
+                ssd=hardware.ssd,
+                backup=hardware.backup,
+                serial=disk.serial,
+            )
+            attach = _ssh_run(
+                node_ip,
+                user,
+                ssh_opts,
+                f"qm set {matched.vmid} --{available_device} "
+                f"{shlex.quote(disk_value)}",
+                dry_run=False,
+            )
+            if attach.returncode != 0:
+                detail = (attach.stderr or attach.stdout or "").strip()
+                raise ProvisionError(
+                    f"Could not attach VM data disk '{logical_name}' at "
+                    f"{available_device}: {detail or 'unknown error'}"
+                )
+            used_devices.add(available_device)
+            attached_disks.append((logical_name, available_device))
+
+        verify_attachments = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"qm config {matched.vmid}",
+            dry_run=False,
+        )
+        if verify_attachments.returncode != 0:
+            detail = (
+                verify_attachments.stderr or verify_attachments.stdout or ""
+            ).strip()
+            raise ProvisionError(
+                f"Could not verify attached disks on VM {matched.vmid}: "
+                f"{detail or 'unknown error'}"
+            )
+        matched = _parse_existing_vm(
+            matched.vmid,
+            verify_attachments.stdout or "",
+        )
+        managed_disks = _existing_managed_disks(
+            matched,
+            desired_disk_hardware,
+        )
+        _verify_existing_storage_layout(
+            matched,
+            managed_disks,
+            desired_storage_layout,
         )
 
     name_changed = bool(
@@ -1126,6 +1241,14 @@ def _reconcile_existing_vm(
         print(
             f"  ✓ Reconfigured {len(disk_changes)} managed disk(s) on VM "
             f"{matched.vmid}: {details}"
+        )
+    if attached_disks:
+        details = ", ".join(
+            f"{name} ({device})" for name, device in attached_disks
+        )
+        print(
+            f"  ✓ Attached {len(attached_disks)} managed data disk(s) to "
+            f"VM {matched.vmid}: {details}"
         )
     disk_model_changed = any(
         ((_disk_option(value, "discard") == "on") != hardware.discard)
@@ -1866,6 +1989,7 @@ def provision_vm(
     start_existing_vm: bool = False,
     verify_existing_bridge: bool = False,
     verify_existing_storage: bool = False,
+    attach_missing_data_disks: Optional[set[str]] = None,
 ) -> None:
     """Orchestrate Proxmox VM provisioning.
 
@@ -1880,6 +2004,8 @@ def provision_vm(
         start_existing_vm: Start a verified existing VM when it is stopped.
         verify_existing_bridge: Require an existing VM's net0 bridge to match.
         verify_existing_storage: Require existing disks to match declared pools.
+        attach_missing_data_disks: Exact named data disks that may be created on
+            a saved existing VM when their managed identities are absent.
 
     Raises:
         VMAlreadyExists: if a VM with the target IP already exists on the node.
@@ -1943,10 +2069,20 @@ def provision_vm(
 
     if dry_run:
         print("[DRY RUN] Would provision Proxmox VM:")
-        if verify_existing_bridge or verify_existing_storage:
+        if attach_missing_data_disks:
+            print(
+                "  Existing VM storage extension: attach "
+                + ", ".join(sorted(attach_missing_data_disks))
+            )
+        if require_existing_name or start_existing_vm:
             print(
                 "  Existing VM rebind: require and verify the destination, then "
                 "start it if stopped"
+            )
+        elif verify_existing_bridge or verify_existing_storage:
+            print(
+                "  Existing VM verification: require the saved guest and "
+                "verify its declared provider layout"
             )
         print(f"  Proxmox node: {node_ip}")
         print(f"  Target IP: {target_ip}")
@@ -2099,6 +2235,7 @@ def provision_vm(
         require_existing_name=require_existing_name,
         start_existing=start_existing_vm,
         allow_managed_data_disks=allow_existing_data_disks,
+        attach_missing_data_disks=attach_missing_data_disks,
         allow_memory_overcommit=getattr(
             config,
             "allow_memory_overcommit",

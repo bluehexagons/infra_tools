@@ -46,6 +46,39 @@ def _args(**overrides: object) -> Namespace:
 
 
 class TestCachedProvisioningMetadata(unittest.TestCase):
+    def test_setup_parser_accepts_additive_mounted_disk_without_root(self) -> None:
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(
+            [
+                "setup",
+                "server_lite",
+                "10.0.0.50",
+                "admin",
+                "--provision-on",
+                "pve1",
+                "--storage",
+                "team-data",
+                "bulk-lvm",
+                "512G",
+                "--storage-mount",
+                "team-data",
+                "/srv/team-files",
+                "ext4",
+                "empty",
+            ]
+        )
+
+        config = SetupConfig.from_args(args, args.system_type)
+
+        self.assertEqual(
+            config.container_storage,
+            [["team-data", "bulk-lvm", "512G"]],
+        )
+        self.assertEqual(
+            config.storage_mounts,
+            [["team-data", "/srv/team-files", "ext4", "empty"]],
+        )
+
     def test_setup_parser_accepts_force_provider_verification(self) -> None:
         parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
 
@@ -382,6 +415,153 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         self.assertIn(
             "--storage",
             "\n".join(str(call.args[0]) for call in mock_print.call_args_list),
+        )
+
+    def test_mounted_disk_addition_merges_saved_vm_storage(self) -> None:
+        current = _config(
+            container_storage=[
+                ["syncthing-data", "bulk-lvm", "512G"],
+            ],
+            storage_mounts=[
+                ["syncthing-data", "/srv/syncthing", "ext4", "empty"],
+            ],
+            vm_disk_settings=[["syncthing-data", "backup=on"]],
+        )
+        cached = _config(
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["agent-data", "bulk-lvm", "128G"],
+            ],
+            storage_mounts=[["agent-data", "/srv/agent-workspace"]],
+            vm_disk_settings=[["agent-data", "ssd=on"]],
+        )
+        args = _args(
+            container_storage=current.container_storage,
+            storage_mounts=current.storage_mounts,
+            vm_disk_settings=current.vm_disk_settings,
+        )
+
+        additions = infra_tools._merge_additive_vm_storage(
+            current,
+            cached,
+            args,
+        )
+
+        self.assertEqual(additions, {"syncthing-data"})
+        self.assertEqual(
+            current.container_storage,
+            [
+                ["root", "local-lvm", "32G"],
+                ["agent-data", "bulk-lvm", "128G"],
+                ["syncthing-data", "bulk-lvm", "512G"],
+            ],
+        )
+        self.assertEqual(
+            current.storage_mounts,
+            [
+                ["agent-data", "/srv/agent-workspace"],
+                ["syncthing-data", "/srv/syncthing", "ext4", "empty"],
+            ],
+        )
+        self.assertEqual(
+            current.vm_disk_settings,
+            [
+                ["agent-data", "ssd=on"],
+                ["syncthing-data", "backup=on"],
+            ],
+        )
+        self.assertEqual(
+            infra_tools._unsupported_cached_provisioning_changes(
+                current,
+                cached,
+                args,
+                additive_storage_disks=additions,
+            ),
+            [],
+        )
+
+    def test_multiple_mounted_disks_can_be_added_without_syncthing(self) -> None:
+        cached = _config(
+            container_storage=[["root", "local-lvm", "32G"]],
+        )
+        args = _args(
+            container_storage=[
+                ["team-data", "bulk-lvm", "512G"],
+                ["archive-data", "archive", "1T"],
+            ],
+            storage_mounts=[
+                ["team-data", "/srv/team-files"],
+                ["archive-data", "/mnt/archive", "xfs", "empty"],
+            ],
+        )
+        current = _config(
+            container_storage=args.container_storage,
+            storage_mounts=args.storage_mounts,
+        )
+
+        additions = infra_tools._merge_additive_vm_storage(
+            current,
+            cached,
+            args,
+        )
+
+        self.assertEqual(additions, {"team-data", "archive-data"})
+        self.assertEqual(current.container_storage[0][0], "root")
+        self.assertFalse(current.enable_syncthing)
+
+    def test_additive_storage_rejects_changes_to_saved_declarations(self) -> None:
+        cached = _config(
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["existing-data", "bulk-lvm", "64G"],
+            ],
+            storage_mounts=[["existing-data", "/srv/existing"]],
+        )
+        current = _config(
+            container_storage=[
+                ["root", "fast-lvm", "64G"],
+                ["new-data", "bulk-lvm", "128G"],
+            ],
+            storage_mounts=[["new-data", "/srv/new"]],
+        )
+        args = _args(
+            container_storage=current.container_storage,
+            storage_mounts=current.storage_mounts,
+        )
+
+        additions = infra_tools._merge_additive_vm_storage(
+            current,
+            cached,
+            args,
+        )
+
+        self.assertEqual(additions, set())
+        self.assertEqual(
+            infra_tools._unsupported_cached_provisioning_changes(
+                current,
+                cached,
+                args,
+                additive_storage_disks=additions,
+            ),
+            ["--storage", "--storage-mount"],
+        )
+
+    def test_existing_vm_storage_addition_rejects_home_mount(self) -> None:
+        cached = _config(
+            container_storage=[["root", "local-lvm", "32G"]],
+        )
+        current = _config(
+            container_storage=[["home-data", "bulk-lvm", "128G"]],
+            storage_mounts=[["home-data", "/home", "ext4", "empty"]],
+        )
+        args = _args(
+            container_storage=current.container_storage,
+            storage_mounts=current.storage_mounts,
+        )
+
+        self.assertEqual(
+            infra_tools._merge_additive_vm_storage(current, cached, args),
+            set(),
         )
 
     def test_reuses_metadata_when_explicit_guest_shape_matches(self) -> None:
@@ -908,6 +1088,123 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             mock_save.call_args.args[0].container_storage,
             [["root", "fast-lvm", "64G"]],
         )
+
+    def test_existing_vm_can_add_declared_mounted_storage(self) -> None:
+        from lib.proxmox_vm import VMAlreadyExists
+
+        current = _config(
+            hosted_node="10.0.0.10",
+            hosted_user="root",
+            hosted_key="/keys/proxmox",
+            container_storage=[
+                ["team-data", "bulk-lvm", "512G"],
+            ],
+            storage_mounts=[
+                ["team-data", "/srv/team-files", "ext4", "empty"],
+            ],
+        )
+        cached = _config(
+            hosted_node="10.0.0.10",
+            hosted_user="root",
+            hosted_key="/keys/proxmox",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        args = _args(
+            container_storage=current.container_storage,
+            storage_mounts=current.storage_mounts,
+        )
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=current), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch(
+                 "infra_tools._prepare_runtime_config_for_cli",
+                 side_effect=lambda config: config,
+             ), \
+             patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.print_setup_summary"), \
+             patch("infra_tools.store_cli_credentials"), \
+             patch("infra_tools.save_setup_command") as mock_save, \
+             patch("infra_tools.register_proxmox_setup_host"), \
+             patch("infra_tools.run_remote_setup", return_value=0), \
+             patch("infra_tools.ensure_guest_ipv4_route"), \
+             patch(
+                 "lib.proxmox_vm.provision_vm",
+                 side_effect=VMAlreadyExists(),
+             ) as mock_provision, \
+             patch("infra_tools.refresh_managed_guest_host_keys"):
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            current.container_storage,
+            [
+                ["root", "local-lvm", "32G"],
+                ["team-data", "bulk-lvm", "512G"],
+            ],
+        )
+        mock_provision.assert_called_once_with(
+            current,
+            image=current.vm_image,
+            allow_existing_data_disks=True,
+            require_existing_vm=True,
+            verify_existing_storage=True,
+            attach_missing_data_disks={"team-data"},
+        )
+        self.assertTrue(mock_save.called)
+        self.assertEqual(
+            mock_save.call_args.args[0].storage_mounts,
+            [
+                ["team-data", "/srv/team-files", "ext4", "empty"],
+            ],
+        )
+
+    def test_failed_additive_mount_keeps_previous_cached_layout(self) -> None:
+        from lib.proxmox_vm import VMAlreadyExists
+
+        current = _config(
+            container_storage=[["team-data", "bulk-lvm", "512G"]],
+            storage_mounts=[["team-data", "/srv/team-files"]],
+        )
+        cached = _config(
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        args = _args(
+            container_storage=current.container_storage,
+            storage_mounts=current.storage_mounts,
+        )
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=current), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch(
+                 "infra_tools._prepare_runtime_config_for_cli",
+                 side_effect=lambda config: config,
+             ), \
+             patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.print_setup_summary"), \
+             patch("infra_tools.store_cli_credentials"), \
+             patch("infra_tools.save_setup_command") as mock_save, \
+             patch("infra_tools.register_proxmox_setup_host"), \
+             patch("infra_tools.run_remote_setup", return_value=1), \
+             patch("infra_tools.ensure_guest_ipv4_route"), \
+             patch(
+                 "lib.proxmox_vm.provision_vm",
+                 side_effect=VMAlreadyExists(),
+             ), \
+             patch("infra_tools.refresh_managed_guest_host_keys"):
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 1)
+        mock_save.assert_not_called()
 
     def test_migrated_vm_is_verified_and_rebound_to_explicit_destination(
         self,

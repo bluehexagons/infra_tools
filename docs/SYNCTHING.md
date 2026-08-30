@@ -80,6 +80,29 @@ same path for both makes the dependency explicit and fail-closed. Proxmox disk
 backup inclusion does not replace Syncthing versioning or an independent
 off-host backup.
 
+For an existing infra-tools-managed QEMU VM, start with the command shown by
+`infra-tools cmd fileserver` so its other service choices remain intact, then
+append the new disk, mount, and Syncthing flags. Existing storage declarations
+may be left in that reconstructed command unchanged, or the shorter storage
+portion may contain only the addition:
+
+```bash
+infra-tools credentials set syncthing-admin
+
+infra-tools setup server_lite 192.168.0.60 admin \
+  --provision-on pve1 \
+  --storage syncthing-data bulk-lvm 512G \
+  --storage-mount syncthing-data /srv/syncthing ext4 empty \
+  --disk-backup syncthing-data \
+  --syncthing --syncthing-root /srv/syncthing
+```
+
+Infra-tools merges the saved root disk and existing mounted disks, verifies
+them at Proxmox, checks capacity, and hot-adds only the newly named blank disk.
+The same additive workflow supports ordinary mounted data disks unrelated to
+Syncthing. It does not replace a missing old disk, adopt a manually attached
+volume, or resize or detach storage.
+
 Changing `--syncthing-root` does not move files or rewrite GUI folder paths.
 Before changing it on an existing endpoint, migrate the data and update or
 recreate the GUI folders so every folder path is below the new root. Setup

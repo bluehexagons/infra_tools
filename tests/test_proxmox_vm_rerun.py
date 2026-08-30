@@ -245,6 +245,195 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
         )
         self.assertFalse(any("--scsi2" in command for command in commands))
 
+    @patch("lib.proxmox_vm._preflight_data_disk_capacity")
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_authorized_data_disk_is_attached_at_first_free_slot(
+        self,
+        mock_run,
+        mock_capacity,
+    ) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "scsi0: local-lvm:vm-112-disk-0,iothread=1,size=32G\n"
+                    "scsi1: manual:vm-112-disk-1,size=8G\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "scsi0: local-lvm:vm-112-disk-0,iothread=1,size=32G\n"
+                    "scsi1: manual:vm-112-disk-1,size=8G\n"
+                    "scsi2: bulk-lvm:vm-112-disk-2,iothread=1,"
+                    "serial=it-syncthing-data,size=512G\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+        ]
+        layout = {
+            "root": VMDataDisk("root", "local-lvm", "32G"),
+            "syncthing-data": VMDataDisk(
+                "syncthing-data",
+                "bulk-lvm",
+                "512G",
+            ),
+        }
+
+        self.assertTrue(
+            _reconcile_existing_vm(
+                "10.0.0.1",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_disk_hardware={
+                    "root": VMDiskHardware("root", False, False),
+                    "syncthing-data": VMDiskHardware(
+                        "syncthing-data",
+                        False,
+                        False,
+                    ),
+                },
+                desired_storage_layout=layout,
+                allow_managed_data_disks=True,
+                attach_missing_data_disks={"syncthing-data"},
+            )
+        )
+
+        mock_capacity.assert_called_once_with(
+            [layout["syncthing-data"]],
+            "10.0.0.1",
+            "root",
+            [],
+        )
+        self.assertEqual(
+            mock_run.call_args_list[4].args[3],
+            "qm set 112 --scsi2 "
+            "bulk-lvm:512,iothread=1,serial=it-syncthing-data",
+        )
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_authorized_attachment_does_not_replace_a_missing_saved_disk(
+        self,
+        mock_run,
+    ) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "scsi0: local-lvm:vm-112-disk-0,iothread=1,size=32G\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+        ]
+
+        with self.assertRaisesRegex(ProvisionError, "existing-data"):
+            _reconcile_existing_vm(
+                "10.0.0.1",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_disk_hardware={
+                    "root": VMDiskHardware("root", False, False),
+                    "existing-data": VMDiskHardware(
+                        "existing-data",
+                        False,
+                        False,
+                    ),
+                    "syncthing-data": VMDiskHardware(
+                        "syncthing-data",
+                        False,
+                        False,
+                    ),
+                },
+                desired_storage_layout={
+                    "root": VMDataDisk("root", "local-lvm", "32G"),
+                    "existing-data": VMDataDisk(
+                        "existing-data",
+                        "bulk-lvm",
+                        "64G",
+                    ),
+                    "syncthing-data": VMDataDisk(
+                        "syncthing-data",
+                        "bulk-lvm",
+                        "512G",
+                    ),
+                },
+                allow_managed_data_disks=True,
+                attach_missing_data_disks={"syncthing-data"},
+            )
+
+        self.assertFalse(
+            any(call.args[3].startswith("qm set") for call in mock_run.call_args_list)
+        )
+
+    @patch("lib.proxmox_vm._preflight_data_disk_capacity")
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_authorized_disk_attachment_is_idempotent(
+        self,
+        mock_run,
+        mock_capacity,
+    ) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "scsi0: local-lvm:vm-112-disk-0,iothread=1,size=32G\n"
+                    "scsi1: bulk-lvm:vm-112-disk-1,iothread=1,"
+                    "serial=it-syncthing-data,size=512G\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+        ]
+
+        self.assertTrue(
+            _reconcile_existing_vm(
+                "10.0.0.1",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_disk_hardware={
+                    "root": VMDiskHardware("root", False, False),
+                    "syncthing-data": VMDiskHardware(
+                        "syncthing-data",
+                        False,
+                        False,
+                    ),
+                },
+                desired_storage_layout={
+                    "root": VMDataDisk("root", "local-lvm", "32G"),
+                    "syncthing-data": VMDataDisk(
+                        "syncthing-data",
+                        "bulk-lvm",
+                        "512G",
+                    ),
+                },
+                allow_managed_data_disks=True,
+                attach_missing_data_disks={"syncthing-data"},
+            )
+        )
+
+        mock_capacity.assert_not_called()
+        self.assertFalse(
+            any(call.args[3].startswith("qm set") for call in mock_run.call_args_list)
+        )
+
     @patch("lib.proxmox_vm._ssh_run")
     def test_unsaved_named_disks_are_rejected_before_mutation(self, mock_run) -> None:
         mock_run.side_effect = [

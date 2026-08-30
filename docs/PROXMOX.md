@@ -266,18 +266,38 @@ and agent repositories verify a matching declared mount before writing, so a
 failed data mount cannot silently redirect application data to the SSD boot
 filesystem.
 
-This first slice is deliberately provisioning-only. It does not adopt an
-existing disk, attach data storage to LXC, detach or resize a data disk, or
-manage a manually attached VPS volume. Supported empty mount targets are
-`/data`, `/home` on a newly provisioned QEMU VM, or paths below `/srv`,
-`/var/lib`, `/opt`, and `/mnt`. For `/home`, cloud-init defers creation of the
-setup user until the blank disk has been mounted. Populated-path migration is
-still rejected. `--image-storage` remains only the staging pool for the VM
-image; it is not guest data storage. See the
-[VM management and lightweight Git hosting plan](plans/VM_MANAGEMENT_AND_LIGHTWEIGHT_GIT_HOSTING.md)
-for the deferred lifecycle work. Idempotent reruns are supported when the VM's
-saved provisioning metadata matches the declaration; an existing unsaved VM
-is not treated as permission to adopt disks.
+Named mounted disks may also be added to an existing QEMU VM that has saved
+infra-tools provisioning metadata. Start with its reconstructed setup command,
+or supply the same target, system type, setup user, and `--provision-on` value,
+then add only the new disk and mount declarations:
+
+```bash
+infra-tools setup server_lite 10.0.0.60 admin \
+  --provision-on pve1 \
+  --storage team-data bulk-lvm 512G \
+  --storage-mount team-data /srv/team-files ext4 empty
+```
+
+The saved root disk, existing data disks, mounts, provider identity, and
+network defaults are merged automatically when omitted. Existing declarations
+may instead be repeated unchanged. Infra-tools verifies every old managed disk
+before mutation, checks capacity for only the additions, uses the first free
+SCSI slots without touching unrelated disks, and verifies each new stable
+`it-NAME` identity. Target setup then formats only a blank exact-identity disk
+and requires an empty mount path. Multiple new mounted disks may be declared in
+one command. If one attachment succeeds before a later step fails, rerunning
+the same command recognizes the attached identity and continues safely; saved
+setup metadata changes only after remote setup succeeds.
+
+This additive path does not adopt a manually attached disk, replace a missing
+saved disk, attach data storage to LXC, add `/home` to an existing VM, create
+new cache or swap media, or detach or resize a disk. Supported empty mount
+targets are `/data`, `/home` on a newly provisioned QEMU VM, or paths below
+`/srv`, `/var/lib`, `/opt`, and `/mnt`. For `/home`, cloud-init defers creation
+of the setup user until the blank disk has been mounted. Populated-path
+migration is still rejected. `--image-storage` remains only the staging pool
+for the VM image; it is not guest data storage. An existing unsaved VM is not
+treated as permission to adopt or add disks.
 
 Inspect a provisioned VM by its saved local `--name`:
 
@@ -339,8 +359,9 @@ retains the same logical disk names, setup bypasses the stale cached layout and
 requires Proxmox to report each disk on the requested pool at or above the
 requested size before saving the new declaration. `--verify-provider` performs
 the same storage check when the declaration itself is unchanged. This adopts
-verified metadata drift only: setup still does not move, resize, attach, or
-detach an existing disk.
+verified metadata drift only: setup still does not move, resize, or detach an
+existing disk. New named mounted disks are the exception and use the additive
+workflow above.
 
 For an offline GUI migration, rerun the saved setup command with the new
 `--provision-on` destination. Infra-tools keeps the explicit destination host,
@@ -356,11 +377,12 @@ binding changes only after remote setup succeeds. A replacement clone can
 follow this path while the original remains stopped; a coexisting clone needs
 a unique address, hostname, and saved setup identity.
 
-Existing-guest setup does not replace, resize, attach, or detach root/data
-volumes, and does not mutate bridges, cache declarations, base images, or image
-staging storage. It may update the managed discard, SSD, I/O-thread, and backup
-hints in place while verifying that the volume reference, size, serial, and
-other unowned options remain intact.
+Existing-guest setup does not replace, resize, or detach root/data volumes, and
+does not mutate bridges, cache declarations, base images, or image staging
+storage. It may add explicitly declared blank mounted data disks through the
+saved-guest workflow above. It may also update the managed discard, SSD,
+I/O-thread, and backup hints in place while verifying that the volume
+reference, size, serial, and other unowned options remain intact.
 When saved metadata shows that another provisioning-only declaration changed,
 setup rejects the rerun instead of saving a value it did not apply. Use the
 explicit `vm` or `proxmox` management command for a supported lifecycle change,

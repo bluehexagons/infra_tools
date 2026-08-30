@@ -216,7 +216,9 @@ started and allowed time for SSH to return. Supply the moved VM's actual
 `--storage` when the logical disk names are unchanged. A size change is accepted
 only when the live disk is already at least that large; setup verifies and
 adopts the declaration but does not resize the disk. A different disk set
-remains an explicit storage operation and is rejected by setup.
+during a provider rebind remains rejected. On the same saved provider VM,
+setup can add new named disks that each have a new `--storage-mount`; it still
+rejects removals, replacements, and changes to saved disk or mount identities.
 
 A GUI clone that replaces the original can use the same rebind path only while
 the saved source VM is stopped. A clone intended to coexist with its source
@@ -741,7 +743,7 @@ reboots explicitly.
 | `--allow-memory-overcommit` | Explicitly allow running VM memory floors to exceed the node balloon target |
 | `--storage root POOL AMOUNT` | Required root storage spec |
 | `--storage root AMOUNT` | Root storage shorthand using saved defaults or `auto` |
-| `--storage NAME POOL AMOUNT` | Provision a named non-root QEMU data disk; repeatable |
+| `--storage NAME POOL AMOUNT` | Declare a named non-root QEMU data disk; repeatable and addable to a saved managed VM when paired with a new mount |
 | `--storage NAME AMOUNT` | Named-disk shorthand using the root-pool default |
 | `--storage-mount NAME PATH [FILESYSTEM] [empty]` | Prepare the matching blank data disk at an empty guest path; filesystem defaults to `ext4` and may be `ext4` or `xfs` |
 | `--storage-cache DATA_NAME CACHE_NAME [MODE]` | Consume a second named VM disk as an LVM cache for a mounted data disk; mode defaults to `writethrough` and may be `writethrough` or `writeback` |
@@ -757,7 +759,9 @@ reboots explicitly.
 Notes:
 
 - `--storage` is repeatable.
-- `root` storage is required when `--provision-on` is used.
+- `root` storage is required on initial provisioning. A saved managed VM's
+  additive mounted-disk rerun may omit it because the verified declaration is
+  merged from local metadata.
 - Provisioned VM disks use VirtIO SCSI single with a per-disk I/O thread and
   discard enabled. Use `--no-disk-discard` when storage policy must suppress
   guest TRIM. `--disk-ssd` is explicit because a Proxmox pool can be remote,
@@ -781,10 +785,17 @@ Notes:
 - `--cpu-type host` exposes the node CPU for the best single-node performance.
   Choose a common Proxmox `x86-64-*` model for guests that must migrate across
   nodes with different CPU generations.
-- Named data disks are available only while provisioning a new QEMU VM. Every
-  name must have exactly one mount declaration unless it is consumed as the
-  cache device in `--storage-cache` or by `--swap-device`; logical names use lowercase letters,
-  numbers, and hyphens and are at most 17 characters.
+- Every named data disk must have exactly one mount declaration unless it is
+  consumed as the cache device in `--storage-cache` or by `--swap-device`;
+  logical names use lowercase letters, numbers, and hyphens and are at most 17
+  characters. A same-provider setup rerun for a saved managed QEMU VM may add
+  one or more named disks when each addition has a new empty-path
+  `--storage-mount`. Existing storage and mount declarations may be omitted
+  and are merged from saved metadata, or may be repeated unchanged. The
+  provider verifies every saved disk and enough capacity before attaching only
+  the authorized new identities. Additive cache media, swap disks, `/home`,
+  LXC disks, manual-volume adoption, replacement, detach, and resize remain
+  unsupported.
 - `--storage-cache` builds a guest-side LVM cache from two entire blank disks.
   Put the data disk on the durable pool and the cache disk on SSD storage. The
   data disk retains its normal `--storage-mount`; the cache disk must not have
@@ -796,8 +807,10 @@ Notes:
 - Automated mounting accepts only a confirmed blank disk and an empty `/data`
   path, a path below `/srv`, `/var/lib`, `/opt`, or `/mnt`, or `/home` while
   provisioning a new QEMU VM. The `/home` case mounts the disk before the
-  setup user is created. Populated-path migration, existing-disk adoption,
-  detach, and data-disk resize remain unsupported.
+  setup user is created. A newly declared mounted disk can be hot-added to an
+  existing saved QEMU VM; start from `infra-tools cmd NAME` when the setup has
+  other service flags that must be retained. Populated-path migration,
+  existing-disk adoption, detach, and data-disk resize remain unsupported.
 - Guest mounts are required UUID-based systemd mounts. Missing or mismatched
   storage stops dependent Gogs and agent repository setup instead of writing
   to the root filesystem.

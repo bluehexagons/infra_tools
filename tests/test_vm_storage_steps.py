@@ -41,6 +41,30 @@ class TestDiskIdentity(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "smaller than declared"):
             storage_steps._find_declared_disk("it-data", "2G")
 
+    @patch("common.storage_steps.time.sleep")
+    @patch("common.storage_steps._run_capture")
+    @patch("common.storage_steps._find_declared_disk")
+    def test_waits_for_hot_added_disk_to_reach_guest(
+        self,
+        mock_find,
+        mock_run,
+        mock_sleep,
+    ):
+        disk = {"type": "disk", "serial": "it-data", "size": 2 * 1024**3}
+        mock_find.side_effect = [
+            storage_steps._MissingDeclaredDisk(
+                "Expected exactly one VM data disk with serial 'it-data'; found 0"
+            ),
+            disk,
+        ]
+
+        self.assertIs(
+            storage_steps._wait_for_declared_disk("it-data", "2G"),
+            disk,
+        )
+        mock_run.assert_called_once_with("udevadm settle", check=False)
+        mock_sleep.assert_called_once_with(1)
+
 
 class TestDiskPreparationSafety(unittest.TestCase):
     @patch("common.storage_steps._wipefs_signatures", return_value=["ext4"])

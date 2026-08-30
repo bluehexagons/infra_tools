@@ -1,4 +1,4 @@
-"""Fail-closed guest filesystem setup for newly provisioned VM data disks."""
+"""Fail-closed guest filesystem setup for managed VM data disks."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shlex
+import time
 from typing import Any
 
 from lib.atomic_io import write_json_atomic, write_text_atomic
@@ -24,6 +25,10 @@ from lib.vm_storage import (
 STORAGE_STATE_FILE = "/opt/infra_tools/state/vm-storage.json"
 STORAGE_MARKER = ".infra-tools-storage.json"
 STORAGE_SCHEMA_VERSION = 2
+
+
+class _MissingDeclaredDisk(RuntimeError):
+    """A managed hot-added disk is not visible in the guest yet."""
 
 
 def _run_capture(command: str, *, check: bool = True):
@@ -90,6 +95,10 @@ def _find_declared_disk(serial: str, expected_size: str) -> dict[str, Any]:
         for device in _lsblk()
         if device.get("type") == "disk" and device.get("serial") == serial
     ]
+    if not matches:
+        raise _MissingDeclaredDisk(
+            f"Expected exactly one VM data disk with serial {serial!r}; found 0"
+        )
     if len(matches) != 1:
         raise RuntimeError(
             f"Expected exactly one VM data disk with serial {serial!r}; found {len(matches)}"
@@ -106,6 +115,27 @@ def _find_declared_disk(serial: str, expected_size: str) -> dict[str, Any]:
             f"{actual_bytes} bytes < {expected_bytes} bytes"
         )
     return disk
+
+
+def _wait_for_declared_disk(
+    serial: str,
+    expected_size: str,
+    *,
+    attempts: int = 10,
+) -> dict[str, Any]:
+    """Wait briefly for a newly hot-added managed disk to reach the guest."""
+
+    last_error: RuntimeError | None = None
+    for attempt in range(attempts):
+        try:
+            return _find_declared_disk(serial, expected_size)
+        except _MissingDeclaredDisk as exc:
+            last_error = exc
+        if attempt + 1 < attempts:
+            _run_capture("udevadm settle", check=False)
+            time.sleep(1)
+    assert last_error is not None
+    raise last_error
 
 
 def _wipefs_signatures(device_path: str) -> list[str]:
@@ -413,7 +443,7 @@ def _prepare_mount(
                 f"VM storage mount path must be empty before first use: {mount.path}"
             )
 
-    disk = _find_declared_disk(serial, disk_size)
+    disk = _wait_for_declared_disk(serial, disk_size)
     if mounted is not None and not (disk.get("children") or []):
         raise RuntimeError(
             f"Refusing to prepare blank VM data disk {serial!r} while "

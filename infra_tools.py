@@ -1233,12 +1233,134 @@ def _storage_declaration_can_be_verified(
     )
 
 
+def _named_specs(
+    specs: Optional[NestedStrList],
+) -> Optional[dict[str, StrList]]:
+    """Return unique CLI declarations keyed by their logical first field."""
+
+    result: dict[str, StrList] = {}
+    for spec in specs or []:
+        if not spec or spec[0] in result:
+            return None
+        result[spec[0]] = list(spec)
+    return result
+
+
+def _canonical_storage_mount(spec: StrList) -> tuple[str, str, str, str]:
+    """Return a mount declaration with its optional values made explicit."""
+
+    return (
+        spec[0],
+        spec[1],
+        spec[2] if len(spec) >= 3 else "ext4",
+        spec[3] if len(spec) >= 4 else "empty",
+    )
+
+
+def _merge_additive_vm_storage(
+    config: SetupConfig,
+    cached_config: Optional[SetupConfig],
+    args: argparse.Namespace,
+    *,
+    provider_rebind: bool = False,
+) -> set[str]:
+    """Merge additive mounted disks into a saved managed VM layout.
+
+    Existing declarations may be omitted for a concise setup command or
+    repeated unchanged. The returned names are the only provider identities
+    that the caller may create; all previously managed disks must still exist.
+    """
+
+    if (
+        cached_config is None
+        or provider_rebind
+        or config.machine_type != "vm"
+        or cached_config.machine_type != "vm"
+        or getattr(args, "container_storage", None) is None
+        or getattr(args, "storage_mounts", None) is None
+    ):
+        return set()
+
+    cached_storage = _named_specs(cached_config.container_storage)
+    requested_storage = _named_specs(config.container_storage)
+    cached_mounts = _named_specs(cached_config.storage_mounts)
+    requested_mounts = _named_specs(config.storage_mounts)
+    if (
+        not cached_storage
+        or requested_storage is None
+        or cached_mounts is None
+        or requested_mounts is None
+        or any(len(spec) < 2 for spec in cached_mounts.values())
+        or any(len(spec) < 2 for spec in requested_mounts.values())
+        or "root" not in cached_storage
+    ):
+        return set()
+
+    for name in set(cached_storage) & set(requested_storage):
+        if requested_storage[name] != cached_storage[name]:
+            return set()
+    new_storage_names = set(requested_storage) - set(cached_storage)
+    if not new_storage_names:
+        return set()
+    if any(
+        name in {"root", "template"}
+        or len(requested_storage[name]) != 3
+        for name in new_storage_names
+    ):
+        return set()
+
+    for name in set(cached_mounts) & set(requested_mounts):
+        if _canonical_storage_mount(requested_mounts[name]) != (
+            _canonical_storage_mount(cached_mounts[name])
+        ):
+            return set()
+    new_mount_names = set(requested_mounts) - set(cached_mounts)
+    if new_mount_names != new_storage_names or any(
+        _canonical_storage_mount(requested_mounts[name])[1] == "/home"
+        or _canonical_storage_mount(requested_mounts[name])[3] != "empty"
+        for name in new_mount_names
+    ):
+        return set()
+
+    config.container_storage = [
+        *[list(spec) for spec in cached_config.container_storage or []],
+        *[
+            list(spec)
+            for name, spec in requested_storage.items()
+            if name in new_storage_names
+        ],
+    ]
+    config.storage_mounts = [
+        *[list(spec) for spec in cached_config.storage_mounts or []],
+        *[
+            list(spec)
+            for name, spec in requested_mounts.items()
+            if name in new_mount_names
+        ],
+    ]
+
+    if getattr(args, "vm_disk_settings", None) is not None:
+        cached_settings = _named_specs(cached_config.vm_disk_settings) or {}
+        requested_settings = _named_specs(config.vm_disk_settings) or {}
+        config.vm_disk_settings = [
+            *[
+                list(spec)
+                for name, spec in cached_settings.items()
+                if name not in requested_settings
+            ],
+            *[list(spec) for spec in requested_settings.values()],
+        ] or None
+
+    return new_storage_names
+
+
 def _unsupported_cached_provisioning_changes(
     config: SetupConfig,
     cached_config: SetupConfig,
     args: argparse.Namespace,
     *,
     provider_rebind: bool = False,
+    additive_storage_disks: Optional[set[str]] = None,
 ) -> list[str]:
     """Return explicit existing-guest changes setup cannot safely reconcile."""
 
@@ -1249,10 +1371,16 @@ def _unsupported_cached_provisioning_changes(
         and getattr(config, field) != getattr(cached_config, field)
     ]
     if cached_config.machine_type == "vm":
+        additive_storage_fields = (
+            {"container_storage", "storage_mounts"}
+            if additive_storage_disks
+            else set()
+        )
         changed_fields = [
             field
             for field in changed_fields
             if field not in _RECONCILABLE_VM_PROVISIONING_CHANGES
+            and field not in additive_storage_fields
             and not (
                 field == "container_storage"
                 and _storage_declaration_can_be_verified(config, cached_config)
@@ -1583,12 +1711,19 @@ def run_setup_command(args: argparse.Namespace) -> int:
         cached_provisioning,
         args,
     )
+    additive_storage_disks = _merge_additive_vm_storage(
+        config,
+        cached_provisioning,
+        args,
+        provider_rebind=provider_rebind,
+    )
     if cached_provisioning is not None:
         unsupported_changes = _unsupported_cached_provisioning_changes(
             config,
             cached_provisioning,
             args,
             provider_rebind=provider_rebind,
+            additive_storage_disks=additive_storage_disks,
         )
         if unsupported_changes:
             print(
@@ -1701,12 +1836,22 @@ def run_setup_command(args: argparse.Namespace) -> int:
                         verify_existing_storage=True,
                     )
                 elif verify_existing_storage:
+                    storage_extension_options = (
+                        {
+                            "attach_missing_data_disks": (
+                                additive_storage_disks
+                            )
+                        }
+                        if additive_storage_disks
+                        else {}
+                    )
                     provision_vm(
                         config,
                         image=config.vm_image,
                         allow_existing_data_disks=allow_existing_data_disks,
                         require_existing_vm=True,
                         verify_existing_storage=True,
+                        **storage_extension_options,
                     )
                 else:
                     provision_vm(
@@ -1797,7 +1942,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
 
     if not config.dry_run:
         store_cli_credentials(config)
-        if not provider_rebind:
+        if not provider_rebind and not additive_storage_disks:
             save_setup_command(config, operation="setup")
 
     if not os.path.exists(REMOTE_SCRIPT_PATH):
@@ -1819,7 +1964,11 @@ def run_setup_command(args: argparse.Namespace) -> int:
     finally:
         end_time = time.time()
         success = (returncode == 0)
-        if not config.dry_run and (not provider_rebind or success):
+        if (
+            not config.dry_run
+            and (not provider_rebind or success)
+            and (not additive_storage_disks or success)
+        ):
             save_setup_command(config, start_time, end_time, success, operation="setup")
 
     if replaced_cache_host:
