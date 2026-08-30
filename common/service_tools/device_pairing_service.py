@@ -969,10 +969,15 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
             return
         submitted_nonce = (form.get("nonce") or [""])[0]
         intent = (form.get("intent") or [""])[0]
+        route = match.group(1)
+        allowed_intents = {
+            "pair": {"current", "other"},
+            "connect": {"start", "input", "toggle"},
+        }
         if (
             not secrets.compare_digest(submitted_nonce, self._nonce_cookie())
             or not self.state.consume_nonce(submitted_nonce)
-            or intent not in {"current", "other", "start", "input", "toggle"}
+            or intent not in allowed_intents[route]
         ):
             self._send_html(
                 HTTPStatus.FORBIDDEN,
@@ -1005,7 +1010,7 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
         if provider is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
-        if match.group(1) == "connect":
+        if route == "connect":
             if provider_name not in self.state._connect_jobs:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return

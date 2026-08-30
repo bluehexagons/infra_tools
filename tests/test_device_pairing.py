@@ -28,6 +28,7 @@ from common.service_tools.device_pairing_service import (
 from common.t3code_steps import (
     _configure_device_pairing,
     _configure_firewall,
+    _set_pairing_t3_https_port,
     _write_passthrough_wrapper,
     install_t3code_web,
 )
@@ -691,6 +692,36 @@ class PairingBrokerTest(unittest.TestCase):
         self.assertIn(" 403 ", response)
         issue.assert_not_called()
 
+    def test_pair_route_rejects_connect_input_intent_before_rate_limit(self) -> None:
+        state = PairingState({"t3code": self._provider()})
+        nonce = state.new_nonce()
+        body = urlencode({"nonce": nonce, "intent": "input"}).encode("utf-8")
+        headers = Message()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        headers["Content-Length"] = str(len(body))
+        headers["Cookie"] = f"infra_tools_pairing_nonce={nonce}"
+        headers["X-Real-IP"] = "192.168.0.12"
+        handler = PairingRequestHandler.__new__(PairingRequestHandler)
+        handler.server = SimpleNamespace(pairing_state=state)
+        handler.path = "/pair/t3code"
+        handler.command = "POST"
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = "POST /pair/t3code HTTP/1.1"
+        handler.headers = headers
+        handler.rfile = BytesIO(body)
+        handler.wfile = BytesIO()
+
+        with (
+            patch.object(state, "allow_request") as allow_request,
+            patch.object(state, "issue") as issue,
+        ):
+            handler.do_POST()
+
+        response = handler.wfile.getvalue().decode("iso-8859-1")
+        self.assertIn(" 403 ", response)
+        allow_request.assert_not_called()
+        issue.assert_not_called()
+
 
 class DevicePairingRemoteSetupTest(unittest.TestCase):
     def test_pairing_rejects_symlinked_t3_state_directory(self) -> None:
@@ -731,8 +762,23 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
             nginx_available = os.path.join(temporary, "nginx-available")
             nginx_enabled = os.path.join(temporary, "nginx-enabled")
             os.makedirs(payload_dir)
+            os.makedirs(config_dir)
             with open(os.path.join(payload_dir, "htpasswd"), "w", encoding="utf-8") as file_obj:
                 file_obj.write("agent:$6$salt$hash\n")
+            with open(
+                os.path.join(config_dir, "providers.json"),
+                "w",
+                encoding="utf-8",
+            ) as file_obj:
+                json.dump(
+                    {
+                        "version": 1,
+                        "providers": {
+                            "t3code": {"https_public_port": 8444},
+                        },
+                    },
+                    file_obj,
+                )
             account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
 
             constants = {
@@ -822,6 +868,10 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
             self.assertIn("--server-url", command)
             self.assertNotIn("--port", command)
             self.assertIn("--json", command)
+            self.assertEqual(
+                providers["providers"]["t3code"]["https_public_port"],
+                8444,
+            )
             self.assertNotIn("$6$salt$hash", json.dumps(providers))
             with open(
                 os.path.join(temporary, "pairing.service"), encoding="utf-8"
@@ -850,10 +900,10 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
                 pw_uid=os.getuid(),
                 pw_gid=os.getgid(),
             )
-            https_urls = [
-                ("https://agent-vm:8444/", 8444),
-                ("https://agent-vm:8445/", 8445),
-            ]
+            https_endpoints = {
+                "t3code-pairing": ("https://agent-vm:8445/", 8445),
+                "t3code": ("https://agent-vm:8444/", 8444),
+            }
 
             with (
                 patch("common.t3code_steps.is_dry_run", return_value=False),
@@ -866,7 +916,7 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
                 patch("common.t3code_steps._configure_connect_restart_units"),
                 patch(
                     "common.t3code_steps._configure_t3_https",
-                    return_value=https_urls,
+                    return_value=https_endpoints,
                 ),
                 patch(
                     "common.t3code_steps._set_pairing_t3_https_port"
@@ -884,6 +934,14 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
                 )
 
             set_https_port.assert_called_once_with(8444)
+
+    def test_pairing_https_port_rejects_invalid_values(self) -> None:
+        for value in (True, 443, 65536):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                ValueError,
+                "between 1024 and 65535",
+            ):
+                _set_pairing_t3_https_port(value)
 
     def test_firewall_includes_pairing_port(self) -> None:
         config = _config()

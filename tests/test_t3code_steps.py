@@ -89,7 +89,7 @@ class T3CodeWebTest(unittest.TestCase):
 
     def test_https_gateway_is_optional_when_managed_utility_is_unavailable(self) -> None:
         with patch("common.t3code_steps.os.path.isfile", return_value=False):
-            self.assertEqual(_configure_t3_https(self._config(), 3773, None), [])
+            self.assertEqual(_configure_t3_https(self._config(), 3773, None), {})
 
     def test_https_gateway_preserves_t3_file_upload_limit(self) -> None:
         completed = SimpleNamespace(
@@ -112,9 +112,12 @@ class T3CodeWebTest(unittest.TestCase):
             ),
             patch("common.t3code_steps.run", return_value=completed) as run_command,
         ):
-            urls = _configure_t3_https(self._config(), 3773, None)
+            endpoints = _configure_t3_https(self._config(), 3773, None)
 
-        self.assertEqual(urls, [("https://target:8444/", 8444)])
+        self.assertEqual(
+            endpoints,
+            {"t3code": ("https://target:8444/", 8444)},
+        )
         command = run_command.call_args.args[0]
         self.assertIn("forward add t3code", command)
         self.assertIn("--max-body-size 50m", command)
@@ -954,7 +957,7 @@ class T3CodeWebTest(unittest.TestCase):
                 patch("common.t3code_steps._remove_connect_restart_units"),
                 patch("common.t3code_steps._remove_device_pairing"),
                 patch("common.t3code_steps._remove_t3_https"),
-                patch("common.t3code_steps._configure_t3_https", return_value=[]),
+                patch("common.t3code_steps._configure_t3_https", return_value={}),
                 patch("common.t3code_steps.T3_ADMIN_PAIR_SCRIPT", admin_pair_script),
             ):
                 install_t3code_web(

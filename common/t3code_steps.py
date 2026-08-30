@@ -1210,6 +1210,30 @@ def _nginx_listen_address(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
+def _existing_pairing_t3_https_port() -> int | None:
+    """Retain the last validated T3 HTTPS port during reconciliation."""
+
+    if os.path.islink(DEVICE_PAIRING_PROVIDERS_FILE):
+        raise RuntimeError(
+            "Refusing symlinked device-pairing provider configuration: "
+            f"{DEVICE_PAIRING_PROVIDERS_FILE}"
+        )
+    try:
+        with open(DEVICE_PAIRING_PROVIDERS_FILE, encoding="utf-8") as file_obj:
+            providers = json.load(file_obj)
+        t3_provider = providers["providers"]["t3code"]
+        https_port = t3_provider.get("https_public_port")
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+    if (
+        not isinstance(https_port, int)
+        or isinstance(https_port, bool)
+        or not 1024 <= https_port <= 65535
+    ):
+        return None
+    return https_port
+
+
 def _configure_device_pairing(
     config: SetupConfig,
     home: str,
@@ -1234,6 +1258,7 @@ def _configure_device_pairing(
     auth_changed, previous_auth = _install_pairing_auth_file()
     web_account = pwd.getpwnam("www-data")
     server_url, _default_base_url = _t3_pairing_urls(config.host, host, t3_port)
+    existing_https_port = _existing_pairing_t3_https_port()
 
     providers = {
         "version": 1,
@@ -1289,6 +1314,8 @@ def _configure_device_pairing(
             }
         },
     }
+    if existing_https_port is not None:
+        providers["providers"]["t3code"]["https_public_port"] = existing_https_port
     providers_content = json.dumps(providers, indent=2, sort_keys=True) + "\n"
     providers_changed = _write_text_if_changed(
         DEVICE_PAIRING_PROVIDERS_FILE, providers_content, 0o640
@@ -1571,7 +1598,7 @@ def _configure_t3_https(
     config: SetupConfig,
     port: int,
     pairing_port: int | None,
-) -> list[tuple[str, int]]:
+) -> dict[str, tuple[str, int]]:
     """Publish T3 web and pairing pages through the shared internal HTTPS gateway."""
 
     if os.geteuid() != 0 or not os.path.isfile(
@@ -1579,7 +1606,7 @@ def _configure_t3_https(
     ):
         # Target setup is root-owned; keeping this a no-op makes dry unit tests
         # and installations without the managed gateway side-effect free.
-        return []
+        return {}
 
     from common.godot_web_steps import configure_internal_web_host, identities_for_config
 
@@ -1591,7 +1618,7 @@ def _configure_t3_https(
         install_utility=True,
     )
     utility = "/usr/local/bin/infra-web"
-    urls: list[tuple[str, int]] = []
+    endpoints: dict[str, tuple[str, int]] = {}
     routes = [("t3code", port, "50m")]
     if pairing_port is not None:
         routes.append(("t3code-pairing", pairing_port, None))
@@ -1632,13 +1659,19 @@ def _configure_t3_https(
             or not 1024 <= listen <= 65535
         ):
             raise RuntimeError("HTTPS gateway returned an invalid T3 endpoint")
-        urls.append((url, listen))
-    return urls
+        endpoints[name] = (url, listen)
+    return endpoints
 
 
 def _set_pairing_t3_https_port(https_port: int) -> None:
     """Set the public HTTPS port used by links issued from the pairing portal."""
 
+    if (
+        not isinstance(https_port, int)
+        or isinstance(https_port, bool)
+        or not 1024 <= https_port <= 65535
+    ):
+        raise ValueError("T3 Code HTTPS port must be between 1024 and 65535")
     if os.path.islink(DEVICE_PAIRING_PROVIDERS_FILE):
         raise RuntimeError(
             f"Refusing symlinked device-pairing provider configuration: "
@@ -1739,15 +1772,17 @@ def install_t3code_web(config: SetupConfig) -> None:
             config.username,
             account.pw_uid,
         )
-        https_urls = _configure_t3_https(
+        https_endpoints = _configure_t3_https(
             config,
             port,
             config.device_pairing_port,
         )
-        if https_urls:
-            if len(https_urls) < 2:
+        if https_endpoints:
+            t3_https = https_endpoints.get("t3code")
+            pairing_https = https_endpoints.get("t3code-pairing")
+            if t3_https is None or pairing_https is None:
                 raise RuntimeError(
-                    "HTTPS gateway returned no T3 Code pairing endpoint"
+                    "HTTPS gateway returned incomplete T3 Code endpoints"
                 )
             _write_admin_pair_wrapper(
                 pair_wrapper,
@@ -1755,31 +1790,36 @@ def install_t3code_web(config: SetupConfig) -> None:
                 workspace,
                 t3_cli_wrapper,
                 server_url,
-                https_urls[0][0],
+                t3_https[0],
             )
             os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
-            _set_pairing_t3_https_port(https_urls[0][1])
+            _set_pairing_t3_https_port(t3_https[1])
     else:
         _remove_connect_restart_units(os.path.join(home, ".t3"))
         _remove_device_pairing()
         _remove_t3_https(config)
-        https_urls = _configure_t3_https(config, port, None)
-        if https_urls:
+        https_endpoints = _configure_t3_https(config, port, None)
+        if https_endpoints:
+            t3_https = https_endpoints.get("t3code")
+            if t3_https is None:
+                raise RuntimeError("HTTPS gateway returned no T3 Code endpoint")
             _write_admin_pair_wrapper(
                 pair_wrapper,
                 home,
                 workspace,
                 t3_cli_wrapper,
                 server_url,
-                https_urls[0][0],
+                t3_https[0],
             )
             os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
     print(f"  T3 Code web service listening on {host}:{port}")
-    for index, (https_url, _listen_port) in enumerate(https_urls):
-        label = "T3 Code HTTPS endpoint"
-        if index == 1:
-            label = "T3 Code pairing HTTPS endpoint"
-        print(f"  {label}: {https_url}")
+    for name, label in (
+        ("t3code", "T3 Code HTTPS endpoint"),
+        ("t3code-pairing", "T3 Code pairing HTTPS endpoint"),
+    ):
+        endpoint = https_endpoints.get(name)
+        if endpoint is not None:
+            print(f"  {label}: {endpoint[0]}")
     print(
         "  T3 Code HTTP compatibility: "
         f"port {port} ({host}); use the printed HTTPS endpoint"

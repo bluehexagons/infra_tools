@@ -156,6 +156,9 @@ source path and interactive password are excluded from saved configurations.
 A normal rerun reuses the installed target file. To rotate portal credentials,
 rerun setup or patch with a new `--device-pairing-auth-file`; infra-tools
 replaces the file and reloads Nginx only after `nginx -t` succeeds.
+Reconciliation also retains the last validated primary T3 HTTPS port until the
+gateway confirms its current named endpoints, avoiding an HTTP-link window
+while the managed routes are refreshed.
 
 To remove enrollment from a saved host:
 
@@ -215,10 +218,11 @@ minutes also trigger a one-hour Fail2ban ban. The failure-only log contains the
 source address, timestamp, and a fixed marker; it never contains the Basic Auth
 header or a pairing URL. After authentication, requests use a single-use
 same-site form nonce, and the broker independently limits pairing issuance to
-five requests per minute per source. Provider commands are fixed in a
-root-managed configuration, executed without a shell, restricted to the
-configured local T3 endpoint, and required to return a link for the expected
-T3 origin.
+five requests per minute per source. Pairing and Connect forms accept only
+their own action types, so an interactive Connect response cannot bypass the
+pairing issuance limit. Provider commands are fixed in a root-managed
+configuration, executed without a shell, restricted to the configured local
+T3 endpoint, and required to return a link for the expected T3 origin.
 
 ## Files and services
 
