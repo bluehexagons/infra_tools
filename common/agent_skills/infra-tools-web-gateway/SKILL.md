@@ -30,16 +30,51 @@ ad hoc Nginx or firewall changes. Never bind a development service to
 
 ## Static sites
 
+Publication copies the detected output tree into a separate managed site
+directory and atomically replaces the previous snapshot. The published site is
+not a symlink to the checkout or its `dist` directory: editing, committing, or
+running a build does not refresh an existing publication. When the requested
+outcome includes the hosted site, publish again after the final source change
+and build. A healthy pre-existing route can still be serving an older snapshot.
+
 From a Vite or similar project with a build script:
 
 ```bash
 infra-web publish site
 infra-web site doctor NAME
+infra-web site url NAME
 ```
 
 Use `--project`, `--output`, or `--no-build` when auto-detection is not enough.
 Published sites are available beneath `/sites/USERNAME/NAME/` on shared HTTPS
-port 8443. Remove one only when explicitly requested, using `infra-web site
+port 8443. Static applications must therefore use relative assets or a build
+base that includes that prefix; root-relative `/assets/...` URLs point outside
+the site.
+
+When `node_modules` is absent, publication installs dependencies before the
+build. An npm project without a lockfile uses `npm install`, which can create a
+`package-lock.json`; inspect Git status before and after publishing and do not
+silently commit or discard that file. Use `--no-install` only when dependencies
+are already usable.
+
+`site doctor` proves that the managed directory exists and its root HTTPS URL
+responds successfully. It does not compare the publication with the checkout,
+inspect client-side routes, or prove that JavaScript rendered. After updating a
+hosted site, verify at least one changed public artifact against the build:
+
+```bash
+published_url="$(infra-web site url NAME)"
+curl --fail --silent --show-error "${published_url}PATH" | sha256sum
+sha256sum OUTPUT/PATH
+```
+
+Replace `PATH` with a non-sensitive changed file and `OUTPUT` with the detected
+build directory. Never add `-k`. A URL fragment such as `#/README.md` is used
+only by the browser and is not sent to Nginx; verify the underlying file URL or
+the site root separately, then use the `infra-tools-browser-testing` skill for
+rendered behavior.
+
+Remove a publication only when explicitly requested, using `infra-web site
 remove NAME --yes`.
 
 ## Managed live previews

@@ -96,6 +96,33 @@ secret workflow appropriate to the task; do not put passwords or session tokens
 in setup commands, repository files, prompts intended for logging, or agent
 configuration. Isolated mode discards any cookies created during the session.
 
+## Collaborative preview and private networks
+
+T3 Code's collaborative preview and the managed Playwright fallback do not use
+the same network origin. The collaborative browser runs in the connected
+client's context, while managed Playwright runs on the agent VM. Consequently,
+an internal `infra-web` URL such as `https://192.168.x.x:8443/...` can pass
+`curl` and `infra-web doctor` on the VM yet fail in the collaborative preview
+when the client lacks a route to that LAN, is outside the gateway's allowed
+source ranges, or has not enrolled the local CA.
+
+An opened preview tab or a status result containing the requested URL does not
+prove the document rendered. Confirm a snapshot or user-visible content. When
+private-URL navigation fails, separate the failure layers:
+
+1. verify the exact URL and a non-sensitive artifact from the VM with normal
+   TLS verification;
+2. check whether the client reports a certificate error, as opposed to a
+   timeout or unreachable route;
+3. use `infra-web ca` only for client certificate trust;
+4. use the explicitly provisioned VM-local browser when a VM-origin rendering
+   check is appropriate and the current agent integration permits it.
+
+A client-only reachability failure is not evidence that the hosted site is
+down. Do not respond by weakening TLS, expanding gateway/firewall exposure, or
+rebinding the application. Report which network origin passed and which one
+failed so the operator can decide whether that client should have access.
+
 ## Verification
 
 Run the browser check on the configured VM as the setup user:

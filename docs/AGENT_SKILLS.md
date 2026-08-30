@@ -14,7 +14,7 @@ base skills:
 | --- | --- |
 | `infra-tools-agent-operations` | Readiness checks, deliberate terminal-agent updates, maintenance holds, and controller-side credential rotation |
 | `infra-tools-agent-workspace` | Isolated branches and worktrees for concurrent tasks |
-| `infra-tools-browser-testing` | Choosing collaborative T3 preview or the optional VM-local Playwright fallback |
+| `infra-tools-browser-testing` | Choosing collaborative T3 preview or VM-local Playwright and distinguishing client from VM reachability |
 | `infra-tools-deploy-smoke` | Preflight and layered smoke checks for test deployments |
 | `infra-tools-shared-assets` | SMB/SSHFS asset boundaries and Git LFS workflows |
 | `infra-tools-vm-triage` | Redacted host diagnostics and support snapshots |
@@ -24,7 +24,7 @@ Provisioned capabilities add focused skills:
 | Skill | Installed with |
 | --- | --- |
 | `infra-tools-t3code` | T3 Code web service |
-| `infra-tools-web-gateway` | T3 Code setup or the Godot web bundle; the skill verifies that `infra-web` was provisioned before use |
+| `infra-tools-web-gateway` | T3 Code setup or the Godot web bundle; the skill publishes and verifies managed static snapshots or live forwards |
 | `infra-tools-godot-web` | Godot web bundle |
 
 The browser-testing skill is useful even when Playwright is absent: it tells an

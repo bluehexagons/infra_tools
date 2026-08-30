@@ -30,6 +30,16 @@ do not consume a dedicated listener or firewall rule:
 https://HOST:8443/sites/USERNAME/my-site/
 ```
 
+The active site is a copied snapshot, not a symlink to the checkout or build
+directory. A later edit, commit, or standalone build leaves the hosted copy
+unchanged until `infra-web publish site` runs again. This allows failed builds
+to leave the last publication intact, but it also means a healthy existing
+route may be stale relative to the repository.
+
+Applications are hosted below the `/sites/USERNAME/NAME/` prefix. Use relative
+asset and data URLs or configure the build tool with that base; root-relative
+paths such as `/assets/app.js` resolve outside the publication.
+
 Specify the name, project, or output when detection is not sufficient:
 
 ```bash
@@ -43,7 +53,10 @@ infra-web publish site docs --open
 `--no-build` requires an existing output directory. `--no-install` skips the
 automatic dependency installation but still runs the build. Static output must
 contain `index.html`, remain inside the project, and contain no symbolic links
-or special files.
+or special files. When an npm project has no lockfile and `node_modules` is
+absent, the automatic `npm install` can create `package-lock.json`; inspect Git
+status before and after publication and handle that file according to the
+project's dependency policy.
 
 Inspect and remove publications as the owning user:
 
@@ -54,7 +67,22 @@ infra-web site doctor docs
 infra-web site remove docs --yes
 ```
 
-A failed build or activation keeps the previous publication available.
+`site doctor` verifies the managed site directory and the HTTPS status of its
+root URL. It does not compare the served tree with the current build, follow a
+client-side route, or execute JavaScript. After publishing a change, compare a
+representative non-sensitive served file with its build artifact when content
+freshness matters:
+
+```bash
+published_url="$(infra-web site url docs)"
+curl --fail --silent --show-error "${published_url}assets/app.js" | sha256sum
+sha256sum dist/assets/app.js
+```
+
+Do not add `-k`. A fragment such as `#/README.md` is client-side state and is
+not sent in the HTTP request; test the corresponding public file and then use a
+browser for the rendered route. A failed build or activation keeps the previous
+publication available.
 
 ## Start a managed live preview
 
