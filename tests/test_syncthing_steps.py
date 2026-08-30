@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from lib.config import SetupConfig
@@ -12,6 +15,8 @@ from sync.syncthing_steps import (
     DEFAULT_SYNCTHING_ROOT,
     SYNCTHING_HOME,
     _configure_syncthing_https,
+    _preflight_existing_folders,
+    _prepare_share_root,
     _render_service,
     build_syncthing_policy_config,
     setup_syncthing,
@@ -128,6 +133,26 @@ class SyncthingDesiredConfigTest(unittest.TestCase):
                 "/mnt/team-files",
             )
 
+    def test_policy_rejects_folder_path_traversal(self) -> None:
+        current = _current_config()
+        current["folders"][0]["path"] = "/srv/syncthing/../../etc"
+
+        with self.assertRaisesRegex(RuntimeError, "outside the configured"):
+            build_syncthing_policy_config(current, DEFAULT_SYNCTHING_ROOT)
+
+    def test_policy_rejects_folder_root_symlink_escape(self) -> None:
+        current = _current_config()
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            share_root = os.path.join(temporary_dir, "shares")
+            outside = os.path.join(temporary_dir, "outside")
+            os.mkdir(share_root)
+            os.mkdir(outside)
+            os.symlink(outside, os.path.join(share_root, "linked"))
+            current["folders"][0]["path"] = os.path.join(share_root, "linked")
+
+            with self.assertRaisesRegex(RuntimeError, "outside the configured"):
+                build_syncthing_policy_config(current, share_root)
+
     def test_service_is_unprivileged_hardened_and_confined(self) -> None:
         service = _render_service(_config(), "agent")
         self.assertIn("User=agent", service)
@@ -155,6 +180,61 @@ class SyncthingDesiredConfigTest(unittest.TestCase):
 
 
 class SyncthingCompositionTest(unittest.TestCase):
+    def test_share_root_rejects_symbolic_link_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            target = os.path.join(temporary_dir, "target")
+            link = os.path.join(temporary_dir, "link")
+            os.mkdir(target)
+            os.symlink(target, link)
+            config = SimpleNamespace(
+                username="agent",
+                syncthing_root=os.path.join(link, "shares"),
+                storage_mounts=None,
+            )
+            with (
+                patch("sync.syncthing_steps.assert_declared_storage_mount"),
+                patch("sync.syncthing_steps.run") as run_command,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "symbolic-link traversal"):
+                    _prepare_share_root(config, "agent")  # type: ignore[arg-type]
+            run_command.assert_not_called()
+
+    def test_share_root_verifies_declared_mount_before_install(self) -> None:
+        config = SimpleNamespace(
+            username="agent",
+            syncthing_root="/srv/syncthing",
+            storage_mounts=[
+                ["syncthing-data", "/srv/syncthing", "ext4", "empty"]
+            ],
+        )
+        with (
+            patch(
+                "sync.syncthing_steps.assert_declared_storage_mount",
+                side_effect=RuntimeError("Required VM data mount is not active"),
+            ) as assert_mount,
+            patch("sync.syncthing_steps.run") as run_command,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "mount is not active"):
+                _prepare_share_root(config, "agent")  # type: ignore[arg-type]
+
+        assert_mount.assert_called_once_with(config, "/srv/syncthing")
+        run_command.assert_not_called()
+
+    def test_running_service_preflights_folder_paths_before_root_change(self) -> None:
+        active = subprocess.CompletedProcess(args=[], returncode=0)
+        with (
+            patch("sync.syncthing_steps.run", return_value=active),
+            patch("sync.syncthing_steps._wait_for_api") as wait_for_api,
+            patch(
+                "sync.syncthing_steps._load_current_config",
+                return_value=_current_config(),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "outside the configured"):
+                _preflight_existing_folders("agent", "/mnt/team-files")
+
+        wait_for_api.assert_called_once_with("agent")
+
     def test_server_and_workstation_compositions_include_syncthing(self) -> None:
         for system_type in ("server_lite", "workstation_desktop"):
             with self.subTest(system_type=system_type):
@@ -263,6 +343,43 @@ class SyncthingCompositionTest(unittest.TestCase):
         desired = put_config.call_args.args[0]
         self.assertEqual(desired["folders"][0]["id"], "shared-work")
         self.assertEqual(desired["devices"][1]["name"], "alice-laptop")
+
+    def test_setup_disables_service_when_post_start_policy_is_unsafe(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=LOCAL_DEVICE_ID + "\n",
+            stderr="",
+        )
+        with (
+            patch("sync.syncthing_steps.can_manage_system_services", return_value=True),
+            patch("sync.syncthing_steps.is_dry_run", return_value=False),
+            patch("sync.syncthing_steps.is_package_installed", return_value=True),
+            patch("sync.syncthing_steps._preflight_existing_folders"),
+            patch("sync.syncthing_steps._account", return_value=(1000, 1000, "agent")),
+            patch("sync.syncthing_steps.os.makedirs"),
+            patch("sync.syncthing_steps.os.chmod"),
+            patch("sync.syncthing_steps.os.chown"),
+            patch("sync.syncthing_steps._prepare_share_root"),
+            patch("sync.syncthing_steps.write_text_atomic"),
+            patch("sync.syncthing_steps.run", return_value=completed) as run_command,
+            patch("sync.syncthing_steps._wait_for_api"),
+            patch("sync.syncthing_steps._run_as_user", return_value=completed),
+            patch(
+                "sync.syncthing_steps._load_current_config",
+                return_value=_current_config(),
+            ),
+            patch("sync.syncthing_steps._put_config") as put_config,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "outside the configured"):
+                setup_syncthing(_config(syncthing_root="/mnt/team-files"))
+
+        put_config.assert_not_called()
+        commands = [call.args[0] for call in run_command.call_args_list]
+        self.assertIn(
+            ["systemctl", "disable", "--now", "infra-syncthing.service"],
+            commands,
+        )
 
     def test_https_route_uses_shared_gateway_and_syncthing_profile(self) -> None:
         completed = subprocess.CompletedProcess(

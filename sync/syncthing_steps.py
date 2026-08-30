@@ -14,6 +14,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from common.storage_steps import assert_declared_storage_mount
 from lib.atomic_io import write_text_atomic
 from lib.config import DEFAULT_SYNCTHING_ROOT, SetupConfig
 from lib.credentials import get_runtime_credential
@@ -165,6 +166,30 @@ def _staggered_versioning(default: object) -> dict[str, Any]:
     return versioning
 
 
+def _validate_folder_paths(current: dict[str, Any], share_root: str) -> None:
+    """Reject GUI-managed folders that escape the writable storage root."""
+
+    folders = current.get("folders")
+    if not isinstance(folders, list):
+        raise RuntimeError("Syncthing configuration is missing folders")
+    resolved_root = os.path.realpath(share_root)
+    for folder in folders:
+        path = folder.get("path") if isinstance(folder, dict) else None
+        try:
+            contained = (
+                isinstance(path, str)
+                and os.path.isabs(path)
+                and os.path.commonpath((resolved_root, os.path.realpath(path)))
+                == resolved_root
+            )
+        except ValueError:
+            contained = False
+        if not contained:
+            raise RuntimeError(
+                f"Syncthing folder path is outside the configured storage root: {path}"
+            )
+
+
 def build_syncthing_policy_config(
     current: dict[str, Any],
     share_root: str,
@@ -172,18 +197,7 @@ def build_syncthing_policy_config(
     """Apply service policy without replacing GUI-managed devices or folders."""
 
     desired = copy.deepcopy(current)
-    folders = desired.get("folders")
-    if not isinstance(folders, list):
-        raise RuntimeError("Syncthing configuration is missing folders")
-    for folder in folders:
-        path = folder.get("path") if isinstance(folder, dict) else None
-        if (
-            not isinstance(path, str)
-            or (path != share_root and not path.startswith(f"{share_root}{os.sep}"))
-        ):
-            raise RuntimeError(
-                f"Syncthing folder path is outside the configured storage root: {path}"
-            )
+    _validate_folder_paths(desired, share_root)
     defaults = _mapping(desired.get("defaults"), "defaults")
     default_folder = _mapping(defaults.get("folder"), "folder defaults")
     default_folder["path"] = share_root
@@ -323,6 +337,11 @@ def _prepare_share_root(config: SetupConfig, group_name: str) -> None:
         or not os.path.isdir(share_root)
     ):
         raise RuntimeError(f"Refusing unsafe Syncthing share root: {share_root}")
+    if os.path.realpath(share_root) != share_root:
+        raise RuntimeError(
+            f"Refusing Syncthing share root with symbolic-link traversal: {share_root}"
+        )
+    assert_declared_storage_mount(config, share_root)
     run(
         [
             "install",
@@ -336,6 +355,19 @@ def _prepare_share_root(config: SetupConfig, group_name: str) -> None:
             share_root,
         ]
     )
+
+
+def _preflight_existing_folders(username: str, share_root: str) -> None:
+    """Validate a running endpoint before changing its writable root."""
+
+    active = run(
+        ["systemctl", "is-active", "--quiet", f"{SYNCTHING_SERVICE_NAME}.service"],
+        check=False,
+    )
+    if active.returncode != 0:
+        return
+    _wait_for_api(username)
+    _validate_folder_paths(_load_current_config(username), share_root)
 
 
 def setup_syncthing(config: SetupConfig, **_kwargs: Any) -> None:
@@ -405,6 +437,8 @@ def setup_syncthing(config: SetupConfig, **_kwargs: Any) -> None:
         if not is_package_installed("syncthing"):
             raise RuntimeError("Syncthing package installation did not verify")
 
+    share_root = _share_root(config)
+    _preflight_existing_folders(config.username, share_root)
     uid, gid, group_name = _account(config.username)
     os.makedirs(SYNCTHING_HOME, mode=0o700, exist_ok=True)
     os.chmod(SYNCTHING_HOME, 0o700)
@@ -433,32 +467,40 @@ def setup_syncthing(config: SetupConfig, **_kwargs: Any) -> None:
     run(["systemd-analyze", "verify", SYNCTHING_SERVICE_FILE])
     run(["systemctl", "daemon-reload"])
     run(["systemctl", "enable", "--now", f"{SYNCTHING_SERVICE_NAME}.service"])
-    _wait_for_api(config.username)
-
-    device_id_result = _run_as_user(
-        config.username,
-        ["serve", "--device-id", f"--home={SYNCTHING_HOME}"],
-        capture_output=True,
-    )
-    local_device_id = str(device_id_result.stdout or "").strip()
-    if not _DEVICE_ID_PATTERN.fullmatch(local_device_id):
-        raise RuntimeError("Syncthing returned an invalid local device ID")
-    share_root = _share_root(config)
-    _put_config(
-        build_syncthing_policy_config(
-            _load_current_config(config.username),
-            share_root,
+    try:
+        _wait_for_api(config.username)
+        device_id_result = _run_as_user(
+            config.username,
+            ["serve", "--device-id", f"--home={SYNCTHING_HOME}"],
+            capture_output=True,
         )
-    )
-    run(["systemctl", "restart", f"{SYNCTHING_SERVICE_NAME}.service"])
-    _wait_for_api(config.username)
-    active = run(
-        ["systemctl", "is-active", f"{SYNCTHING_SERVICE_NAME}.service"],
-        capture_output=True,
-        check=False,
-    )
-    if active.returncode != 0:
-        raise RuntimeError("Managed Syncthing service is not active")
+        local_device_id = str(device_id_result.stdout or "").strip()
+        if not _DEVICE_ID_PATTERN.fullmatch(local_device_id):
+            raise RuntimeError("Syncthing returned an invalid local device ID")
+        desired = build_syncthing_policy_config(
+            _load_current_config(config.username), share_root
+        )
+        _put_config(desired)
+        run(["systemctl", "restart", f"{SYNCTHING_SERVICE_NAME}.service"])
+        _wait_for_api(config.username)
+        active = run(
+            ["systemctl", "is-active", f"{SYNCTHING_SERVICE_NAME}.service"],
+            capture_output=True,
+            check=False,
+        )
+        if active.returncode != 0:
+            raise RuntimeError("Managed Syncthing service is not active")
+    except Exception:
+        run(
+            [
+                "systemctl",
+                "disable",
+                "--now",
+                f"{SYNCTHING_SERVICE_NAME}.service",
+            ],
+            check=False,
+        )
+        raise
 
     https_url = _configure_syncthing_https(config)
     print(f"  ✓ Syncthing device ID: {local_device_id}")

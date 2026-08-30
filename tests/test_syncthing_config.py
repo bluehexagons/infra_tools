@@ -98,6 +98,14 @@ class SyncthingConfigTest(unittest.TestCase):
             [["syncthing-data", "/srv/syncthing", "ext4", "empty"]],
         )
         self.assertEqual(config.syncthing_root, "/srv/syncthing")
+        self.assertIn(
+            "--storage-mount syncthing-data /srv/syncthing ext4 empty",
+            config.to_remote_args(),
+        )
+        self.assertIn(
+            "--syncthing-root /srv/syncthing",
+            config.to_remote_args(),
+        )
 
     def test_patch_omission_preserves_syncthing_settings(self) -> None:
         parser = create_setup_argument_parser("test")

@@ -50,10 +50,10 @@ infra-tools setup server_lite fileserver admin \
 ```
 
 Infra-tools creates the root for the setup user and confines the systemd
-service to that root. The generated service also uses `RequiresMountsFor=`, so
-a declared or separately managed data mount must be available before Syncthing
-starts. This prevents a missing disk from redirecting writes into the root
-filesystem.
+service to that root. Setup verifies an infra-tools-declared VM data mount
+before writing to it, and the generated service also uses `RequiresMountsFor=`
+for declared or separately managed mounts. This prevents a missing disk from
+redirecting setup or synchronization writes into the root filesystem.
 
 ### Provision a VM with dedicated Syncthing storage
 
@@ -83,8 +83,9 @@ off-host backup.
 Changing `--syncthing-root` does not move files or rewrite GUI folder paths.
 Before changing it on an existing endpoint, migrate the data and update or
 recreate the GUI folders so every folder path is below the new root. Setup
-rejects a configuration that would leave a GUI-managed folder outside the
-service sandbox.
+checks a running endpoint before stopping it and rejects a configuration that
+would leave a GUI-managed folder outside the service sandbox. Storage roots
+and configured folder roots may not escape through symbolic links.
 
 ## Add people and folders
 
