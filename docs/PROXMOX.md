@@ -301,9 +301,11 @@ shell history; the password is not persisted in saved setup state.
 
 After a guest has been provisioned, a later `setup` invocation can retain
 `--provision-on`. If the target has saved local setup metadata, infra-tools
-reuses its recorded Proxmox details and skips contacting the Proxmox host
-before updating the guest. Guest-shape options emitted by a saved reconstructed
-command are also accepted when they match that metadata. Changing any of
+reuses its recorded Proxmox details and skips the full provider-shape check
+before updating the guest. It still contacts the authenticated Proxmox node to
+rescan and replace the managed guest's workspace SSH host key before the first
+direct connection. Guest-shape options emitted by a saved reconstructed command
+are also accepted when they match that metadata. Changing any of
 `--machine`, `--bridge`, `--memory`, `--balloon-min`, `--balloon-shares`,
 `--allow-memory-overcommit`, `--storage`, `--cores`, `--cpu-type`,
 `--base`, `--image`, or `--image-storage` requests a provisioning check instead.
@@ -367,14 +369,14 @@ identity. If that VM already exists and the corrected declaration changes its
 Proxmox name, infra-tools applies and verifies the rename before continuing
 setup. A desired name already owned by a different VM is rejected rather than
 creating an ambiguous duplicate. Repeating the saved `--name` and `--hostname`
-values is an ordinary idempotent rerun and does not contact Proxmox. Changing
-`--hostname`, or changing `--name` when it supplies the VM hostname, performs
-the identity check. Once the authenticated Proxmox node confirms the saved
-guest, infra-tools refreshes its workspace SSH host key before checking the
-guest route or starting remote setup. A guest without matching saved metadata
-still requires explicit host-key enrollment. Use the explicit host and VMID
-forms to inspect or repair provider-side drift and duplicates created by older
-releases.
+values is an ordinary idempotent rerun and does not perform a full provider
+check. Changing `--hostname`, or changing `--name` when it supplies the VM
+hostname, performs the identity check. Regardless of whether a full
+provisioning check is needed, the authenticated Proxmox node refreshes the
+saved guest's workspace SSH host key before infra-tools checks the guest route
+or starts remote setup. A guest without matching saved metadata still requires
+explicit host-key enrollment. Use the explicit host and VMID forms to inspect
+or repair provider-side drift and duplicates created by older releases.
 
 ## Graphical VM hardware baseline
 

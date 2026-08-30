@@ -70,12 +70,14 @@ Proxmox guests are a special host-key enrollment case. After provisioning,
 infra-tools scans the guest's ED25519 key from the authenticated Proxmox node,
 replaces any stale entry for that address in the workspace `known_hosts`, and
 then uses strict checking for the direct guest connection. It also refreshes
-the key when a provisioning recheck confirms an existing guest whose saved
-infra-tools metadata matches the address, machine type, and Proxmox node.
-Existing guests without that matching saved identity are not enrolled
-automatically; enroll those explicitly with `infra-tools ssh-key enroll` after
-verifying the displayed fingerprint. Proxmox node and guest connections both
-use strict checking against the workspace `known_hosts` file.
+the key before every setup rerun for a cached managed guest whose saved
+infra-tools metadata matches the address, machine type, and Proxmox node. This
+cleans up stale trust left by older or recreated managed guests before strict
+direct SSH checks run. Existing guests without that matching saved identity
+are not enrolled automatically; enroll those explicitly with `infra-tools
+ssh-key enroll` after verifying the displayed fingerprint. Proxmox node and
+guest connections both use strict checking against the workspace `known_hosts`
+file.
 Explicit enrollment scans only the ED25519 key, avoiding a burst of parallel
 probe connections against hosts that enforce SSH connection-rate limits.
 The enrollment command does not modify OpenSSH's default `~/.ssh/known_hosts`;

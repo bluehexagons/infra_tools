@@ -1650,7 +1650,21 @@ def run_setup_command(args: argparse.Namespace) -> int:
     print_setup_summary(config, description)
 
     if config.hosted_node and reuse_cached_provisioning:
-        print("  ✓ Guest already provisioned in local metadata; skipping Proxmox host check")
+        try:
+            _refresh_existing_managed_guest_host_keys(
+                config,
+                cached_provisioning,
+            )
+        except ProvisionError as exc:
+            print(
+                "\n✗ Failed to refresh the managed guest SSH host key: "
+                f"{exc}"
+            )
+            return 1
+        print(
+            "  ✓ Guest already provisioned; refreshed SSH host trust "
+            "through Proxmox"
+        )
     elif config.hosted_node:
         if config.machine_type == "vm":
             from lib.proxmox_vm import (
