@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import os
 import shlex
 from dataclasses import dataclass, asdict
 from typing import Optional, cast
@@ -307,6 +308,10 @@ class SetupConfig:
     git_auth_file: MaybeStr = None
     git_auth_token: MaybeStr = None
     disable_git_auth: bool = False
+    git_credentials: Optional[NestedStrList] = None
+    git_ca_certificates: Optional[NestedStrList] = None
+    git_ca_pems: Optional[NestedStrList] = None
+    clear_git_credentials: bool = False
     agent_auth_source: MaybeStr = None
     agent_auth_files: Optional[NestedStrList] = None
     disable_agent_auth: bool = False
@@ -436,6 +441,17 @@ class SetupConfig:
         ):
             raise ValueError("git_host must be a non-empty hostname")
 
+        from lib.git_credentials import normalize_git_https_origin
+
+        for specs in (
+            self.git_credentials,
+            self.git_ca_certificates,
+            self.git_ca_pems,
+        ):
+            for spec in specs or []:
+                if len(spec) == 2 and isinstance(spec[0], str):
+                    spec[0] = normalize_git_https_origin(spec[0])
+
         if self.editor is not None:
             if self.editor not in EDITORS:
                 raise ValueError(f"editor must be one of: {', '.join(EDITORS)}")
@@ -487,6 +503,10 @@ class SetupConfig:
             self.samba_sources = None
         if self.clear_samba_metadata_cache:
             self.samba_metadata_cache = None
+        if self.clear_git_credentials:
+            self.git_credentials = None
+            self.git_ca_certificates = None
+            self.git_ca_pems = None
         if self.disable_browser_automation:
             self.browser_automation = None
         pairing_providers = list(dict.fromkeys(self.device_pairing_providers or []))
@@ -829,6 +849,18 @@ class SetupConfig:
             args.append(f"--git-access {shlex.quote(self.git_access)}")
         if self.git_host != "github.com":
             args.append(f"--git-host {shlex.quote(self.git_host)}")
+        for origin, username in self.git_credentials or []:
+            args.append(
+                "--git-credential "
+                f"{shlex.quote(origin)} {shlex.quote(username)}"
+            )
+        for origin, encoded_pem in self.git_ca_pems or []:
+            args.append(
+                "--git-ca-pem "
+                f"{shlex.quote(origin)} {shlex.quote(encoded_pem)}"
+            )
+        if self.clear_git_credentials:
+            args.append("--no-git-credentials")
         if self.copy_agent_config or self.copy_agent_keys or self.agent_payload:
             args.append("--agent-payload")
 
@@ -1276,6 +1308,19 @@ class SetupConfig:
             cmd_parts.append("--agent-auth none")
         if self.git_host != "github.com":
             cmd_parts.append(f"--git-host {shlex.quote(self.git_host)}")
+        if self.clear_git_credentials:
+            cmd_parts.append("--no-git-credentials")
+        else:
+            for origin, username in self.git_credentials or []:
+                cmd_parts.append(
+                    "--git-credential "
+                    f"{shlex.quote(origin)} {shlex.quote(username)}"
+                )
+            for origin, source_path in self.git_ca_certificates or []:
+                cmd_parts.append(
+                    "--git-ca-certificate "
+                    f"{shlex.quote(origin)} {shlex.quote(source_path)}"
+                )
 
         if self.agent_repos:
             for git_url in self.agent_repos:
@@ -1351,9 +1396,14 @@ class SetupConfig:
         MIN_SHARE_FIELDS = SHARE_USERS_INDEX + 1
         required_share_credentials: StrList = []
         seen_share_credentials: set[str] = set()
+        for _origin, username in self.git_credentials or []:
+            if username not in seen_share_credentials:
+                required_share_credentials.append(username)
+                seen_share_credentials.add(username)
         if self.antistatic_admin:
-            required_share_credentials.append(self.antistatic_admin)
-            seen_share_credentials.add(self.antistatic_admin)
+            if self.antistatic_admin not in seen_share_credentials:
+                required_share_credentials.append(self.antistatic_admin)
+                seen_share_credentials.add(self.antistatic_admin)
         redacted_share_specs: list[list[str]] = []
         if self.samba_shares:
             for share_spec in self.samba_shares:
@@ -1461,6 +1511,8 @@ class SetupConfig:
             'git_auth_source',
             'git_auth_file',
             'git_auth_token',
+            'git_ca_pems',
+            'clear_git_credentials',
             'agent_auth_source',
             'agent_auth_files',
             'agent_config_source',
@@ -1525,6 +1577,10 @@ class SetupConfig:
         data['swap_devices'] = _normalize_nested_specs(data.get('swap_devices'))
         data['swap_zram'] = _normalize_nested_specs(data.get('swap_zram'))
         data['vm_disk_settings'] = _normalize_nested_specs(data.get('vm_disk_settings'))
+        data['git_credentials'] = _normalize_nested_specs(data.get('git_credentials'))
+        data['git_ca_certificates'] = _normalize_nested_specs(
+            data.get('git_ca_certificates')
+        )
         system_defaults = get_system_type_definition(system_type)
         if not data.get('agent_tools') and not data.get('agent_tools_removed'):
             data['agent_tools'] = list(system_defaults.default_agent_tools) or None
@@ -1717,6 +1773,44 @@ class SetupConfig:
         git_access = raw_git_access if raw_git_access in GIT_ACCESS_POLICIES else 'none'
         raw_git_host = getattr(args, 'git_host', 'github.com')
         git_host = raw_git_host if isinstance(raw_git_host, str) else 'github.com'
+        clear_git_credentials = bool(
+            getattr(args, 'clear_git_credentials', False)
+        )
+        raw_git_credentials = _normalize_nested_specs(
+            getattr(args, 'git_credentials', None)
+        )
+        raw_git_ca_certificates = _normalize_nested_specs(
+            getattr(args, 'git_ca_certificates', None)
+        )
+        raw_git_ca_pems = _normalize_nested_specs(
+            getattr(args, 'git_ca_pems', None)
+        )
+        if clear_git_credentials and (
+            raw_git_credentials
+            or raw_git_ca_certificates
+            or raw_git_ca_pems
+        ):
+            raise ValueError(
+                "--no-git-credentials cannot be combined with Git credential or CA options"
+            )
+        git_credentials = (
+            None
+            if clear_git_credentials
+            else raw_git_credentials
+        )
+        git_ca_certificates = (
+            None
+            if clear_git_credentials
+            else raw_git_ca_certificates
+        )
+        for ca_spec in git_ca_certificates or []:
+            if len(ca_spec) == 2:
+                ca_spec[1] = os.path.abspath(ca_spec[1])
+        git_ca_pems = (
+            None
+            if clear_git_credentials
+            else raw_git_ca_pems
+        )
         raw_agent_auth_files = getattr(args, 'agent_auth_files', None)
         agent_auth_files = (
             raw_agent_auth_files if isinstance(raw_agent_auth_files, list) else None
@@ -1939,6 +2033,10 @@ class SetupConfig:
             git_auth_file=git_auth_file,
             git_auth_token=git_auth_token,
             disable_git_auth=disable_git_auth,
+            git_credentials=git_credentials,
+            git_ca_certificates=git_ca_certificates,
+            git_ca_pems=git_ca_pems,
+            clear_git_credentials=clear_git_credentials,
             agent_auth_source=agent_auth_source,
             agent_auth_files=agent_auth_files,
             disable_agent_auth=disable_agent_auth,

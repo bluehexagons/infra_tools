@@ -185,15 +185,23 @@ Agent VMs that need LFS can install and initialize the client once before all
 normal repository clones:
 
 ```bash
+infra-tools credentials set agent-git
+
 infra-tools setup server_dev 192.168.1.41 agent \
+  --git-access read-write \
+  --git-credential https://git.example.com:3000 agent-git \
   --git-lfs \
   --repo https://git.example.com:3000/team/assets.git
 ```
 
-`--git-lfs` does not alter repository URLs or credentials. A loopback-only
-Gogs deployment is not remotely LFS-ready unless the client has a persistent
-HTTP tunnel and a matching repository LFS URL; routine LFS use should use the
-HTTPS hostname mode or source-restricted private listener.
+Add `--git-ca-certificate ORIGIN PATH` when the Gogs certificate is signed by a
+private CA or is the hostless self-signed certificate. `--git-credential`
+resolves the matching workspace password and configures both ordinary HTTPS Git
+and Git LFS without putting the password in the repository URL. `--git-lfs`
+does not alter repository URLs or credentials. A loopback-only Gogs deployment
+is not remotely LFS-ready unless the client has a persistent HTTP tunnel and a
+matching repository LFS URL; routine LFS use should use the HTTPS hostname mode
+or source-restricted private listener.
 
 ## Dedicated mixed-media VM
 

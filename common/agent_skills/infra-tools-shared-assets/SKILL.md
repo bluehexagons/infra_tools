@@ -30,6 +30,19 @@ share does not replace it. Use ordinary `git lfs pull`, checkout, and push
 workflows through the Git remote. Do not create a `file://` remote on a share or
 move the local LFS cache there.
 
+For an infra-tools-managed self-hosted Git origin, inspect only non-secret
+configuration when troubleshooting:
+
+```bash
+git config --includes --get-regexp '^(credential\..*\.username|http\..*\.sslCAInfo)$'
+```
+
+Managed credentials and private CA settings live below
+`~/.config/infra-tools/git/`. Do not print the credential file. Do not add
+credentials to repository URLs or disable TLS verification; have an operator
+rerun setup with `--git-credential` and, when needed,
+`--git-ca-certificate`.
+
 Before writing a shared artifact, confirm the intended destination and whether
 another user or job owns it. For a completed archive or export, write a
 temporary sibling and rename it only after the copy and any checksum complete.

@@ -912,7 +912,46 @@ def add_setup_arguments(
         "--git-host",
         default="github.com",
         metavar="HOST",
-        help="Git host whose credentials are configured (default: github.com)",
+        help="GitHub CLI credential host (currently github.com only)",
+    )
+    parser.add_argument(
+        "--git-credential",
+        dest="git_credentials",
+        action="append",
+        nargs=2,
+        metavar=("HTTPS_ORIGIN", "USERNAME"),
+        help=(
+            "Configure one origin-scoped HTTPS Git/LFS credential using the "
+            "matching workspace password; repeat for additional origins"
+        ),
+    )
+    if not for_remote:
+        parser.add_argument(
+            "--git-ca-certificate",
+            dest="git_ca_certificates",
+            action="append",
+            nargs=2,
+            metavar=("HTTPS_ORIGIN", "PATH"),
+            help=(
+                "Trust a controller-local PEM certificate bundle only for one "
+                "Git HTTPS origin; repeat for additional origins"
+            ),
+        )
+    parser.add_argument(
+        "--git-ca-pem",
+        dest="git_ca_pems",
+        action="append",
+        nargs=2,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--no-git-credentials",
+        dest="clear_git_credentials",
+        action="store_true",
+        help=(
+            "Remove all infra-tools-managed HTTPS Git credentials and private "
+            "CA settings from the target user"
+        ),
     )
     parser.add_argument(
         "--agent-payload",
@@ -1078,7 +1117,7 @@ def add_setup_arguments(
                        help="Configure one Samba directory share: access_type (read|write), share_name, absolute path, comma-separated username:password pairs or usernames that resolve via --credential (can be used multiple times)")
     parser.add_argument("--credential", dest="share_credentials",
                         action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
-                        help="Save a workspace credential for a matching Gogs admin, Samba share, or SMB mount username (can be used multiple times)")
+                        help="Save a workspace credential for a matching Gogs admin, Git HTTPS login, Samba share, or SMB mount username (can be used multiple times)")
     
     parser.add_argument("--smbclient", dest="enable_smbclient", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 

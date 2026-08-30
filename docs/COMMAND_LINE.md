@@ -423,7 +423,10 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--no-browser-automation` | Disable profile-provided browser automation |
 | `--refresh-packages` | Force the APT update/upgrade and versioned runtime checks that normal reruns skip when their completion state is already present |
 | `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
-| `--git-host HOST` | Select the Git host for credentials; GitHub auth currently uses `github.com` |
+| `--git-host HOST` | Select the GitHub CLI credential host; authenticated GitHub setup currently supports `github.com` |
+| `--git-credential HTTPS_ORIGIN USERNAME` | Configure target-user Git and Git LFS authentication for one non-GitHub HTTPS origin using the matching workspace credential; repeatable |
+| `--git-ca-certificate HTTPS_ORIGIN PATH` | Trust a controller-local PEM certificate bundle only for one managed Git HTTPS origin; repeatable |
+| `--no-git-credentials` | Remove all infra-tools-managed Git HTTPS credentials, helper configuration, and private CA files from the target user |
 | `--git-auth active\|none` | Seed missing active GitHub CLI host credentials, or disable a profile auth default |
 | `--git-auth-file PATH` | Seed a missing selected-host `hosts.yml` entry or one-line GitHub token from a controller-local file |
 | `--agent-auth active\|none` | Seed missing selected agent credentials, refresh known-outdated Codex credentials from a current source, or disable a profile auth default |
@@ -534,6 +537,13 @@ Public repositories on any reachable Git host work without credentials. Agent
 repository URLs with embedded credentials, SSH/scp syntax, and non-HTTPS schemes
 are rejected. A requested repository that cannot be cloned stops setup, while an
 existing repository is preserved only when its origin exactly matches.
+Private non-GitHub origins use the separate `--git-credential` flow. Its
+password is resolved from the workspace credential store, never embedded in a
+repository URL or saved setup declaration. `--git-ca-certificate` optionally
+adds origin-scoped trust for an internal CA or self-signed service certificate;
+it does not disable certificate verification globally. The target stores the
+credential in a dedicated mode-`0600` file because unattended Git and Git LFS
+need persistent access.
 
 On the configured VM, check selected tools without exposing credential contents:
 

@@ -358,6 +358,17 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"Agent Git access: {config.git_access}")
     if config.agent_repos or config.git_host != "github.com":
         print(f"Agent Git host: {config.git_host}")
+    managed_git_origins = sorted(
+        {
+            spec[0]
+            for spec in (config.git_credentials or []) + (config.git_ca_pems or [])
+            if len(spec) == 2
+        }
+    )
+    if managed_git_origins:
+        print(f"Managed Git HTTPS origins: {', '.join(managed_git_origins)}")
+    elif config.clear_git_credentials:
+        print("Managed Git HTTPS credentials: remove")
     if config.agent_config_source:
         print("Agent config source: active user")
     if config.git_auth_source or config.git_auth_file or config.git_auth_token:

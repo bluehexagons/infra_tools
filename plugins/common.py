@@ -34,6 +34,7 @@ PLUGIN = PluginDefinition(
         "copy_agent_tooling_payload",
         "install_browser_automation",
         "install_git_for_agent_repositories",
+        "configure_git_https_credentials",
         "install_git_lfs_for_agent_repositories",
         "clone_agent_repositories",
         "configure_auto_update_uv",
@@ -255,10 +256,23 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
     git_needed = bool(
         config.agent_repos
         or config.install_git_lfs
+        or config.git_credentials
+        or config.git_ca_pems
+        or config.clear_git_credentials
         or (config.web_interfaces and config.git_access != "none")
     )
     if git_needed:
         steps.append(("Installing Git for agent repositories", install_git_for_agent_repositories))
+
+    if config.git_credentials or config.git_ca_pems or config.clear_git_credentials:
+        from common.git_credential_steps import configure_git_https_credentials
+
+        steps.append(
+            (
+                "Configuring managed Git HTTPS credentials",
+                configure_git_https_credentials,
+            )
+        )
 
     if "t3code" in (config.web_interfaces or []):
         steps.append(("Installing T3 Code web interface", install_t3code_web))
@@ -327,6 +341,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         reconcile_agent_storage,
     )
     from common.t3code_steps import install_t3code_web
+    from common.git_credential_steps import configure_git_https_credentials
     from common.browser_automation_steps import install_browser_automation
     from common.godot_steps import (
         configure_auto_update_godot,
@@ -353,6 +368,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_browser_automation": install_browser_automation,
         "clone_agent_repositories": clone_agent_repositories,
         "install_git_for_agent_repositories": install_git_for_agent_repositories,
+        "configure_git_https_credentials": configure_git_https_credentials,
         "install_git_lfs_for_agent_repositories": install_git_lfs_for_agent_repositories,
         "configure_auto_update_uv": configure_auto_update_uv,
         "configure_auto_update_godot": configure_auto_update_godot,

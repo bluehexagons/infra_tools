@@ -1168,6 +1168,11 @@ def validate_agent_repositories(repositories: Optional[list[str]]) -> None:
 def validate_agent_git_settings(config: Any) -> None:
     """Validate the VM Git policy and the currently supported auth provider."""
     from lib.config import AGENT_TOOLS, GIT_ACCESS_POLICIES
+    from lib.credentials import get_runtime_credential
+    from lib.git_credentials import (
+        decode_git_ca_pem,
+        normalize_git_https_origin,
+    )
 
     git_access = getattr(config, "git_access", "none")
     if git_access not in GIT_ACCESS_POLICIES:
@@ -1180,6 +1185,76 @@ def validate_agent_git_settings(config: Any) -> None:
         raise ValueError("--git-host must be a non-empty hostname")
     if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", git_host):
         raise ValueError(f"Invalid --git-host: {git_host}")
+
+    git_credentials = getattr(config, "git_credentials", None) or []
+    git_ca_certificates = getattr(config, "git_ca_certificates", None) or []
+    git_ca_pems = getattr(config, "git_ca_pems", None) or []
+    clear_git_credentials = bool(
+        getattr(config, "clear_git_credentials", False)
+    )
+    if clear_git_credentials and (
+        git_credentials or git_ca_certificates or git_ca_pems
+    ):
+        raise ValueError(
+            "--no-git-credentials cannot be combined with Git credential or CA options"
+        )
+    if git_credentials and git_access == "none":
+        raise ValueError(
+            "--git-credential requires --git-access read or read-write"
+        )
+
+    seen_credential_origins: set[str] = set()
+    for spec in git_credentials:
+        if (
+            not isinstance(spec, (list, tuple))
+            or len(spec) != 2
+            or not all(isinstance(value, str) for value in spec)
+        ):
+            raise ValueError(
+                "--git-credential requires HTTPS_ORIGIN and USERNAME"
+            )
+        origin = normalize_git_https_origin(spec[0])
+        username = spec[1]
+        if (
+            not username
+            or username != username.strip()
+            or ":" in username
+            or "," in username
+        ):
+            raise ValueError(f"Invalid Git credential username: {username!r}")
+        validate_no_control_characters(username, "Git credential username")
+        if urlparse(origin).hostname == "github.com":
+            raise ValueError(
+                "GitHub credentials must use --git-auth or --agent-auth-file gh"
+            )
+        if origin in seen_credential_origins:
+            raise ValueError(f"Duplicate --git-credential origin: {origin}")
+        seen_credential_origins.add(origin)
+        if get_runtime_credential(config, username) is None:
+            raise ValueError(
+                f"Missing resolved credential for Git user {username} at {origin}"
+            )
+
+    seen_ca_origins: set[str] = set()
+    for option, specs, encoded in (
+        ("--git-ca-certificate", git_ca_certificates, False),
+        ("--git-ca-pem", git_ca_pems, True),
+    ):
+        for spec in specs:
+            if (
+                not isinstance(spec, (list, tuple))
+                or len(spec) != 2
+                or not all(isinstance(value, str) for value in spec)
+            ):
+                raise ValueError(f"{option} requires HTTPS_ORIGIN and a value")
+            origin = normalize_git_https_origin(spec[0])
+            if origin in seen_ca_origins:
+                raise ValueError(f"Duplicate Git CA certificate origin: {origin}")
+            seen_ca_origins.add(origin)
+            if encoded:
+                decode_git_ca_pem(spec[1])
+            else:
+                validate_filesystem_path(spec[1], must_exist=True)
 
     github_auth_requested = bool(
         getattr(config, "git_auth_source", None)

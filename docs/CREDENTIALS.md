@@ -6,7 +6,7 @@ concerns separate:
 
 | Concern | What it controls | How it is supplied |
 | --- | --- | --- |
-| Workspace credentials | Passwords used by services such as the initial Gogs admin, Samba shares, and SMB mounts | `infra-tools credentials set`, or `--credential USERNAME PASSWORD` |
+| Workspace credentials | Passwords used by services such as the initial Gogs admin, managed Git HTTPS origins, Samba shares, and SMB mounts | `infra-tools credentials set`, or `--credential USERNAME PASSWORD` |
 | Git access policy | Whether the target may use Git repositories and whether its intended access is read-only or read-write | `--git-access` |
 | GitHub and agent authentication | Secret files installed for `gh`, Codex, Claude Code, or OpenCode | An active-user source, a specified file, or the interactive setup flow |
 | Agent configuration | Non-secret settings, instructions, skills, rules, aliases, and extensions | `--agent-config active` |
@@ -50,7 +50,8 @@ read-write GitHub token read-only.
 ## Workspace credentials
 
 The workspace credential store is for passwords used by infrastructure
-features, not for agent accounts or GitHub authentication:
+features and explicitly managed non-GitHub Git origins, not for agent-provider
+accounts or GitHub CLI authentication:
 
 ```bash
 infra-tools credentials set workspace-user
@@ -68,8 +69,9 @@ is kept in the active workspace at:
 Use the global `--workspace PATH` option when managing a non-default
 workspace. The file and its containing directory are created with restrictive
 permissions. The store is used by workspace services such as the initial Gogs
-administrator, Samba shares, and SMB mounts; it is not read by `gh`, Codex,
-Claude Code, or OpenCode setup. When Gogs is enabled, a stored credential whose
+administrator, origin-scoped Git HTTPS logins, Samba shares, and SMB mounts;
+it is not read by `gh`, Codex, Claude Code, or OpenCode setup. When Gogs is
+enabled, a stored credential whose
 username matches the setup username supplies the initial administrator
 password. If no match exists, setup generates the password. Reruns preserve an
 existing Gogs administrator password rather than rotating it.
@@ -236,9 +238,9 @@ instead of silently choosing one.
 
 The host is `github.com` by default. `--git-host` selects the host name used by
 the GitHub processing, but authenticated GitHub setup currently accepts only
-`github.com`. Only the selected host entry is staged. GitHub authentication is
-currently the only authenticated Git-host flow; credentials for other Git
-hosts can be added later without changing the public-repository flow.
+`github.com`. Only the selected host entry is staged. GitHub authentication
+remains owned by `gh`. Self-hosted and other non-GitHub HTTPS origins use the
+separate managed Git credential flow below.
 
 During initial VM setup, a missing selected GitHub host entry is appended to
 the target user's existing `gh` hosts file, preserving entries for other hosts.
@@ -256,6 +258,53 @@ public email.
 
 Do not put tokens directly in a saved setup command, shell history, issue, or
 documentation. Prefer a protected file path or the interactive token prompt.
+
+### Self-hosted Git HTTPS and Git LFS
+
+Use an origin-scoped credential for Gogs or another non-GitHub HTTPS server:
+
+```bash
+infra-tools credentials set agent-git
+
+infra-tools setup agent_vm 192.168.0.41 agent \
+  --git-access read-write \
+  --git-credential https://192.168.0.51:3000 agent-git \
+  --git-ca-certificate https://192.168.0.51:3000 /run/infra/gogs-51.crt \
+  --git-lfs \
+  --repo https://192.168.0.51:3000/team/project.git
+```
+
+`HTTPS_ORIGIN` is only the scheme, hostname or IP, and optional port. Repository
+paths, embedded credentials, HTTP, queries, and fragments are rejected. The
+username must match the workspace credential key and the account expected by
+the Git server. Prefer a separate least-privilege Gogs account for each VM or
+trust boundary instead of distributing the administrator password.
+
+The optional CA flag accepts a controller-local PEM certificate or certificate
+bundle. For the hostless Gogs TLS mode, copy and independently verify the
+server certificate from `/etc/nginx/ssl/192.168.0.51.crt`, then pass the local
+copy as shown above. The source must be a regular non-symlink file no larger
+than 1 MiB and must not be group- or world-writable (`0644` or stricter is
+accepted). Infra-tools validates the PEM source, transports its public contents
+to the target, and configures `http.<origin>.sslCAInfo`; it never sets
+`http.sslVerify=false`. Publicly trusted certificates do not need this flag.
+
+On the target, infra-tools installs a URL-scoped Git include and a dedicated
+mode-`0600` credential-store file below
+`~/.config/infra-tools/git/`. The include resets credential helpers only for
+the selected origin, so GitHub continues using the `gh` helper. Ordinary Git
+HTTPS and Git LFS use the same managed credential. The password is necessarily
+stored reversibly on the target for unattended operations; protect the target
+account and give it only the repository permissions it needs.
+
+Updating the matching workspace credential and rerunning setup rotates the
+target value. Change the username or CA path by repeating the origin flag; saved
+patches replace the declaration for that origin. Remove all infra-tools-managed
+Git credentials and private CA settings with:
+
+```bash
+infra-tools patch 192.168.0.41 agent --no-git-credentials
+```
 
 ### Portability by tool
 
@@ -390,6 +439,11 @@ repository permissions and tokens with the minimum required scope, and use a
 different credential file when a VM needs an independent revocation and audit
 boundary.
 
+A private Gogs or other self-hosted repository instead uses
+`--git-credential`, plus `--git-ca-certificate` when its TLS chain is not
+already trusted. This flow works even when `gh` is not selected and also
+supplies the HTTP authentication used by Git LFS.
+
 ## Rotating and checking credentials
 
 Credentials can be updated after setup without recreating the VM:
@@ -447,8 +501,12 @@ operator or provisioning service.
 
 ## Security and lifecycle
 
-- Credential source options are used during staging and are not included in
-  saved setup commands or ordinary setup summaries.
+- Agent-provider credential source options are used during staging and are not
+  included in saved setup commands or ordinary setup summaries.
+- Managed Git origins and usernames are saved as non-secret declarations; their
+  passwords are resolved from the workspace store for each run. Optional CA
+  source paths are saved, but certificate contents are only transported for the
+  active setup run.
 - Credential payloads are staged for the target setup, transferred with
   restrictive permissions, and removed after processing or failure cleanup.
 - Device-pairing htpasswd sources use the same transient staging model. The
@@ -471,6 +529,12 @@ operator or provisioning service.
 auth was supplied, the selected GitHub host matches the repository, and the
 token can read that repository. Check the VM's declared `--git-access` value
 and run `agent auth status` without exposing the token.
+
+For a self-hosted origin, confirm that the exact scheme, host, and port match
+`--git-credential`, the workspace contains the declared username, and the
+server account can access the repository. For a private CA, confirm that the
+matching `--git-ca-certificate` source is current. Do not work around a trust
+failure with `http.sslVerify=false`.
 
 **An active source is missing.** For Codex, Claude Code, and OpenCode, inspect
 the expected active-user paths in the authentication table. The tool may be

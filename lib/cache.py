@@ -352,6 +352,19 @@ def merge_setup_configs(
                     if credential_spec and len(credential_spec) >= 2:
                         merged_credentials[credential_spec[0]] = credential_spec
                 merged_dict[key] = list(merged_credentials.values())
+        elif key in {'git_credentials', 'git_ca_certificates'}:
+            if new_config.clear_git_credentials:
+                merged_dict[key] = None
+            elif value is not None:
+                merged_specs = {
+                    spec[0]: list(spec)
+                    for spec in merged_dict.get(key) or []
+                    if spec and len(spec) == 2
+                }
+                for spec in value:
+                    if spec and len(spec) == 2:
+                        merged_specs[spec[0]] = list(spec)
+                merged_dict[key] = list(merged_specs.values()) or None
         elif key == 'tags':
             if value is not None:
                 merged_dict[key] = value

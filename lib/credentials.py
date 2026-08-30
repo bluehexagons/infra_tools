@@ -8,6 +8,11 @@ import os
 
 from lib.atomic_io import write_json_atomic
 from lib.config import SetupConfig
+from lib.git_credentials import (
+    encode_git_ca_pem,
+    normalize_git_https_origin,
+    validate_git_ca_pem,
+)
 from lib.workspace import ensure_workspace_dir, get_credentials_path
 
 
@@ -234,7 +239,67 @@ def _resolve_share_credentials(config: SetupConfig, credential_map: dict[str, st
                 [gogs_admin, _normalize_credential_password(password)]
             )
 
+    for credential_spec in config.git_credentials or []:
+        if len(credential_spec) != 2:
+            raise ValueError(
+                "--git-credential requires HTTPS_ORIGIN and USERNAME"
+            )
+        origin, username = credential_spec
+        normalized_origin = normalize_git_https_origin(origin)
+        normalized_username = _normalize_credential_username(username)
+        password = credential_map.get(normalized_username)
+        if password is None:
+            raise ValueError(
+                f"Missing credential for Git user {normalized_username} at "
+                f"{normalized_origin}. Run infra-tools credentials set USERNAME "
+                "or use --credential USERNAME PASSWORD"
+            )
+        if normalized_username not in seen_usernames:
+            seen_usernames.add(normalized_username)
+            resolved_credentials.append(
+                [normalized_username, _normalize_credential_password(password)]
+            )
+
     return resolved_credentials
+
+
+def _read_git_ca_bundle(source_path: str) -> str:
+    """Read and validate one controller-local PEM certificate bundle."""
+    from lib.validation import validate_filesystem_path
+
+    validate_filesystem_path(source_path, must_exist=True)
+    if os.path.islink(source_path) or not os.path.isfile(source_path):
+        raise ValueError(
+            f"Git CA certificate source must be a regular non-symlink file: {source_path}"
+        )
+    source_mode = os.stat(source_path).st_mode & 0o777
+    if source_mode & 0o022:
+        raise ValueError(
+            f"Git CA certificate source must not be group/world-writable: {source_path}"
+        )
+    if os.path.getsize(source_path) > 1024 * 1024:
+        raise ValueError(f"Git CA certificate source exceeds 1 MiB: {source_path}")
+    with open(source_path, "r", encoding="utf-8") as file_obj:
+        content = file_obj.read()
+
+    try:
+        return validate_git_ca_pem(content)
+    except ValueError as exc:
+        raise ValueError(f"Invalid Git CA certificate source {source_path}: {exc}") from exc
+
+
+def _prepare_git_ca_pems(config: SetupConfig) -> list[list[str]] | None:
+    prepared: list[list[str]] = []
+    for ca_spec in config.git_ca_certificates or []:
+        if len(ca_spec) != 2:
+            raise ValueError(
+                "--git-ca-certificate requires HTTPS_ORIGIN and PATH"
+            )
+        origin, source_path = ca_spec
+        normalized_origin = normalize_git_https_origin(origin)
+        content = _read_git_ca_bundle(source_path)
+        prepared.append([normalized_origin, encode_git_ca_pem(content)])
+    return prepared or None
 
 
 def _resolve_named_smb_mounts(
@@ -266,4 +331,6 @@ def prepare_runtime_config(config: SetupConfig, workspace: str | None = None) ->
     credential_map = load_workspace_credentials(workspace)
     runtime_config.share_credentials = _resolve_share_credentials(runtime_config, credential_map) or None
     runtime_config.smb_mounts = _resolve_named_smb_mounts(runtime_config.smb_mounts, credential_map)
+    runtime_config.git_ca_pems = _prepare_git_ca_pems(runtime_config)
+    runtime_config.git_ca_certificates = None
     return runtime_config
