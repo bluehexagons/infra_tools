@@ -148,7 +148,6 @@ def _rewrite_cached_home_paths(value: Any, old_home: str, new_home: str) -> Any:
     path_indexes = {
         "samba_shares": (2,),
         "smb_mounts": (0,),
-        "syncthing_folders": (2,),
         "sync_specs": (0, 1),
         "backup_specs": (0, 1),
         "scrub_specs": (0, 1),
@@ -375,8 +374,6 @@ def merge_setup_configs(
     if new_config.disable_syncthing:
         merged_dict["enable_syncthing"] = False
         merged_dict["disable_syncthing"] = True
-        merged_dict["syncthing_devices"] = None
-        merged_dict["syncthing_folders"] = None
-        merged_dict["syncthing_versioning"] = "staggered"
+        merged_dict["syncthing_admin"] = None
     
     return SetupConfig(**merged_dict)

@@ -164,6 +164,9 @@ sudo infra-web forward add upload-api \
 
 The limit accepts a positive integer with an optional `k`, `m`, or `g` suffix
 and is capped at 1 GiB. T3 Code's managed route sets 50 MiB automatically.
+The managed Syncthing route uses a dedicated profile to retain Syncthing's
+loopback host validation while preserving the external host in forwarding
+headers.
 
 ## Certificate trust
 

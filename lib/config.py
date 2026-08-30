@@ -35,8 +35,6 @@ BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
 EDITORS = ("geany", "vscode")
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 GODOT_BUNDLES = ("web", "publishing")
-SYNCTHING_FOLDER_MODES = ("send-receive", "send-only", "receive-only")
-SYNCTHING_VERSIONING_MODES = ("none", "trashcan", "staggered")
 GODOT_WEB_HTTPS_PORT = 8443
 DEFAULT_AGENT_WEB_PORTS = (80, 443, 8080, 8081)
 LAN_ACCESS_SOURCES = (
@@ -343,9 +341,7 @@ class SetupConfig:
     smb_mounts: Optional[NestedStrList] = None
     enable_syncthing: bool = False
     disable_syncthing: bool = False
-    syncthing_devices: Optional[NestedStrList] = None
-    syncthing_folders: Optional[NestedStrList] = None
-    syncthing_versioning: Optional[str] = "staggered"
+    syncthing_admin: MaybeStr = None
     sync_specs: Optional[NestedStrList] = None
     backup_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
@@ -411,6 +407,9 @@ class SetupConfig:
 
         if self.install_data_analysis_tools:
             self.install_python = True
+
+        if self.enable_syncthing and self.syncthing_admin is None:
+            self.syncthing_admin = "syncthing-admin"
 
         if self.t3code_ready:
             if self.disable_web_interface:
@@ -965,17 +964,9 @@ class SetupConfig:
             args.append("--no-syncthing")
         elif self.enable_syncthing:
             args.append("--syncthing")
-            if self.syncthing_versioning != "staggered":
-                args.append(
-                    "--syncthing-versioning "
-                    f"{shlex.quote(self.syncthing_versioning)}"
-                )
-        for device_spec in self.syncthing_devices or []:
-            escaped_spec = ' '.join(shlex.quote(str(s)) for s in device_spec)
-            args.append(f"--syncthing-device {escaped_spec}")
-        for folder_spec in self.syncthing_folders or []:
-            escaped_spec = ' '.join(shlex.quote(str(s)) for s in folder_spec)
-            args.append(f"--syncthing-folder {escaped_spec}")
+            args.append(
+                f"--syncthing-admin {shlex.quote(self.syncthing_admin or '')}"
+            )
         
         if self.sync_specs:
             for sync_spec in self.sync_specs:
@@ -1436,6 +1427,10 @@ class SetupConfig:
             if self.antistatic_admin not in seen_share_credentials:
                 required_share_credentials.append(self.antistatic_admin)
                 seen_share_credentials.add(self.antistatic_admin)
+        if self.syncthing_admin:
+            if self.syncthing_admin not in seen_share_credentials:
+                required_share_credentials.append(self.syncthing_admin)
+                seen_share_credentials.add(self.syncthing_admin)
         redacted_share_specs: list[list[str]] = []
         if self.samba_shares:
             for share_spec in self.samba_shares:
@@ -1482,17 +1477,9 @@ class SetupConfig:
             cmd_parts.append("--no-syncthing")
         elif self.enable_syncthing:
             cmd_parts.append("--syncthing")
-            if self.syncthing_versioning != "staggered":
-                cmd_parts.append(
-                    "--syncthing-versioning "
-                    f"{shlex.quote(self.syncthing_versioning)}"
-                )
-        for device_spec in self.syncthing_devices or []:
-            escaped_spec = ' '.join(shlex.quote(str(s)) for s in device_spec)
-            cmd_parts.append(f"--syncthing-device {escaped_spec}")
-        for folder_spec in self.syncthing_folders or []:
-            escaped_spec = ' '.join(shlex.quote(str(s)) for s in folder_spec)
-            cmd_parts.append(f"--syncthing-folder {escaped_spec}")
+            cmd_parts.append(
+                f"--syncthing-admin {shlex.quote(self.syncthing_admin or '')}"
+            )
         
         # Sync
         if self.sync_specs:
@@ -1589,7 +1576,6 @@ class SetupConfig:
             self.install_data_analysis_tools
         )
         data['enable_syncthing'] = bool(self.enable_syncthing)
-        data['syncthing_versioning'] = self.syncthing_versioning or "staggered"
         # Live activation is a one-shot controller operation. Persisting it
         # would make a later deploy retry a sensitive address change without
         # the operator explicitly requesting another handoff.
@@ -1614,6 +1600,9 @@ class SetupConfig:
             'reset_migrations',
             'api_subdomain',
             'desktop_interfaces',
+            'syncthing_devices',
+            'syncthing_folders',
+            'syncthing_versioning',
         ):
             data.pop(removed_field, None)
         tags_str = data.get('tags')
@@ -1632,12 +1621,6 @@ class SetupConfig:
         data['git_credentials'] = _normalize_nested_specs(data.get('git_credentials'))
         data['git_ca_certificates'] = _normalize_nested_specs(
             data.get('git_ca_certificates')
-        )
-        data['syncthing_devices'] = _normalize_nested_specs(
-            data.get('syncthing_devices')
-        )
-        data['syncthing_folders'] = _normalize_nested_specs(
-            data.get('syncthing_folders')
         )
         system_defaults = get_system_type_definition(system_type)
         if not data.get('agent_tools') and not data.get('agent_tools_removed'):
@@ -1747,33 +1730,13 @@ class SetupConfig:
         elif enable_smbclient is None:
             enable_smbclient = False
 
-        raw_syncthing_devices = getattr(args, 'syncthing_devices', None)
-        syncthing_devices = (
-            raw_syncthing_devices
-            if isinstance(raw_syncthing_devices, list)
-            else None
-        )
-        raw_syncthing_folders = getattr(args, 'syncthing_folders', None)
-        syncthing_folders = (
-            raw_syncthing_folders
-            if isinstance(raw_syncthing_folders, list)
-            else None
-        )
         enable_syncthing = getattr(args, 'enable_syncthing', None)
         if enable_syncthing is not None and not isinstance(enable_syncthing, bool):
             enable_syncthing = None
         disable_syncthing = bool(getattr(args, 'disable_syncthing', False))
         if disable_syncthing:
             enable_syncthing = False
-        elif enable_syncthing is None and (syncthing_devices or syncthing_folders):
-            enable_syncthing = True
-        syncthing_versioning = getattr(args, 'syncthing_versioning', None)
-        if syncthing_versioning is not None and not isinstance(
-            syncthing_versioning, str
-        ):
-            syncthing_versioning = None
-        if enable_syncthing and syncthing_versioning is None:
-            syncthing_versioning = "staggered"
+        syncthing_admin = _optional_str_arg(args, 'syncthing_admin')
 
         is_build_server = bool(getattr(args, 'is_build_server', False))
         is_app_server = bool(getattr(args, 'is_app_server', False))
@@ -2150,9 +2113,7 @@ class SetupConfig:
             smb_mounts=smb_mounts,
             enable_syncthing=enable_syncthing,
             disable_syncthing=disable_syncthing,
-            syncthing_devices=syncthing_devices,
-            syncthing_folders=syncthing_folders,
-            syncthing_versioning=syncthing_versioning,
+            syncthing_admin=syncthing_admin,
             sync_specs=getattr(args, 'sync_specs', None),
             backup_specs=getattr(args, 'backup_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),

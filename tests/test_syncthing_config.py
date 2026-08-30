@@ -10,11 +10,6 @@ from lib.cache import merge_setup_configs
 from lib.config import SetupConfig
 
 
-REMOTE_DEVICE_ID = (
-    "S7UKX27-GI7ZTXS-GC6RKUA-7AJGZ44-C6NAYEB-HSKTJQK-KJHU2NO-CWV7EQW"
-)
-
-
 class SyncthingConfigTest(unittest.TestCase):
     def _config(self, **overrides: object) -> SetupConfig:
         values: dict[str, object] = {
@@ -22,67 +17,29 @@ class SyncthingConfigTest(unittest.TestCase):
             "username": "agent",
             "system_type": "server_lite",
             "enable_syncthing": True,
-            "syncthing_devices": [["alice-laptop", REMOTE_DEVICE_ID]],
-            "syncthing_folders": [
-                [
-                    "send-receive",
-                    "shared-work",
-                    "/srv/syncthing/shared-work",
-                    "alice-laptop",
-                ]
-            ],
         }
         values.update(overrides)
         return SetupConfig(**values)  # type: ignore[arg-type]
 
-    def test_flags_auto_enable_and_round_trip(self) -> None:
+    def test_flag_defaults_admin_and_round_trips(self) -> None:
         parser = create_setup_argument_parser("test")
-        args = parser.parse_args(
-            [
-                "fileserver",
-                "agent",
-                "--syncthing-device",
-                "alice-laptop",
-                REMOTE_DEVICE_ID,
-                "--syncthing-folder",
-                "send-receive",
-                "shared-work",
-                "/srv/syncthing/shared-work",
-                "alice-laptop",
-                "--syncthing-versioning",
-                "trashcan",
-            ]
-        )
+        args = parser.parse_args(["fileserver", "agent", "--syncthing"])
         with patch("lib.system_utils.get_local_timezone", return_value="UTC"):
             config = SetupConfig.from_args(args, "server_lite")
 
         self.assertTrue(config.enable_syncthing)
-        self.assertEqual(config.syncthing_versioning, "trashcan")
+        self.assertEqual(config.syncthing_admin, "syncthing-admin")
         self.assertIn("--syncthing", config.to_remote_args())
-        self.assertIn(
-            f"--syncthing-device alice-laptop {REMOTE_DEVICE_ID}",
-            config.to_remote_args(),
-        )
-        self.assertIn(
-            "--syncthing-folder send-receive shared-work "
-            "/srv/syncthing/shared-work alice-laptop",
-            config.to_setup_command(),
-        )
+        self.assertIn("--syncthing-admin syncthing-admin", config.to_remote_args())
 
-        restored = SetupConfig.from_dict(
-            "fileserver", "server_lite", config.to_dict()
-        )
-        self.assertEqual(restored.syncthing_devices, config.syncthing_devices)
-        self.assertEqual(restored.syncthing_folders, config.syncthing_folders)
+        restored = SetupConfig.from_dict("fileserver", "server_lite", config.to_dict())
+        self.assertEqual(restored.syncthing_admin, "syncthing-admin")
 
-    def test_default_staggered_versioning_is_implicit_in_commands(self) -> None:
-        config = self._config()
-        self.assertNotIn(
-            "--syncthing-versioning staggered", config.to_remote_args()
-        )
-        self.assertNotIn(
-            "--syncthing-versioning staggered", config.to_setup_command()
-        )
+    def test_custom_admin_is_in_commands(self) -> None:
+        config = self._config(syncthing_admin="file-admin")
+
+        self.assertIn("--syncthing-admin file-admin", config.to_remote_args())
+        self.assertIn("--syncthing-admin file-admin", config.to_setup_command())
 
     def test_patch_omission_preserves_syncthing_settings(self) -> None:
         parser = create_setup_argument_parser("test")
@@ -90,14 +47,13 @@ class SyncthingConfigTest(unittest.TestCase):
         with patch("lib.system_utils.get_local_timezone", return_value="UTC"):
             update = SetupConfig.from_args(args, "server_lite")
         self.assertIsNone(update.enable_syncthing)
-        self.assertIsNone(update.syncthing_versioning)
+        self.assertIsNone(update.syncthing_admin)
 
         merged = merge_setup_configs(self._config(), update)
         self.assertTrue(merged.enable_syncthing)
-        self.assertEqual(merged.syncthing_versioning, "staggered")
-        self.assertEqual(merged.syncthing_devices, self._config().syncthing_devices)
+        self.assertEqual(merged.syncthing_admin, "syncthing-admin")
 
-    def test_explicit_disable_clears_managed_declarations(self) -> None:
+    def test_explicit_disable_clears_admin(self) -> None:
         parser = create_setup_argument_parser("test")
         args = parser.parse_args(["fileserver", "agent", "--no-syncthing"])
         with patch("lib.system_utils.get_local_timezone", return_value="UTC"):
@@ -107,40 +63,32 @@ class SyncthingConfigTest(unittest.TestCase):
 
         self.assertFalse(merged.enable_syncthing)
         self.assertTrue(merged.disable_syncthing)
-        self.assertIsNone(merged.syncthing_devices)
-        self.assertIsNone(merged.syncthing_folders)
+        self.assertIsNone(merged.syncthing_admin)
         self.assertIn("--no-syncthing", merged.to_remote_args())
         self.assertNotIn("disable_syncthing", merged.to_dict())
 
-        stale_data = merged.to_dict()
-        stale_data["disable_syncthing"] = True
-        restored = SetupConfig.from_dict("fileserver", "server_lite", stale_data)
-        self.assertFalse(restored.disable_syncthing)
+    def test_removed_declarations_are_ignored_in_old_cache(self) -> None:
+        data = self._config().to_dict()
+        data.update(
+            {
+                "syncthing_devices": [["old-device", "OLD-ID"]],
+                "syncthing_folders": [
+                    ["send-receive", "old", "/srv/old", "old-device"]
+                ],
+                "syncthing_versioning": "trashcan",
+            }
+        )
 
-    def test_folder_must_reference_a_declared_device(self) -> None:
-        with self.assertRaisesRegex(ValueError, "unknown device.*bob-laptop"):
-            self._config(
-                syncthing_folders=[
-                    [
-                        "send-receive",
-                        "shared-work",
-                        "/srv/syncthing/shared-work",
-                        "bob-laptop",
-                    ]
-                ]
-            )
+        restored = SetupConfig.from_dict("fileserver", "server_lite", data)
 
-    def test_folder_path_is_limited_to_data_roots(self) -> None:
-        with self.assertRaisesRegex(ValueError, "PATH must be below"):
-            self._config(
-                syncthing_folders=[
-                    ["send-receive", "shared-work", "/etc/shared", "alice-laptop"]
-                ]
-            )
+        self.assertTrue(restored.enable_syncthing)
+        self.assertFalse(hasattr(restored, "syncthing_devices"))
 
-    def test_full_device_id_is_required(self) -> None:
-        with self.assertRaisesRegex(ValueError, "full uppercase"):
-            self._config(syncthing_devices=[["alice-laptop", "S7UKX27"]])
+    def test_admin_requires_enablement_and_valid_username(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires --syncthing"):
+            self._config(enable_syncthing=False, syncthing_admin="file-admin")
+        with self.assertRaisesRegex(ValueError, "valid username"):
+            self._config(syncthing_admin="Not Valid")
 
     def test_root_and_oci_targets_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "non-root"):

@@ -6,7 +6,7 @@ concerns separate:
 
 | Concern | What it controls | How it is supplied |
 | --- | --- | --- |
-| Workspace credentials | Passwords used by services such as the initial Gogs admin, managed Git HTTPS origins, Samba shares, and SMB mounts | `infra-tools credentials set`, or `--credential USERNAME PASSWORD` |
+| Workspace credentials | Passwords used by services such as Syncthing administration, the initial Gogs admin, managed Git HTTPS origins, Samba shares, and SMB mounts | `infra-tools credentials set`, or `--credential USERNAME PASSWORD` |
 | Git access policy | Whether the target may use Git repositories and whether its intended access is read-only or read-write | `--git-access` |
 | GitHub and agent authentication | Secret files installed for `gh`, Codex, Claude Code, or OpenCode | An active-user source, a specified file, or the interactive setup flow |
 | Agent configuration | Non-secret settings, instructions, skills, rules, aliases, and extensions | `--agent-config active` |
@@ -68,13 +68,20 @@ is kept in the active workspace at:
 
 Use the global `--workspace PATH` option when managing a non-default
 workspace. The file and its containing directory are created with restrictive
-permissions. The store is used by workspace services such as the initial Gogs
-administrator, origin-scoped Git HTTPS logins, Samba shares, and SMB mounts;
+permissions. The store is used by workspace services such as the Syncthing web
+administrator, initial Gogs administrator, origin-scoped Git HTTPS logins,
+Samba shares, and SMB mounts;
 it is not read by `gh`, Codex, Claude Code, or OpenCode setup. When Gogs is
 enabled, a stored credential whose
 username matches the setup username supplies the initial administrator
 password. If no match exists, setup generates the password. Reruns preserve an
 existing Gogs administrator password rather than rotating it.
+
+Managed Syncthing requires a stored credential named `syncthing-admin` by
+default. `--syncthing-admin USERNAME` selects a different credential. Setup
+uses it to hash the GUI password on the target; the plaintext is not saved in
+the setup cache. Updating the credential and rerunning with `--syncthing`
+rotates the GUI login without replacing GUI-managed devices or folders.
 
 The repeatable setup option `--credential USERNAME PASSWORD` saves the same
 workspace credential before setup. Prefer `infra-tools credentials set` when

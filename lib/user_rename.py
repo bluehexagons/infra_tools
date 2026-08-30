@@ -669,7 +669,6 @@ def _rewrite_setup_path_values(config: dict[str, Any], old_home: str, new_home: 
     path_indexes = {
         "samba_shares": (2,),
         "smb_mounts": (0,),
-        "syncthing_folders": (2,),
         "sync_specs": (0, 1),
         "backup_specs": (0, 1),
         "scrub_specs": (0, 1),

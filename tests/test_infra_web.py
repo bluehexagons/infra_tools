@@ -64,6 +64,21 @@ class TestInfraWebForwarding(unittest.TestCase):
 
         self.assertIn("client_max_body_size 50m;", content)
 
+    def test_syncthing_profile_uses_loopback_upstream_host(self) -> None:
+        route = {
+            "listen": 8444,
+            "name": "syncthing",
+            "owner": "agent",
+            "profile": "syncthing",
+            "target_host": "127.0.0.1",
+            "target_port": 8384,
+        }
+
+        content = infra_web.render_forward_nginx([route], _policy())
+
+        self.assertIn("proxy_set_header Host $proxy_host;", content)
+        self.assertIn("proxy_set_header X-Forwarded-Host $http_host;", content)
+
     def test_rejects_unsafe_or_unbounded_request_body_limit(self) -> None:
         for value in ("0", "2g", "50m; include /tmp/unsafe"):
             with self.subTest(value=value):

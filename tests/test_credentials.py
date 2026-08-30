@@ -128,6 +128,39 @@ class TestWorkspaceCredentials(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Missing credential for Antistatic admin: operator"):
                 prepare_runtime_config(config, tmpdir)
 
+    def test_prepare_runtime_config_resolves_syncthing_admin_credential(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            set_workspace_credential("syncthing-admin", "secret1", tmpdir)
+            config = SetupConfig(
+                host="host",
+                username="user",
+                system_type="server_lite",
+                enable_syncthing=True,
+            )
+
+            runtime_config = prepare_runtime_config(config, tmpdir)
+
+            self.assertIsNone(config.share_credentials)
+            self.assertEqual(
+                runtime_config.share_credentials,
+                [["syncthing-admin", "secret1"]],
+            )
+
+    def test_prepare_runtime_config_rejects_missing_syncthing_admin_credential(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = SetupConfig(
+                host="host",
+                username="user",
+                system_type="server_lite",
+                enable_syncthing=True,
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Missing credential for Syncthing admin: syncthing-admin",
+            ):
+                prepare_runtime_config(config, tmpdir)
+
     def test_prepare_runtime_config_optionally_resolves_gogs_admin_credential(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             set_workspace_credential("gitadmin", "gogs-secret", tmpdir)

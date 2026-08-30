@@ -48,7 +48,7 @@ _USERNAME_PATTERN = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 _SAFE_PATH_PATTERN = re.compile(r"^/[A-Za-z0-9_./-]+$")
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]\s+(.*)$")
 _BODY_SIZE_PATTERN = re.compile(r"^([1-9][0-9]{0,9})([kKmMgG]?)$")
-_PROFILES = ("general", "godot")
+_PROFILES = ("general", "godot", "syncthing")
 _MAX_FORWARD_BODY_BYTES = 1024**3
 
 
@@ -470,6 +470,9 @@ def render_forward_nginx(
             profile_headers = """
         add_header Cross-Origin-Opener-Policy "same-origin" always;
         add_header Cross-Origin-Embedder-Policy "require-corp" always;"""
+        host_header = (
+            "$proxy_host" if route["profile"] == "syncthing" else "$http_host"
+        )
         blocks.append(
             f"""
 # {route['name']} ({route['owner']}, {route['profile']})
@@ -486,7 +489,7 @@ server {{
     location / {{
         proxy_pass http://{upstream_host}:{route['target_port']};
         proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host {host_header};
         proxy_set_header X-Forwarded-Host $http_host;
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

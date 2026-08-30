@@ -97,44 +97,22 @@ _CHANNEL_VERSION_PATTERN = re.compile(
 )
 _CHANNEL_BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9._/-]*[A-Za-z0-9_])?$")
 _CHANNEL_COMMIT_PATTERN = re.compile(r"^[0-9A-Fa-f]{4,64}$")
-_SYNCTHING_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9.-]{0,63}$")
-_SYNCTHING_DEVICE_ID_PATTERN = re.compile(
-    r"^[A-Z2-7]{7}(?:-[A-Z2-7]{7}){7}$"
-)
-
-
 def validate_syncthing_settings(config: Any) -> None:
-    """Validate managed Syncthing peers, folders, and service boundaries."""
+    """Validate managed Syncthing service and administrator boundaries."""
 
     enabled = bool(getattr(config, "enable_syncthing", False))
     disabled = bool(getattr(config, "disable_syncthing", False))
-    device_specs = _nested_string_specs(
-        getattr(config, "syncthing_devices", None), "--syncthing-device"
-    )
-    folder_specs = _nested_string_specs(
-        getattr(config, "syncthing_folders", None), "--syncthing-folder"
-    )
-    versioning = getattr(config, "syncthing_versioning", "staggered")
+    admin = getattr(config, "syncthing_admin", None)
 
     if disabled:
-        if enabled or device_specs or folder_specs or versioning not in {None, "staggered"}:
+        if enabled or admin:
             raise ValueError(
                 "--no-syncthing cannot be combined with Syncthing setup options"
             )
         return
-    if versioning is None and not enabled:
-        return
-    if versioning not in {"none", "trashcan", "staggered"}:
-        raise ValueError(
-            "--syncthing-versioning must be none, trashcan, or staggered"
-        )
     if not enabled:
-        if device_specs or folder_specs:
-            raise ValueError(
-                "--syncthing-device and --syncthing-folder require --syncthing"
-            )
-        if versioning != "staggered":
-            raise ValueError("--syncthing-versioning requires --syncthing")
+        if admin:
+            raise ValueError("--syncthing-admin requires --syncthing")
         return
 
     username = str(getattr(config, "username", "")).strip()
@@ -144,84 +122,10 @@ def validate_syncthing_settings(config: Any) -> None:
         raise ValueError("--syncthing is not supported on a Proxmox host")
     if getattr(config, "machine_type", None) == "oci":
         raise ValueError("--syncthing is not supported for OCI setup targets")
+    from lib.validators import validate_username
 
-    device_ids: set[str] = set()
-    devices_by_name: dict[str, str] = {}
-    for spec in device_specs:
-        if len(spec) != 2:
-            raise ValueError("--syncthing-device requires NAME DEVICE_ID")
-        name, device_id = spec
-        if not _SYNCTHING_NAME_PATTERN.fullmatch(name):
-            raise ValueError(
-                "Syncthing device NAME must start with a lowercase letter and "
-                "contain only lowercase letters, numbers, '.', or '-'"
-            )
-        if name in devices_by_name:
-            raise ValueError(f"Duplicate Syncthing device NAME '{name}'")
-        if not _SYNCTHING_DEVICE_ID_PATTERN.fullmatch(device_id):
-            raise ValueError(
-                "Syncthing DEVICE_ID must be the full uppercase, hyphenated device ID"
-            )
-        if device_id in device_ids:
-            raise ValueError(f"Duplicate Syncthing DEVICE_ID '{device_id}'")
-        devices_by_name[name] = device_id
-        device_ids.add(device_id)
-
-    folder_ids: set[str] = set()
-    folder_paths: set[str] = set()
-    allowed_roots = (
-        os.path.join("/home", username),
-        "/data",
-        "/media",
-        "/mnt",
-        "/srv",
-    )
-    for spec in folder_specs:
-        if len(spec) != 4:
-            raise ValueError(
-                "--syncthing-folder requires MODE FOLDER_ID PATH DEVICES"
-            )
-        mode, folder_id, path, raw_devices = spec
-        if mode not in {"send-receive", "send-only", "receive-only"}:
-            raise ValueError(
-                "Syncthing folder MODE must be send-receive, send-only, or receive-only"
-            )
-        if not _SYNCTHING_NAME_PATTERN.fullmatch(folder_id):
-            raise ValueError(
-                "Syncthing FOLDER_ID must start with a lowercase letter and "
-                "contain only lowercase letters, numbers, '.', or '-'"
-            )
-        if folder_id in folder_ids:
-            raise ValueError(f"Duplicate Syncthing FOLDER_ID '{folder_id}'")
-        validate_filesystem_path(path)
-        if not os.path.isabs(path) or os.path.normpath(path) != path:
-            raise ValueError("Syncthing folder PATH must be absolute and normalized")
-        if not any(
-            path.startswith(f"{root}{os.sep}") for root in allowed_roots
-        ):
-            raise ValueError(
-                "Syncthing folder PATH must be below the setup user's home, "
-                "/data, /media, /mnt, or /srv"
-            )
-        if path in folder_paths:
-            raise ValueError(f"Duplicate Syncthing folder PATH '{path}'")
-        device_names = [name.strip() for name in raw_devices.split(",")]
-        if not device_names or any(not name for name in device_names):
-            raise ValueError(
-                "Syncthing folder DEVICES must list one or more device names"
-            )
-        if len(device_names) != len(set(device_names)):
-            raise ValueError(
-                f"Syncthing folder '{folder_id}' repeats a device name"
-            )
-        unknown = set(device_names) - set(devices_by_name)
-        if unknown:
-            raise ValueError(
-                f"Syncthing folder '{folder_id}' references unknown device(s): "
-                + ", ".join(sorted(unknown))
-            )
-        folder_ids.add(folder_id)
-        folder_paths.add(path)
+    if not isinstance(admin, str) or not validate_username(admin):
+        raise ValueError("--syncthing-admin must be a valid username")
 
 
 def validate_channel(channel: str) -> str:

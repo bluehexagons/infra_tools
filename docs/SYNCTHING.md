@@ -1,99 +1,81 @@
 # Managed Syncthing
 
 The Syncthing integration provides private, bidirectional file exchange for a
-known group of people without requiring a VPN or a publicly reachable server.
-Each endpoint trusts explicit device IDs, and each folder names exactly which
-declared devices may participate. Syncthing encrypts device-to-device traffic;
-relay operators cannot read file contents.
+known group without requiring a VPN or a publicly reachable server. Syncthing
+encrypts device-to-device traffic and can use outbound relays when direct
+connections are unavailable.
 
-Infra-tools manages one dedicated Syncthing instance on a Debian server or
-workstation. The service runs as the non-root setup account, the admin UI binds
-only to `127.0.0.1:8384`, automatic router port mappings are disabled, and no
-firewall rule is added. Existing routing and firewall policy may still permit
-direct connections; otherwise Syncthing uses its outbound relay fallback.
+Infra-tools owns the service boundary: a non-root systemd service, an
+authenticated HTTPS admin endpoint, a fixed writable root at `/srv/syncthing`,
+and conservative network defaults. The Syncthing web GUI owns devices, folders,
+folder direction, and versioning. Rerunning infra-tools preserves those GUI
+changes.
 
-## Bootstrap the hub
+## Install the endpoint
 
-Install the endpoint first so it can generate a stable device identity:
+Save the web administrator password in the workspace credential store, then
+enable Syncthing:
 
 ```bash
+infra-tools credentials set syncthing-admin
 infra-tools setup server_lite fileserver admin --syncthing
 ```
 
-Setup prints the server's full device ID. It also prints the SSH tunnel command
-for its loopback-only admin UI. From the controller, use the actual setup host
-and account:
+The credential command prompts without exposing the password in shell history.
+Setup prints the server device ID and an HTTPS admin URL. The default login
+username is `syncthing-admin`; choose a different workspace credential name
+with `--syncthing-admin USERNAME`:
 
 ```bash
-ssh -L 8384:127.0.0.1:8384 admin@fileserver
-```
-
-Then open `http://127.0.0.1:8384`. The tunnel is for administration only;
-coworkers do not need SSH or network access to the server.
-
-Have each coworker install Syncthing and send you the full ID shown by their
-client. They should add only the server ID to their client. They do not need to
-add one another, which preserves the hub-and-spoke boundary.
-
-## Declare peers and folders
-
-Rerun setup with the complete peer and folder declaration:
-
-```bash
+infra-tools credentials set file-admin
 infra-tools setup server_lite fileserver admin \
-  --syncthing \
-  --syncthing-device alice-laptop \
-    S7UKX27-GI7ZTXS-GC6RKUA-7AJGZ44-C6NAYEB-HSKTJQK-KJHU2NO-CWV7EQW \
-  --syncthing-device bob-desktop \
-    5SYI2FS-LW6YAXI-JJDYETS-NDBBPIO-256MWBO-XDPXWVG-24QPUM4-PDW4UQU \
-  --syncthing-folder send-receive shared-work \
-    /srv/syncthing/shared-work alice-laptop,bob-desktop
+  --syncthing --syncthing-admin file-admin
 ```
 
-The example IDs are illustrative; use the exact IDs copied from those clients.
-Device names and folder IDs are local infra-tools identifiers and use lowercase
-letters, numbers, dots, and hyphens. A folder path must be below the setup
-user's home, `/data`, `/media`, `/mnt`, or `/srv`.
+The HTTPS listener uses the existing infra-tools web gateway, certificate, and
+access-source policy. If the server uses its local CA, enroll that public CA on
+each administrator's browser device as described in
+[Internal HTTPS sites and previews](INTERNAL_WEB.md#certificate-trust). Do not
+disable certificate verification.
 
-On each coworker's client, accept or create a folder with the same folder ID,
-`shared-work`, choose any appropriate local path, and share it only with the
-server. Their client can normally use **Send & Receive** for bidirectional work.
+## Add people and folders
 
-Folder modes are interpreted from the managed endpoint's perspective:
+1. Open the printed HTTPS URL and sign in.
+2. Have each coworker install Syncthing and send you their device ID.
+3. In the server GUI, select **Add Remote Device**, enter the ID and a helpful
+   name, and save it. Do not mark a coworker as an introducer.
+4. Select **Add Folder**, use a path below `/srv/syncthing`, and select only the
+   devices that should receive it.
+5. On each coworker's client, add the server device ID and accept the offered
+   folder at an appropriate local path.
 
-- `send-receive` sends local changes and accepts peer changes;
-- `send-only` publishes local content without applying peer changes;
-- `receive-only` accepts peer content without publishing local edits.
+Coworkers need only the Syncthing client. They do not need the admin URL, its
+password, SSH access, a VPN, or access to one another's devices. A normal
+**Send & Receive** folder is bidirectional. Use separate folders for groups
+that need different access, because Syncthing does not provide per-file ACLs
+inside one folder.
 
-Repeat `--syncthing-folder` for project-scoped folders. The final `DEVICES`
-argument is a comma-separated list without spaces and may contain only names
-declared by `--syncthing-device`.
+New folders default to `/srv/syncthing` and staggered versioning for up to one
+year. Both are visible and adjustable in the GUI. Existing folder settings are
+never reset by an infra-tools rerun. Versioning is useful recovery but is not
+an independent backup; retain server snapshots or another backup for disk
+loss, administrator mistakes, or compromise.
 
-Infra-tools treats the devices and folders of this dedicated instance as a
-complete declaration. A later setup that supplies declarations replaces the
-managed set, so include every peer and folder that should remain. Changes made
-directly in the Syncthing GUI are overwritten on the next infra-tools run.
+## Administrator credential rotation
 
-## Version recovery
-
-Staggered versioning is the default on every declared folder. It keeps older
-versions with progressively wider spacing for up to one year. This is the
-recommended hub setting because replacements and deletions arriving from a
-coworker's device can be recovered from the hub's `.stversions` directory.
-
-Choose another global policy when necessary:
+Replace the stored credential and reconcile the saved setup:
 
 ```bash
---syncthing-versioning trashcan   # keep remote replacements/deletions for 30 days
---syncthing-versioning none       # disable Syncthing file versioning
+infra-tools credentials set syncthing-admin
+infra-tools patch fileserver --syncthing
 ```
 
-Syncthing versioning is not an independent backup: it applies when another
-device replaces or deletes a file, and all peers still share a trust domain.
-Keep server snapshots or a separate backup for recovery from disk loss,
-account compromise, or mistakes made directly on the hub.
+Use the custom username instead when `--syncthing-admin` was selected. Setup
+resets the web login from that workspace credential but preserves the server's
+device identity, remote devices, folders, and their settings. For a routine
+membership or folder change, use the GUI only; no setup rerun is needed.
 
-## Service operations
+## Service operations and removal
 
 ```bash
 sudo systemctl status infra-syncthing.service
@@ -101,33 +83,35 @@ sudo journalctl -u infra-syncthing.service -n 200 --no-pager
 ```
 
 The device certificate and database live in
-`/var/lib/infra-tools/syncthing`. Preserve that directory to retain the
-server's device ID. The service uses the Debian Syncthing package and disables
-Syncthing's self-updater so normal APT maintenance remains authoritative.
+`/var/lib/infra-tools/syncthing`. Preserve that directory to retain the server
+device ID. The Debian package remains authoritative, and Syncthing's
+self-updater is disabled.
 
-To stop sharing through the managed endpoint, run:
+To remove the service and HTTPS route while preserving state and files:
 
 ```bash
 infra-tools patch fileserver --no-syncthing
 ```
 
-This stops and removes `infra-syncthing.service` and clears its saved peer and
-folder declarations. It deliberately leaves the Syncthing package, synchronized
-folder contents, and `/var/lib/infra-tools/syncthing` in place. Re-enabling the
-endpoint therefore retains the same server device ID. Delete retained data only
-as a separate, deliberate cleanup after verifying that it is no longer needed.
+Re-enabling the endpoint retains the device ID and GUI-managed sharing state.
+Delete `/var/lib/infra-tools/syncthing` or `/srv/syncthing` only as a separate,
+deliberate cleanup after verifying the data is no longer needed.
 
-## Boundaries
+## Security boundaries
 
-- Device IDs grant folder-level Syncthing trust, not Unix account access or
-  general network access.
-- Syncthing has no per-file ACL inside a folder. Use separate folders when
-  coworkers need different access.
-- Do not synchronize live databases, virtual machine images, Git working trees,
-  or application state that requires transactional consistency.
-- A compromised authorized device can still replace or delete shared data.
-  Keep versioning enabled on the hub and maintain an independent backup.
-- A second Syncthing instance using TCP/QUIC 22000 or GUI port 8384 will conflict
-  with the managed service. Stop or reconfigure the other instance first.
+- The GUI remains bound to `127.0.0.1:8384`; only the managed HTTPS gateway is
+  externally reachable, and its firewall scope follows infra-tools access
+  sources.
+- The service can write only its state directory and `/srv/syncthing`; GUI
+  folder paths outside that root will fail rather than expanding access.
+- Automatic router mapping is disabled. Existing routing can permit direct
+  device connections; otherwise outbound relay fallback remains enabled.
+- Device IDs grant folder-level Syncthing trust, not Unix or general network
+  access. A compromised authorized device can still replace or delete shared
+  data.
+- Do not synchronize live databases, virtual-machine images, or application
+  state that requires transactional consistency.
+- A second Syncthing instance using TCP/QUIC 22000 or GUI port 8384 conflicts
+  with the managed service.
 - This capability is rejected for `server_proxmox`, the root account, and OCI
-  targets. Run the hub in a normal Debian VM, LXC, or physical host instead.
+  targets. Use a normal Debian VM, LXC, workstation, or physical server.

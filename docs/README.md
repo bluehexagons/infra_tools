@@ -30,7 +30,7 @@ references and may describe future work separately from this live contract.
 | [Protected device pairing](DEVICE_PAIRING.md) | Basic-Auth enrollment portal, one-time provider links, rotation, removal, and security boundaries |
 | [Machine types](MACHINE_TYPES.md) | Debian bare metal, VM, LXC, OCI, and capability differences |
 | [Samba shares](SAMBA_SHARES.md) | Authenticated shares, credentials, access changes, removals, and SMB mounts |
-| [Managed Syncthing](SYNCTHING.md) | Private hub-and-spoke file exchange, peer and folder declarations, relays, and recovery |
+| [Managed Syncthing](SYNCTHING.md) | Private hub-and-spoke file exchange, HTTPS GUI administration, relays, and recovery |
 | [Storage operations](STORAGE_OPERATIONS.md) | Rsync mirrors, par2 protection, schedules, locks, and recovery |
 | [Generic path backups](BACKUPS.md) | Provider-neutral backup mirrors, mounted destinations, parity, and consistency limits |
 

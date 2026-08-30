@@ -1,4 +1,4 @@
-"""Tests for managed Syncthing service composition and config generation."""
+"""Tests for managed Syncthing service composition and policy."""
 
 from __future__ import annotations
 
@@ -10,8 +10,10 @@ from lib.config import SetupConfig
 from lib.system_types import get_steps_for_system_type
 from sync.syncthing_steps import (
     SYNCTHING_HOME,
+    SYNCTHING_SHARE_ROOT,
+    _configure_syncthing_https,
     _render_service,
-    build_managed_syncthing_config,
+    build_syncthing_policy_config,
     setup_syncthing,
 )
 
@@ -30,15 +32,7 @@ def _config(system_type: str = "server_lite", **overrides: object) -> SetupConfi
         "username": "agent",
         "system_type": system_type,
         "enable_syncthing": True,
-        "syncthing_devices": [["alice-laptop", REMOTE_DEVICE_ID]],
-        "syncthing_folders": [
-            [
-                "send-receive",
-                "shared-work",
-                "/srv/syncthing/shared-work",
-                "alice-laptop",
-            ]
-        ],
+        "share_credentials": [["syncthing-admin", "correct horse battery staple"]],
     }
     values.update(overrides)
     return SetupConfig(**values)  # type: ignore[arg-type]
@@ -47,18 +41,30 @@ def _config(system_type: str = "server_lite", **overrides: object) -> SetupConfi
 def _current_config() -> dict[str, object]:
     return {
         "version": 37,
-        "folders": [],
-        "devices": [
+        "folders": [
             {
-                "deviceID": LOCAL_DEVICE_ID,
-                "name": "fileserver",
-                "addresses": ["dynamic"],
+                "id": "shared-work",
+                "path": "/srv/syncthing/shared-work",
+                "devices": [
+                    {"deviceID": LOCAL_DEVICE_ID},
+                    {"deviceID": REMOTE_DEVICE_ID},
+                ],
+                "versioning": {
+                    "type": "trashcan",
+                    "params": {"cleanoutDays": "30"},
+                },
             }
+        ],
+        "devices": [
+            {"deviceID": LOCAL_DEVICE_ID, "name": "fileserver"},
+            {"deviceID": REMOTE_DEVICE_ID, "name": "alice-laptop"},
         ],
         "gui": {
             "enabled": True,
             "address": "0.0.0.0:8384",
             "apiKey": "test-api-key",
+            "user": "syncthing-admin",
+            "password": "$2a$10$hashed",
             "useTLS": True,
         },
         "options": {
@@ -67,18 +73,8 @@ def _current_config() -> dict[str, object]:
             "crashReportingEnabled": True,
         },
         "defaults": {
-            "device": {
-                "deviceID": "",
-                "name": "",
-                "addresses": ["dynamic"],
-                "introducer": False,
-            },
             "folder": {
-                "id": "",
-                "label": "",
                 "path": "~",
-                "type": "sendreceive",
-                "devices": [{"deviceID": LOCAL_DEVICE_ID}],
                 "versioning": {
                     "type": "",
                     "params": {},
@@ -86,93 +82,52 @@ def _current_config() -> dict[str, object]:
                     "fsPath": "",
                     "fsType": "basic",
                 },
-                "maxConflicts": 10,
             },
         },
     }
 
 
 class SyncthingDesiredConfigTest(unittest.TestCase):
-    def test_builds_hub_folder_with_safe_network_and_gui_defaults(self) -> None:
-        desired = build_managed_syncthing_config(
-            _current_config(), _config(), LOCAL_DEVICE_ID
-        )
+    def test_policy_preserves_gui_devices_folders_and_versioning(self) -> None:
+        current = _current_config()
 
-        self.assertEqual(
-            [device["deviceID"] for device in desired["devices"]],
-            [LOCAL_DEVICE_ID, REMOTE_DEVICE_ID],
-        )
-        self.assertFalse(desired["devices"][1]["introducer"])
-        folder = desired["folders"][0]
-        self.assertEqual(folder["type"], "sendreceive")
-        self.assertEqual(
-            [device["deviceID"] for device in folder["devices"]],
-            [LOCAL_DEVICE_ID, REMOTE_DEVICE_ID],
-        )
-        self.assertEqual(folder["versioning"]["type"], "staggered")
-        self.assertEqual(folder["versioning"]["params"]["maxAge"], "31536000")
+        desired = build_syncthing_policy_config(current)
+
+        self.assertEqual(desired["devices"], current["devices"])
+        self.assertEqual(desired["folders"], current["folders"])
+        self.assertEqual(desired["folders"][0]["versioning"]["type"], "trashcan")
         self.assertEqual(desired["gui"]["address"], "127.0.0.1:8384")
         self.assertFalse(desired["gui"]["useTLS"])
+        self.assertFalse(desired["gui"]["insecureSkipHostcheck"])
         self.assertTrue(desired["options"]["relaysEnabled"])
         self.assertFalse(desired["options"]["natEnabled"])
-        self.assertEqual(desired["options"]["urAccepted"], -1)
-        self.assertFalse(desired["options"]["crashReportingEnabled"])
-
-    def test_maps_folder_directions_and_versioning_modes(self) -> None:
-        cases = (
-            ("send-only", "sendonly", "trashcan", "trashcan"),
-            ("receive-only", "receiveonly", "none", ""),
+        self.assertEqual(
+            desired["options"]["defaultFolderPath"],
+            SYNCTHING_SHARE_ROOT,
         )
-        for mode, expected_type, versioning, expected_versioning in cases:
-            with self.subTest(mode=mode, versioning=versioning):
-                config = _config(
-                    syncthing_folders=[
-                        [
-                            mode,
-                            "shared-work",
-                            "/srv/syncthing/shared-work",
-                            "alice-laptop",
-                        ]
-                    ],
-                    syncthing_versioning=versioning,
-                )
-                desired = build_managed_syncthing_config(
-                    _current_config(), config, LOCAL_DEVICE_ID
-                )
-                self.assertEqual(desired["folders"][0]["type"], expected_type)
-                self.assertEqual(
-                    desired["folders"][0]["versioning"]["type"],
-                    expected_versioning,
-                )
-
-    def test_rejects_declaring_the_local_device_as_a_peer(self) -> None:
-        config = _config(
-            syncthing_devices=[["this-server", LOCAL_DEVICE_ID]],
-            syncthing_folders=[
-                [
-                    "send-receive",
-                    "shared-work",
-                    "/srv/syncthing/shared-work",
-                    "this-server",
-                ]
-            ],
+        self.assertEqual(desired["defaults"]["folder"]["path"], SYNCTHING_SHARE_ROOT)
+        self.assertEqual(
+            desired["defaults"]["folder"]["versioning"]["type"],
+            "staggered",
         )
-        with self.assertRaisesRegex(RuntimeError, "matches this endpoint"):
-            build_managed_syncthing_config(
-                _current_config(), config, LOCAL_DEVICE_ID
-            )
 
-    def test_service_is_unprivileged_hardened_and_loopback_only(self) -> None:
+    def test_policy_requires_offline_admin_configuration(self) -> None:
+        current = _current_config()
+        current["gui"].pop("password")
+
+        with self.assertRaisesRegex(RuntimeError, "password was not configured"):
+            build_syncthing_policy_config(current)
+
+    def test_service_is_unprivileged_hardened_and_confined(self) -> None:
         service = _render_service(_config(), "agent")
         self.assertIn("User=agent", service)
         self.assertIn("NoNewPrivileges=true", service)
+        self.assertIn("ProtectHome=true", service)
         self.assertIn("ProtectSystem=strict", service)
         self.assertIn("CapabilityBoundingSet=", service)
         self.assertIn("--gui-address=http://127.0.0.1:8384", service)
         self.assertIn(f'ReadWritePaths="{SYNCTHING_HOME}"', service)
-        self.assertIn(
-            'ReadWritePaths="/srv/syncthing/shared-work"', service
-        )
+        self.assertIn(f'ReadWritePaths="{SYNCTHING_SHARE_ROOT}"', service)
 
 
 class SyncthingCompositionTest(unittest.TestCase):
@@ -180,36 +135,33 @@ class SyncthingCompositionTest(unittest.TestCase):
         for system_type in ("server_lite", "workstation_desktop"):
             with self.subTest(system_type=system_type):
                 step_names = [
-                    name for name, _step in get_steps_for_system_type(_config(system_type))
+                    name
+                    for name, _step in get_steps_for_system_type(
+                        _config(system_type)
+                    )
                 ]
                 self.assertIn("Configuring managed Syncthing endpoint", step_names)
 
-    def test_disable_composition_removes_service_and_preserves_state(self) -> None:
+    def test_disable_removes_gateway_and_service_but_preserves_state(self) -> None:
         config = _config(
             enable_syncthing=False,
             disable_syncthing=True,
-            syncthing_devices=None,
-            syncthing_folders=None,
+            share_credentials=None,
         )
-        step_names = [
-            name for name, _step in get_steps_for_system_type(config)
-        ]
-        self.assertIn("Removing managed Syncthing endpoint", step_names)
-
         with (
             patch("sync.syncthing_steps.can_manage_system_services", return_value=True),
             patch("sync.syncthing_steps.is_dry_run", return_value=False),
+            patch("sync.syncthing_steps._remove_syncthing_https") as remove_https,
             patch("sync.syncthing_steps.os.path.lexists", return_value=True),
             patch("sync.syncthing_steps.os.path.islink", return_value=False),
             patch("sync.syncthing_steps.os.path.isfile", return_value=True),
             patch("sync.syncthing_steps.os.unlink") as unlink,
             patch("sync.syncthing_steps.run") as run_command,
         ):
-            run_command.return_value = subprocess.CompletedProcess(
-                args=[], returncode=3, stdout="inactive\n", stderr=""
-            )
+            run_command.return_value = subprocess.CompletedProcess(args=[], returncode=3)
             setup_syncthing(config)
 
+        remove_https.assert_called_once_with(config)
         unlink.assert_called_once()
         commands = [call.args[0] for call in run_command.call_args_list]
         self.assertIn(
@@ -220,21 +172,18 @@ class SyncthingCompositionTest(unittest.TestCase):
             ["systemctl", "is-active", "--quiet", "infra-syncthing.service"],
             commands,
         )
-        self.assertIn(["systemctl", "daemon-reload"], commands)
 
     def test_disable_refuses_to_remove_unit_while_service_is_active(self) -> None:
         config = _config(
             enable_syncthing=False,
             disable_syncthing=True,
-            syncthing_devices=None,
-            syncthing_folders=None,
+            share_credentials=None,
         )
-        completed = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="active\n", stderr=""
-        )
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
         with (
             patch("sync.syncthing_steps.can_manage_system_services", return_value=True),
             patch("sync.syncthing_steps.is_dry_run", return_value=False),
+            patch("sync.syncthing_steps._remove_syncthing_https"),
             patch("sync.syncthing_steps.os.path.lexists", return_value=True),
             patch("sync.syncthing_steps.os.path.islink", return_value=False),
             patch("sync.syncthing_steps.os.path.isfile", return_value=True),
@@ -243,14 +192,15 @@ class SyncthingCompositionTest(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "did not stop"):
                 setup_syncthing(config)
-
         unlink.assert_not_called()
 
-    def test_setup_reconciles_through_the_validated_api(self) -> None:
+    def test_setup_hashes_admin_from_stdin_and_preserves_gui_shares(self) -> None:
         completed = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=LOCAL_DEVICE_ID + "\n", stderr=""
+            args=[],
+            returncode=0,
+            stdout=LOCAL_DEVICE_ID + "\n",
+            stderr="",
         )
-        current = _current_config()
         with (
             patch("sync.syncthing_steps.can_manage_system_services", return_value=True),
             patch("sync.syncthing_steps.is_dry_run", return_value=False),
@@ -259,23 +209,70 @@ class SyncthingCompositionTest(unittest.TestCase):
             patch("sync.syncthing_steps.os.makedirs"),
             patch("sync.syncthing_steps.os.chmod"),
             patch("sync.syncthing_steps.os.chown"),
-            patch("sync.syncthing_steps.os.path.exists", return_value=True),
-            patch("sync.syncthing_steps._prepare_folder_paths"),
+            patch("sync.syncthing_steps._prepare_share_root"),
             patch("sync.syncthing_steps.write_text_atomic"),
             patch("sync.syncthing_steps.run") as run_command,
             patch("sync.syncthing_steps._wait_for_api"),
-            patch("sync.syncthing_steps._run_as_user", return_value=completed),
-            patch("sync.syncthing_steps._load_current_config", return_value=current),
+            patch(
+                "sync.syncthing_steps._run_as_user",
+                return_value=completed,
+            ) as run_as_user,
+            patch(
+                "sync.syncthing_steps._load_current_config",
+                return_value=_current_config(),
+            ),
             patch("sync.syncthing_steps._put_config") as put_config,
+            patch(
+                "sync.syncthing_steps._configure_syncthing_https",
+                return_value="https://fileserver:8444/",
+            ),
         ):
-            run_command.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="active\n", stderr=""
-            )
+            run_command.return_value = completed
             setup_syncthing(_config())
 
+        generate_call = run_as_user.call_args_list[0]
+        self.assertIn("--gui-password=-", generate_call.args[1])
+        self.assertEqual(
+            generate_call.kwargs["input_data"],
+            "correct horse battery staple\n",
+        )
         desired = put_config.call_args.args[0]
         self.assertEqual(desired["folders"][0]["id"], "shared-work")
         self.assertEqual(desired["devices"][1]["name"], "alice-laptop")
+
+    def test_https_route_uses_shared_gateway_and_syncthing_profile(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='{"listen": 8444, "url": "https://fileserver:8444/"}',
+            stderr="",
+        )
+        config = _config(access_sources=["192.0.2.0/24"])
+        with (
+            patch("sync.syncthing_steps.os.geteuid", return_value=0),
+            patch("sync.syncthing_steps.os.path.isfile", return_value=True),
+            patch(
+                "common.godot_web_steps.identities_for_config",
+                return_value=["fileserver"],
+            ),
+            patch(
+                "common.godot_web_steps.configure_internal_web_host"
+            ) as configure_host,
+            patch("sync.syncthing_steps.run", return_value=completed) as run_command,
+        ):
+            url = _configure_syncthing_https(config)
+
+        self.assertEqual(url, "https://fileserver:8444/")
+        configure_host.assert_called_once_with(
+            ["fileserver"],
+            ["agent"],
+            ["192.0.2.0/24"],
+            configure_static_site=True,
+            install_utility=True,
+        )
+        command = run_command.call_args.args[0]
+        self.assertIn("--to 127.0.0.1:8384", command)
+        self.assertIn("--profile syncthing", command)
 
 
 if __name__ == "__main__":

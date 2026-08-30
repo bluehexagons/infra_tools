@@ -13,8 +13,6 @@ from lib.config import (
     GIT_ACCESS_POLICIES,
     GODOT_BUNDLES,
     MACHINE_TYPES,
-    SYNCTHING_FOLDER_MODES,
-    SYNCTHING_VERSIONING_MODES,
     WEB_INTERFACES,
 )
 
@@ -1137,8 +1135,8 @@ def add_setup_arguments(
         action="store_true",
         default=None if not for_remote else False,
         help=(
-            "Install a managed Syncthing endpoint with a loopback-only admin UI; "
-            "peer and folder declarations also enable it"
+            "Install a managed Syncthing endpoint with an authenticated HTTPS "
+            "admin UI"
         ),
     )
     syncthing_group.add_argument(
@@ -1151,35 +1149,13 @@ def add_setup_arguments(
         ),
     )
     parser.add_argument(
-        "--syncthing-device",
-        dest="syncthing_devices",
-        action="append",
-        nargs=2,
-        metavar=("NAME", "DEVICE_ID"),
-        help=(
-            "Declare a trusted Syncthing peer by local name and full device ID; "
-            "repeat as needed"
-        ),
-    )
-    parser.add_argument(
-        "--syncthing-folder",
-        dest="syncthing_folders",
-        action="append",
-        nargs=4,
-        metavar=("MODE", "FOLDER_ID", "PATH", "DEVICES"),
-        help=(
-            f"Share one folder in {', '.join(SYNCTHING_FOLDER_MODES)} mode "
-            "with a comma-separated list of declared device names; repeat as needed"
-        ),
-    )
-    parser.add_argument(
-        "--syncthing-versioning",
-        choices=SYNCTHING_VERSIONING_MODES,
+        "--syncthing-admin",
+        dest="syncthing_admin",
         default=None,
-        metavar="MODE",
+        metavar="USERNAME",
         help=(
-            "Version files replaced or deleted by peers: none, trashcan, or "
-            "staggered (default: staggered)"
+            "Workspace credential username for the Syncthing web administrator "
+            "(default: syncthing-admin)"
         ),
     )
     

@@ -200,6 +200,9 @@ def _collect_required_credential_usernames(config: SetupConfig) -> list[str]:
     if config.antistatic_admin:
         usernames.append(config.antistatic_admin)
         seen_usernames.add(config.antistatic_admin)
+    if config.syncthing_admin and config.syncthing_admin not in seen_usernames:
+        usernames.append(config.syncthing_admin)
+        seen_usernames.add(config.syncthing_admin)
 
     for share_spec in config.samba_shares or []:
         if len(share_spec) < 4:
@@ -233,6 +236,11 @@ def _resolve_share_credentials(config: SetupConfig, credential_map: dict[str, st
             if username == config.antistatic_admin:
                 raise ValueError(
                     f"Missing credential for Antistatic admin: {username}. "
+                    "Run infra-tools credentials set USERNAME to enter it securely"
+                )
+            if username == config.syncthing_admin:
+                raise ValueError(
+                    f"Missing credential for Syncthing admin: {username}. "
                     "Run infra-tools credentials set USERNAME to enter it securely"
                 )
             raise ValueError(
