@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
+import infra_tools
 from lib.arg_parser import create_setup_argument_parser
 from lib.cache import merge_setup_configs
 from lib.config import SetupConfig
@@ -208,6 +211,26 @@ class SyncthingConfigTest(unittest.TestCase):
             self._config(username="root")
         with self.assertRaisesRegex(ValueError, "OCI"):
             self._config(machine_type="oci")
+
+    @patch("infra_tools.get_all_configs")
+    def test_info_displays_syncthing_feature(self, get_all_configs) -> None:
+        get_all_configs.return_value = [
+            {
+                "host": "fileserver",
+                "system_type": "server_lite",
+                "args": {
+                    "username": "agent",
+                    "enable_syncthing": True,
+                },
+            }
+        ]
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = infra_tools.show_info()
+
+        self.assertEqual(result, 0)
+        self.assertIn("Features: Syncthing", output.getvalue())
 
 
 if __name__ == "__main__":

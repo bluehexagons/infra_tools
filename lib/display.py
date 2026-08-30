@@ -90,12 +90,12 @@ def print_rdp_info(config: SetupConfig) -> None:
 def print_service_access_summary(
     config: SetupConfig,
     *,
-    t3_https_urls: Mapping[str, str] | None = None,
+    remote_access_details: Mapping[str, str] | None = None,
 ) -> None:
     """Print concise access links and one-line descriptions."""
 
     lines: list[tuple[str, str, str | None]] = []
-    t3_urls = t3_https_urls or {}
+    access_details = remote_access_details or {}
 
     lines.append(("SSH", f"ssh {config.username}@{config.host}", "shell access"))
 
@@ -125,17 +125,22 @@ def print_service_access_summary(
         for interface in config.web_interfaces:
             label = "T3 Code web" if interface == "t3code" else f"{interface} web"
             if interface == "t3code":
-                if t3_urls.get("t3code"):
-                    lines.append(("T3 Code", t3_urls["t3code"], "coding workspace"))
+                if access_details.get("t3code"):
+                    lines.append(
+                        ("T3 Code", access_details["t3code"], "coding workspace")
+                    )
             else:
                 lines.append((label, web_url, "web interface"))
 
         if "t3code" in config.web_interfaces:
-            if config.device_pairing_providers and t3_urls.get("t3code-pairing"):
+            if (
+                config.device_pairing_providers
+                and access_details.get("t3code-pairing")
+            ):
                 lines.append(
                     (
                         "T3 Code device pairing",
-                        t3_urls["t3code-pairing"],
+                        access_details["t3code-pairing"],
                         "protected device enrollment",
                     )
                 )
@@ -147,6 +152,24 @@ def print_service_access_summary(
                         "create a one-time client link",
                     )
                 )
+
+    if config.enable_syncthing:
+        if access_details.get("syncthing-admin"):
+            lines.append(
+                (
+                    "Syncthing admin",
+                    access_details["syncthing-admin"],
+                    "authenticated administration",
+                )
+            )
+        if access_details.get("syncthing-device-id"):
+            lines.append(
+                (
+                    "Syncthing device ID",
+                    access_details["syncthing-device-id"],
+                    "share with trusted peers",
+                )
+            )
 
     if config.gogs:
         from web.gogs_steps import effective_gogs_ipv4_sources
@@ -238,6 +261,7 @@ def print_service_access_summary(
         "T3 Code",
         "T3 Code device pairing",
         "T3 Code pairing",
+        "Syncthing admin",
     }
     sections: list[tuple[str, list[tuple[str, str, str | None]]]] = [
         ("Web", []),

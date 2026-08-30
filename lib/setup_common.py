@@ -91,30 +91,41 @@ LEGACY_SETUP_OPERATION_FILENAME = "setup-operation.pre-persistence.json"
 MAX_AGENT_CREDENTIAL_BYTES = 4 * 1024 * 1024
 MAX_DEVICE_PAIRING_AUTH_BYTES = 64 * 1024
 _GIT_IDENTITY_PAYLOAD_PATH = os.path.join("config", "git", "identity.json")
-_LAST_REMOTE_ACCESS_URLS: dict[str, str] = {}
+_LAST_REMOTE_ACCESS_DETAILS: dict[str, str] = {}
+_REMOTE_ACCESS_PROGRESS_PREFIX = re.compile(r"^[✓ℹ]\s+")
+_SYNCTHING_DEVICE_ID_PATTERN = re.compile(
+    r"^[A-Z2-7]{7}(?:-[A-Z2-7]{7}){7}$"
+)
 
 
-def get_last_remote_access_urls() -> dict[str, str]:
-    """Return HTTPS endpoints announced by the most recent remote setup."""
+def get_last_remote_access_details() -> dict[str, str]:
+    """Return access details announced by the most recent remote setup."""
 
-    return dict(_LAST_REMOTE_ACCESS_URLS)
+    return dict(_LAST_REMOTE_ACCESS_DETAILS)
 
 
 def _record_remote_access_output(line: str) -> None:
-    """Remember generated HTTPS links while preserving live setup output."""
+    """Remember generated access details while preserving live setup output."""
 
-    text = line.strip()
-    prefixes = {
+    text = _REMOTE_ACCESS_PROGRESS_PREFIX.sub("", line.strip())
+    url_prefixes = {
         "T3 Code HTTPS endpoint:": "t3code",
         "T3 Code pairing HTTPS endpoint:": "t3code-pairing",
+        "Syncthing HTTPS admin:": "syncthing-admin",
     }
-    for prefix, name in prefixes.items():
+    for prefix, name in url_prefixes.items():
         if not text.startswith(prefix):
             continue
         url = text[len(prefix) :].strip()
         if re.fullmatch(r"https://[^\s]+", url):
-            _LAST_REMOTE_ACCESS_URLS[name] = url
+            _LAST_REMOTE_ACCESS_DETAILS[name] = url
         return
+
+    device_id_prefix = "Syncthing device ID:"
+    if text.startswith(device_id_prefix):
+        device_id = text[len(device_id_prefix) :].strip()
+        if _SYNCTHING_DEVICE_ID_PATTERN.fullmatch(device_id):
+            _LAST_REMOTE_ACCESS_DETAILS["syncthing-device-id"] = device_id
 
 
 def _repository_cache_path(cache_dir: str, git_url: str, repo_name: str) -> str:
@@ -1245,7 +1256,7 @@ def remove_replaced_setup_cache(previous_host: Optional[str], current_host: str)
 
 
 def run_remote_setup(config: SetupConfig) -> int:
-    _LAST_REMOTE_ACCESS_URLS.clear()
+    _LAST_REMOTE_ACCESS_DETAILS.clear()
     is_local = config.host in {"localhost", "127.0.0.1", "::1"}
     
     if is_local and not config.dry_run and os.geteuid() != 0:

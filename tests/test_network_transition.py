@@ -194,6 +194,7 @@ class TestSavedHostMigration(unittest.TestCase):
 
         config = _config()
         runtime_config = _config()
+        access_details = {"syncthing-admin": "https://192.168.10.21:8446/"}
 
         def finish_runtime(runtime: SetupConfig) -> int:
             runtime.host = "192.168.10.21"
@@ -202,7 +203,15 @@ class TestSavedHostMigration(unittest.TestCase):
         with patch(
             "infra_tools._prepare_runtime_config_for_cli",
             return_value=runtime_config,
-        ), patch("infra_tools.run_remote_setup", side_effect=finish_runtime):
+        ), patch(
+            "infra_tools.run_remote_setup",
+            side_effect=finish_runtime,
+        ), patch(
+            "infra_tools.get_last_remote_access_details",
+            return_value=access_details,
+        ), patch(
+            "infra_tools.print_service_access_summary",
+        ) as print_access:
             result = _execute_patch_config(config)
 
         self.assertEqual(result, 0)
@@ -210,6 +219,10 @@ class TestSavedHostMigration(unittest.TestCase):
         self.assertFalse(config.activate_network)
         self.assertEqual(mock_save.call_args.args[0].host, "192.168.10.21")
         mock_remove.assert_called_once_with("192.168.10.20", "192.168.10.21")
+        print_access.assert_called_once_with(
+            config,
+            remote_access_details=access_details,
+        )
 
 
 if __name__ == "__main__":

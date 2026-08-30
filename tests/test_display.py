@@ -119,7 +119,7 @@ class TestRdpDisplay(unittest.TestCase):
         with redirect_stdout(output):
             print_service_access_summary(
                 config,
-                t3_https_urls={
+                remote_access_details={
                     "t3code": "https://192.168.0.41:8444/",
                     "t3code-pairing": "https://192.168.0.41:8445/",
                 },
@@ -231,7 +231,7 @@ class TestRdpDisplay(unittest.TestCase):
         with redirect_stdout(output):
             print_service_access_summary(
                 config,
-                t3_https_urls={"t3code": "https://agent-vm:8444/"},
+                remote_access_details={"t3code": "https://agent-vm:8444/"},
             )
 
         rendered = output.getvalue()
@@ -262,6 +262,62 @@ class TestRdpDisplay(unittest.TestCase):
             rendered,
         )
         self.assertIn("godot-web-publish GAME_NAME", rendered)
+
+    def test_access_summary_lists_syncthing_admin_and_device_id(self) -> None:
+        device_id = (
+            "BJ5ID3D-3BL2IM7-KPTHNB3-LI3SO5N-"
+            "KDCFYJN-Z4HKBUQ-AIANLCB-LJOJXAT"
+        )
+        config = SetupConfig(
+            host="fileserver",
+            username="admin",
+            system_type="server_lite",
+            enable_syncthing=True,
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_service_access_summary(
+                config,
+                remote_access_details={
+                    "syncthing-admin": "https://fileserver:8446/",
+                    "syncthing-device-id": device_id,
+                },
+            )
+
+        rendered = output.getvalue()
+        self.assertIn(
+            "Syncthing admin: https://fileserver:8446/ "
+            "— authenticated administration",
+            rendered,
+        )
+        self.assertIn(
+            f"Syncthing device ID: {device_id} — share with trusted peers",
+            rendered,
+        )
+
+    def test_access_summary_does_not_leak_stale_syncthing_details(self) -> None:
+        config = SetupConfig(
+            host="fileserver",
+            username="admin",
+            system_type="server_lite",
+            enable_syncthing=False,
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_service_access_summary(
+                config,
+                remote_access_details={
+                    "syncthing-admin": "https://fileserver:8446/",
+                    "syncthing-device-id": (
+                        "BJ5ID3D-3BL2IM7-KPTHNB3-LI3SO5N-"
+                        "KDCFYJN-Z4HKBUQ-AIANLCB-LJOJXAT"
+                    ),
+                },
+            )
+
+        self.assertNotIn("Syncthing", output.getvalue())
 
 
 if __name__ == "__main__":

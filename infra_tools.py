@@ -97,7 +97,7 @@ from lib.setup_common import (
     REMOTE_SCRIPT_PATH,
     _apply_hosted_proxmox_defaults,
     adopt_verified_network_host,
-    get_last_remote_access_urls,
+    get_last_remote_access_details,
     register_proxmox_setup_host,
     remove_replaced_setup_cache,
     run_remote_setup,
@@ -795,6 +795,8 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("Samba")
         if args.get("gogs"):
             features.append("Gogs")
+        if args.get("enable_syncthing"):
+            features.append("Syncthing")
 
         if features:
             print(f"Features: {', '.join(features)}")
@@ -952,6 +954,10 @@ def _execute_patch_config(config: SetupConfig) -> int:
     print("=" * 60)
     print(f"Host: {config.host}")
     print("System has been updated with new configuration")
+    print_service_access_summary(
+        config,
+        remote_access_details=get_last_remote_access_details(),
+    )
 
     if config.friendly_name or config.tags:
         print()
@@ -2008,7 +2014,10 @@ def run_setup_command(args: argparse.Namespace) -> int:
     print("=" * 60)
     print("Setup Complete!")
     print("=" * 60)
-    print_service_access_summary(config, t3_https_urls=get_last_remote_access_urls())
+    print_service_access_summary(
+        config,
+        remote_access_details=get_last_remote_access_details(),
+    )
     print("=" * 60)
     
     return 0

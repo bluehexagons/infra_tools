@@ -25,24 +25,49 @@ def _make_config(**kwargs) -> SetupConfig:
 class TestSetupMainTimingPersistence(unittest.TestCase):
     """Verify setup_main always saves last_start_time/end_time/success."""
 
-    def test_remote_setup_records_generated_https_access_urls(self):
+    def test_remote_setup_records_generated_access_details(self):
         from lib import setup_common
 
-        setup_common._LAST_REMOTE_ACCESS_URLS.clear()
+        device_id = (
+            "BJ5ID3D-3BL2IM7-KPTHNB3-LI3SO5N-"
+            "KDCFYJN-Z4HKBUQ-AIANLCB-LJOJXAT"
+        )
+        setup_common._LAST_REMOTE_ACCESS_DETAILS.clear()
         setup_common._record_remote_access_output(
             "  T3 Code HTTPS endpoint: https://192.0.2.10:8444/\n"
         )
         setup_common._record_remote_access_output(
             "  T3 Code pairing HTTPS endpoint: https://192.0.2.10:8445/\n"
         )
+        setup_common._record_remote_access_output(
+            f"  ✓ Syncthing device ID: {device_id}\n"
+        )
+        setup_common._record_remote_access_output(
+            "  ✓ Syncthing HTTPS admin: https://192.0.2.10:8446/\n"
+        )
 
         self.assertEqual(
-            setup_common.get_last_remote_access_urls(),
+            setup_common.get_last_remote_access_details(),
             {
                 "t3code": "https://192.0.2.10:8444/",
                 "t3code-pairing": "https://192.0.2.10:8445/",
+                "syncthing-admin": "https://192.0.2.10:8446/",
+                "syncthing-device-id": device_id,
             },
         )
+
+    def test_remote_access_capture_rejects_untrusted_values(self):
+        from lib import setup_common
+
+        setup_common._LAST_REMOTE_ACCESS_DETAILS.clear()
+        setup_common._record_remote_access_output(
+            "  ✓ Syncthing HTTPS admin: http://192.0.2.10:8384/\n"
+        )
+        setup_common._record_remote_access_output(
+            "  ✓ Syncthing device ID: not-a-device-id\n"
+        )
+
+        self.assertEqual(setup_common.get_last_remote_access_details(), {})
 
     def test_success_saves_timing_and_success_true(self):
         with tempfile.TemporaryDirectory():

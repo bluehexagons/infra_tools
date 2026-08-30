@@ -22,7 +22,8 @@ infra-tools setup server_lite fileserver admin --syncthing
 ```
 
 The credential command prompts without exposing the password in shell history.
-Setup prints the server device ID and an HTTPS admin URL. The default login
+The final `Access:` summary includes the server device ID and HTTPS admin URL.
+The same details are repeated after a successful `patch`. The default login
 username is `syncthing-admin`; choose a different workspace credential name
 with `--syncthing-admin USERNAME`:
 
@@ -112,14 +113,14 @@ and configured folder roots may not escape through symbolic links.
 
 ## Add people and folders
 
-1. Open the printed HTTPS URL and sign in.
+1. Open the **Syncthing admin** URL from the final access summary and sign in.
 2. Have each coworker install Syncthing and send you their device ID.
 3. In the server GUI, select **Add Remote Device**, enter the ID and a helpful
    name, and save it. Do not mark a coworker as an introducer.
 4. Select **Add Folder**, use a path below the configured Syncthing root, and
    select only the devices that should receive it.
-5. On each coworker's client, add the server device ID and accept the offered
-   folder at an appropriate local path.
+5. On each coworker's client, add the **Syncthing device ID** from the final
+   access summary and accept the offered folder at an appropriate local path.
 
 Coworkers need only the Syncthing client. They do not need the admin URL, its
 password, SSH access, a VPN, or access to one another's devices. A normal
