@@ -1130,7 +1130,8 @@ def add_setup_arguments(
                         action="append", nargs=5, metavar=("MOUNTPOINT", "IP", "CREDENTIALS", "SHARE", "SUBDIR"),
                         help="Mount SMB share: /mnt/path, ip_address, username or username:password, share_name, /share/subdirectory (can be used multiple times). Auto-enables --smbclient")
 
-    parser.add_argument(
+    syncthing_group = parser.add_mutually_exclusive_group()
+    syncthing_group.add_argument(
         "--syncthing",
         dest="enable_syncthing",
         action="store_true",
@@ -1138,6 +1139,15 @@ def add_setup_arguments(
         help=(
             "Install a managed Syncthing endpoint with a loopback-only admin UI; "
             "peer and folder declarations also enable it"
+        ),
+    )
+    syncthing_group.add_argument(
+        "--no-syncthing",
+        dest="disable_syncthing",
+        action="store_true",
+        help=(
+            "Stop and remove the managed Syncthing service while preserving "
+            "its identity, database, and synchronized files"
         ),
     )
     parser.add_argument(
@@ -1165,7 +1175,7 @@ def add_setup_arguments(
     parser.add_argument(
         "--syncthing-versioning",
         choices=SYNCTHING_VERSIONING_MODES,
-        default="staggered" if for_remote else None,
+        default=None,
         metavar="MODE",
         help=(
             "Version files replaced or deleted by peers: none, trashcan, or "

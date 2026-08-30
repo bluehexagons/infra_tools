@@ -97,6 +97,26 @@ class SyncthingConfigTest(unittest.TestCase):
         self.assertEqual(merged.syncthing_versioning, "staggered")
         self.assertEqual(merged.syncthing_devices, self._config().syncthing_devices)
 
+    def test_explicit_disable_clears_managed_declarations(self) -> None:
+        parser = create_setup_argument_parser("test")
+        args = parser.parse_args(["fileserver", "agent", "--no-syncthing"])
+        with patch("lib.system_utils.get_local_timezone", return_value="UTC"):
+            update = SetupConfig.from_args(args, "server_lite")
+
+        merged = merge_setup_configs(self._config(), update)
+
+        self.assertFalse(merged.enable_syncthing)
+        self.assertTrue(merged.disable_syncthing)
+        self.assertIsNone(merged.syncthing_devices)
+        self.assertIsNone(merged.syncthing_folders)
+        self.assertIn("--no-syncthing", merged.to_remote_args())
+        self.assertNotIn("disable_syncthing", merged.to_dict())
+
+        stale_data = merged.to_dict()
+        stale_data["disable_syncthing"] = True
+        restored = SetupConfig.from_dict("fileserver", "server_lite", stale_data)
+        self.assertFalse(restored.disable_syncthing)
+
     def test_folder_must_reference_a_declared_device(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown device.*bob-laptop"):
             self._config(

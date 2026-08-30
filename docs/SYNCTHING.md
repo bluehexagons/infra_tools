@@ -105,6 +105,18 @@ The device certificate and database live in
 server's device ID. The service uses the Debian Syncthing package and disables
 Syncthing's self-updater so normal APT maintenance remains authoritative.
 
+To stop sharing through the managed endpoint, run:
+
+```bash
+infra-tools patch fileserver --no-syncthing
+```
+
+This stops and removes `infra-syncthing.service` and clears its saved peer and
+folder declarations. It deliberately leaves the Syncthing package, synchronized
+folder contents, and `/var/lib/infra-tools/syncthing` in place. Re-enabling the
+endpoint therefore retains the same server device ID. Delete retained data only
+as a separate, deliberate cleanup after verifying that it is no longer needed.
+
 ## Boundaries
 
 - Device IDs grant folder-level Syncthing trust, not Unix account access or
@@ -115,5 +127,7 @@ Syncthing's self-updater so normal APT maintenance remains authoritative.
   or application state that requires transactional consistency.
 - A compromised authorized device can still replace or delete shared data.
   Keep versioning enabled on the hub and maintain an independent backup.
+- A second Syncthing instance using TCP/QUIC 22000 or GUI port 8384 will conflict
+  with the managed service. Stop or reconfigure the other instance first.
 - This capability is rejected for `server_proxmox`, the root account, and OCI
   targets. Run the hub in a normal Debian VM, LXC, or physical host instead.

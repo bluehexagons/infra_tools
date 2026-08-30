@@ -107,6 +107,7 @@ def validate_syncthing_settings(config: Any) -> None:
     """Validate managed Syncthing peers, folders, and service boundaries."""
 
     enabled = bool(getattr(config, "enable_syncthing", False))
+    disabled = bool(getattr(config, "disable_syncthing", False))
     device_specs = _nested_string_specs(
         getattr(config, "syncthing_devices", None), "--syncthing-device"
     )
@@ -115,6 +116,12 @@ def validate_syncthing_settings(config: Any) -> None:
     )
     versioning = getattr(config, "syncthing_versioning", "staggered")
 
+    if disabled:
+        if enabled or device_specs or folder_specs or versioning not in {None, "staggered"}:
+            raise ValueError(
+                "--no-syncthing cannot be combined with Syncthing setup options"
+            )
+        return
     if versioning is None and not enabled:
         return
     if versioning not in {"none", "trashcan", "staggered"}:

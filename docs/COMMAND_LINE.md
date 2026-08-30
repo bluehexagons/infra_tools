@@ -1039,6 +1039,7 @@ health.
 | `--smbclient` | Install SMB/CIFS client |
 | `--mount-smb MOUNTPOINT IP CREDENTIALS SHARE SUBDIR` | Mount an SMB share persistently; `SUBDIR` may be `/` |
 | `--syncthing` | Install a managed, non-root Syncthing endpoint with a loopback-only admin UI |
+| `--no-syncthing` | Stop and remove the managed service while preserving its identity, database, and synchronized files |
 | `--syncthing-device NAME DEVICE_ID` | Declare a trusted peer by local name and full device ID; repeatable |
 | `--syncthing-folder MODE ID PATH DEVICES` | Declare a project folder and comma-separated peer names; modes are `send-receive`, `send-only`, and `receive-only` |
 | `--syncthing-versioning MODE` | Set managed folder versioning to `staggered` (default), `trashcan`, or `none` |

@@ -384,13 +384,38 @@ def _prepare_folder_paths(config: SetupConfig, group_name: str) -> None:
 def setup_syncthing(config: SetupConfig, **_kwargs: Any) -> None:
     """Install and reconcile one unprivileged, relay-capable Syncthing endpoint."""
 
-    if not config.enable_syncthing:
+    if not config.enable_syncthing and not config.disable_syncthing:
         return
     if not can_manage_system_services(config.machine_type):
         print("  ✓ Skipping Syncthing (persistent services unavailable)")
         return
     if is_dry_run():
         print("  [DRY-RUN] Skipping Syncthing service configuration")
+        return
+    if config.disable_syncthing:
+        unit_exists = os.path.lexists(SYNCTHING_SERVICE_FILE)
+        if unit_exists and (
+            os.path.islink(SYNCTHING_SERVICE_FILE)
+            or not os.path.isfile(SYNCTHING_SERVICE_FILE)
+        ):
+            raise RuntimeError(
+                f"Refusing to remove unsafe Syncthing unit path: {SYNCTHING_SERVICE_FILE}"
+            )
+        run(
+            ["systemctl", "disable", "--now", f"{SYNCTHING_SERVICE_NAME}.service"],
+            check=False,
+        )
+        active = run(
+            ["systemctl", "is-active", "--quiet", f"{SYNCTHING_SERVICE_NAME}.service"],
+            check=False,
+        )
+        if active.returncode == 0:
+            raise RuntimeError("Managed Syncthing service did not stop")
+        if unit_exists:
+            os.unlink(SYNCTHING_SERVICE_FILE)
+        run(["systemctl", "daemon-reload"])
+        print("  ✓ Managed Syncthing service removed")
+        print(f"  ℹ Preserved Syncthing identity and database in {SYNCTHING_HOME}")
         return
 
     if not is_package_installed("syncthing"):

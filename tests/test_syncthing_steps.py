@@ -184,6 +184,68 @@ class SyncthingCompositionTest(unittest.TestCase):
                 ]
                 self.assertIn("Configuring managed Syncthing endpoint", step_names)
 
+    def test_disable_composition_removes_service_and_preserves_state(self) -> None:
+        config = _config(
+            enable_syncthing=False,
+            disable_syncthing=True,
+            syncthing_devices=None,
+            syncthing_folders=None,
+        )
+        step_names = [
+            name for name, _step in get_steps_for_system_type(config)
+        ]
+        self.assertIn("Removing managed Syncthing endpoint", step_names)
+
+        with (
+            patch("sync.syncthing_steps.can_manage_system_services", return_value=True),
+            patch("sync.syncthing_steps.is_dry_run", return_value=False),
+            patch("sync.syncthing_steps.os.path.lexists", return_value=True),
+            patch("sync.syncthing_steps.os.path.islink", return_value=False),
+            patch("sync.syncthing_steps.os.path.isfile", return_value=True),
+            patch("sync.syncthing_steps.os.unlink") as unlink,
+            patch("sync.syncthing_steps.run") as run_command,
+        ):
+            run_command.return_value = subprocess.CompletedProcess(
+                args=[], returncode=3, stdout="inactive\n", stderr=""
+            )
+            setup_syncthing(config)
+
+        unlink.assert_called_once()
+        commands = [call.args[0] for call in run_command.call_args_list]
+        self.assertIn(
+            ["systemctl", "disable", "--now", "infra-syncthing.service"],
+            commands,
+        )
+        self.assertIn(
+            ["systemctl", "is-active", "--quiet", "infra-syncthing.service"],
+            commands,
+        )
+        self.assertIn(["systemctl", "daemon-reload"], commands)
+
+    def test_disable_refuses_to_remove_unit_while_service_is_active(self) -> None:
+        config = _config(
+            enable_syncthing=False,
+            disable_syncthing=True,
+            syncthing_devices=None,
+            syncthing_folders=None,
+        )
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="active\n", stderr=""
+        )
+        with (
+            patch("sync.syncthing_steps.can_manage_system_services", return_value=True),
+            patch("sync.syncthing_steps.is_dry_run", return_value=False),
+            patch("sync.syncthing_steps.os.path.lexists", return_value=True),
+            patch("sync.syncthing_steps.os.path.islink", return_value=False),
+            patch("sync.syncthing_steps.os.path.isfile", return_value=True),
+            patch("sync.syncthing_steps.os.unlink") as unlink,
+            patch("sync.syncthing_steps.run", return_value=completed),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "did not stop"):
+                setup_syncthing(config)
+
+        unlink.assert_not_called()
+
     def test_setup_reconciles_through_the_validated_api(self) -> None:
         completed = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=LOCAL_DEVICE_ID + "\n", stderr=""

@@ -225,8 +225,22 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
             with patch('lib.cache.get_setup_cache_dir', return_value=cache_dir), patch('lib.cache.get_history_dir', return_value=history_dir):
                 config = self._make_config(
                     username='olduser',
+                    enable_syncthing=True,
+                    syncthing_devices=[[
+                        'alice-laptop',
+                        'S7UKX27-GI7ZTXS-GC6RKUA-7AJGZ44-C6NAYEB-'
+                        'HSKTJQK-KJHU2NO-CWV7EQW',
+                    ]],
                     agent_workspace='/home/olduser/repos',
                     sync_specs=[['/home/olduser/data', '/srv/backup', 'daily']],
+                    syncthing_folders=[
+                        [
+                            'send-receive',
+                            'shared-work',
+                            '/home/olduser/shared-work',
+                            'alice-laptop',
+                        ]
+                    ],
                     notify_specs=[['webhook', '/home/olduser/secret-looking-value']],
                     gogs=['git.example.com:3000', '/home/olduser/gogs'],
                     friendly_name='My Server',
@@ -246,6 +260,10 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
                 self.assertEqual(loaded.username, 'newuser')
                 self.assertEqual(loaded.agent_workspace, '/home/newuser/repos')
                 self.assertEqual(loaded.sync_specs[0][0], '/home/newuser/data')
+                self.assertEqual(
+                    loaded.syncthing_folders[0][2],
+                    '/home/newuser/shared-work',
+                )
                 self.assertEqual(loaded.gogs[1], '/home/newuser/gogs')
                 self.assertEqual(
                     loaded.notify_specs[0][1],

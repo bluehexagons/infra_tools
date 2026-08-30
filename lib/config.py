@@ -342,6 +342,7 @@ class SetupConfig:
     enable_smbclient: bool = False
     smb_mounts: Optional[NestedStrList] = None
     enable_syncthing: bool = False
+    disable_syncthing: bool = False
     syncthing_devices: Optional[NestedStrList] = None
     syncthing_folders: Optional[NestedStrList] = None
     syncthing_versioning: Optional[str] = "staggered"
@@ -960,7 +961,9 @@ class SetupConfig:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
                 args.append(f"--mount-smb {escaped_spec}")
 
-        if self.enable_syncthing:
+        if self.disable_syncthing:
+            args.append("--no-syncthing")
+        elif self.enable_syncthing:
             args.append("--syncthing")
             if self.syncthing_versioning != "staggered":
                 args.append(
@@ -1475,7 +1478,9 @@ class SetupConfig:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_mount_spec)
                 cmd_parts.append(f"--mount-smb {escaped_spec}")
 
-        if self.enable_syncthing:
+        if self.disable_syncthing:
+            cmd_parts.append("--no-syncthing")
+        elif self.enable_syncthing:
             cmd_parts.append("--syncthing")
             if self.syncthing_versioning != "staggered":
                 cmd_parts.append(
@@ -1565,6 +1570,7 @@ class SetupConfig:
             'device_pairing_auth_password',
             'device_pairing_payload',
             'swap_initialize',
+            'disable_syncthing',
         ):
             data.pop(transient_field, None)
         for legacy_field in (
@@ -1600,6 +1606,7 @@ class SetupConfig:
         # sensitive live handoff merely because a saved configuration is
         # loaded for deploy, patch, or reconstruction.
         data.pop('activate_network', None)
+        data.pop('disable_syncthing', None)
         # Ignore removed feature fields when loading older saved setup state so
         # upgrades remain usable.
         for removed_field in (
@@ -1755,7 +1762,10 @@ class SetupConfig:
         enable_syncthing = getattr(args, 'enable_syncthing', None)
         if enable_syncthing is not None and not isinstance(enable_syncthing, bool):
             enable_syncthing = None
-        if enable_syncthing is None and (syncthing_devices or syncthing_folders):
+        disable_syncthing = bool(getattr(args, 'disable_syncthing', False))
+        if disable_syncthing:
+            enable_syncthing = False
+        elif enable_syncthing is None and (syncthing_devices or syncthing_folders):
             enable_syncthing = True
         syncthing_versioning = getattr(args, 'syncthing_versioning', None)
         if syncthing_versioning is not None and not isinstance(
@@ -2139,6 +2149,7 @@ class SetupConfig:
             enable_smbclient=enable_smbclient,
             smb_mounts=smb_mounts,
             enable_syncthing=enable_syncthing,
+            disable_syncthing=disable_syncthing,
             syncthing_devices=syncthing_devices,
             syncthing_folders=syncthing_folders,
             syncthing_versioning=syncthing_versioning,

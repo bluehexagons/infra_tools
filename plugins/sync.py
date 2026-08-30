@@ -49,11 +49,16 @@ def extend_syncthing_steps(
 ) -> None:
     """Append managed Syncthing setup when requested."""
 
-    if not config.enable_syncthing:
+    if not config.enable_syncthing and not config.disable_syncthing:
         return
     from sync.syncthing_steps import setup_syncthing
 
-    steps.append(("Configuring managed Syncthing endpoint", setup_syncthing))
+    action = (
+        "Removing managed Syncthing endpoint"
+        if config.disable_syncthing
+        else "Configuring managed Syncthing endpoint"
+    )
+    steps.append((action, setup_syncthing))
 
 
 def get_validator_functions() -> Mapping[str, object]:

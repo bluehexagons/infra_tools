@@ -18,6 +18,14 @@ class TestUserRenameHelpers(unittest.TestCase):
             "username": "olduser",
             "agent_workspace": "/home/olduser/repos",
             "sync_specs": [["/home/olduser/data", "/srv/backup", "daily"]],
+            "syncthing_folders": [
+                [
+                    "send-receive",
+                    "shared-work",
+                    "/home/olduser/shared-work",
+                    "alice-laptop",
+                ]
+            ],
             "share_credentials": [["olduser", "secret"]],
             "notify_specs": [["webhook", "/home/olduser/should-not-change"]],
             "gogs": ["git.example.com:3000", "/home/olduser/gogs"],
@@ -34,6 +42,10 @@ class TestUserRenameHelpers(unittest.TestCase):
         self.assertEqual(updated["username"], "newuser")
         self.assertEqual(updated["agent_workspace"], "/home/newuser/repos")
         self.assertEqual(updated["sync_specs"][0][0], "/home/newuser/data")
+        self.assertEqual(
+            updated["syncthing_folders"][0][2],
+            "/home/newuser/shared-work",
+        )
         self.assertEqual(updated["share_credentials"][0][0], "olduser")
         self.assertEqual(updated["notify_specs"][0][1], "/home/olduser/should-not-change")
         self.assertEqual(updated["gogs"][1], "/home/newuser/gogs")
@@ -54,6 +66,20 @@ class TestUserRenameHelpers(unittest.TestCase):
 
         self.assertEqual(managed_paths, [managed])
         self.assertEqual(unmanaged_paths, [unmanaged])
+
+    def test_syncthing_service_is_a_managed_unit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            managed = os.path.join(tmpdir, "infra-syncthing.service")
+            with open(managed, "w", encoding="utf-8") as file_obj:
+                file_obj.write("User=olduser\n")
+            with patch.object(user_rename, "SYSTEMD_DIR", tmpdir):
+                managed_paths, unmanaged_paths = user_rename._managed_unit_files(
+                    "olduser",
+                    "/home/olduser",
+                )
+
+        self.assertEqual(managed_paths, [managed])
+        self.assertEqual(unmanaged_paths, [])
 
     def test_managed_unit_rewrite_protects_old_username_in_new_home(self):
         with tempfile.TemporaryDirectory() as tmpdir:
