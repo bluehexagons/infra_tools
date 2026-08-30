@@ -1353,11 +1353,31 @@ map $status $infra_tools_device_pairing_auth_failure {{
     401 1;
 }}
 
+map $realip_remote_addr $infra_tools_device_pairing_gateway_request {{
+    default 0;
+    127.0.0.1 1;
+    ::1 1;
+}}
+
+map "$infra_tools_device_pairing_gateway_request:$http_x_forwarded_proto" $infra_tools_device_pairing_public_proto {{
+    default $scheme;
+    "1:https" https;
+}}
+
+map "$infra_tools_device_pairing_gateway_request:$http_x_forwarded_host" $infra_tools_device_pairing_public_host {{
+    default $host;
+    ~^1:(?<infra_tools_device_pairing_forwarded_host>.+)$ $infra_tools_device_pairing_forwarded_host;
+}}
+
 log_format infra_tools_device_pairing_auth '$remote_addr [$time_local] infra-tools-auth-failure';
 
 server {{
     listen {_nginx_listen_address(host, config.device_pairing_port)};
     server_name _;
+    set_real_ip_from 127.0.0.1;
+    set_real_ip_from ::1;
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
     access_log {DEVICE_PAIRING_AUTH_FAILURE_LOG} infra_tools_device_pairing_auth
         if=$infra_tools_device_pairing_auth_failure;
 
@@ -1371,8 +1391,8 @@ server {{
         proxy_pass http://unix:{DEVICE_PAIRING_SOCKET}:/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $infra_tools_device_pairing_public_host;
+        proxy_set_header X-Forwarded-Proto $infra_tools_device_pairing_public_proto;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_connect_timeout 5s;
         proxy_read_timeout 35s;
@@ -1616,7 +1636,9 @@ def _configure_t3_https(
     return urls
 
 
-def _set_pairing_https_port(https_port: int) -> None:
+def _set_pairing_t3_https_port(https_port: int) -> None:
+    """Set the public HTTPS port used by links issued from the pairing portal."""
+
     if os.path.islink(DEVICE_PAIRING_PROVIDERS_FILE):
         raise RuntimeError(
             f"Refusing symlinked device-pairing provider configuration: "
@@ -1736,7 +1758,7 @@ def install_t3code_web(config: SetupConfig) -> None:
                 https_urls[0][0],
             )
             os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
-            _set_pairing_https_port(https_urls[1][1])
+            _set_pairing_t3_https_port(https_urls[0][1])
     else:
         _remove_connect_restart_units(os.path.join(home, ".t3"))
         _remove_device_pairing()

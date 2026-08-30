@@ -29,6 +29,7 @@ from common.t3code_steps import (
     _configure_device_pairing,
     _configure_firewall,
     _write_passthrough_wrapper,
+    install_t3code_web,
 )
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
@@ -331,7 +332,7 @@ class PairingBrokerTest(unittest.TestCase):
 
     def test_https_pairing_page_uses_the_t3_forward_port(self) -> None:
         headers = Message()
-        headers["X-Forwarded-Host"] = "agent-vm:8444"
+        headers["X-Forwarded-Host"] = "agent-vm:8445"
         headers["X-Forwarded-Proto"] = "https"
         handler = SimpleNamespace(headers=headers)
         self.assertEqual(
@@ -789,6 +790,28 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
                 "/run/infra-tools-device-pairing/http.sock:/",
                 nginx,
             )
+            self.assertIn(
+                "map $realip_remote_addr "
+                "$infra_tools_device_pairing_gateway_request",
+                nginx,
+            )
+            self.assertIn('"1:https" https;', nginx)
+            self.assertIn(
+                "~^1:(?<infra_tools_device_pairing_forwarded_host>.+)$",
+                nginx,
+            )
+            self.assertIn("set_real_ip_from 127.0.0.1", nginx)
+            self.assertIn("real_ip_header X-Forwarded-For", nginx)
+            self.assertIn(
+                "proxy_set_header X-Forwarded-Host "
+                "$infra_tools_device_pairing_public_host",
+                nginx,
+            )
+            self.assertIn(
+                "proxy_set_header X-Forwarded-Proto "
+                "$infra_tools_device_pairing_public_proto",
+                nginx,
+            )
             with open(
                 os.path.join(config_dir, "providers.json"), encoding="utf-8"
             ) as file_obj:
@@ -813,6 +836,54 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
                 "device-pairing",
                 "/var/log/nginx/infra-tools-device-pairing-auth-failures.log",
             )
+
+    def test_https_pairing_uses_the_primary_t3_forward_port(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = os.path.join(temporary, "home")
+            workspace = os.path.join(home, "repos")
+            os.makedirs(workspace)
+            admin_pair_script = os.path.join(temporary, "t3code_admin_pair.py")
+            with open(admin_pair_script, "w", encoding="utf-8") as file_obj:
+                file_obj.write("# test helper\n")
+            account = SimpleNamespace(
+                pw_dir=home,
+                pw_uid=os.getuid(),
+                pw_gid=os.getgid(),
+            )
+            https_urls = [
+                ("https://agent-vm:8444/", 8444),
+                ("https://agent-vm:8445/", 8445),
+            ]
+
+            with (
+                patch("common.t3code_steps.is_dry_run", return_value=False),
+                patch("common.t3code_steps.pwd.getpwnam", return_value=account),
+                patch("common.t3code_steps.os.chown"),
+                patch("common.t3code_steps._configure_firewall"),
+                patch("common.t3code_steps._install_t3_service"),
+                patch("common.t3code_steps._ensure_t3_agent_skill"),
+                patch("common.t3code_steps._configure_device_pairing"),
+                patch("common.t3code_steps._configure_connect_restart_units"),
+                patch(
+                    "common.t3code_steps._configure_t3_https",
+                    return_value=https_urls,
+                ),
+                patch(
+                    "common.t3code_steps._set_pairing_t3_https_port"
+                ) as set_https_port,
+                patch(
+                    "common.t3code_steps.T3_ADMIN_PAIR_SCRIPT",
+                    admin_pair_script,
+                ),
+            ):
+                install_t3code_web(
+                    _config(
+                        agent_workspace=workspace,
+                        web_interface_host="0.0.0.0",
+                    )
+                )
+
+            set_https_port.assert_called_once_with(8444)
 
     def test_firewall_includes_pairing_port(self) -> None:
         config = _config()

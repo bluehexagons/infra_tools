@@ -9,10 +9,10 @@ This is deliberately separate from the service being paired:
 
 ```text
 browser or app
-    -> Nginx Basic Auth portal on port 3774
+    -> managed HTTPS gateway and Nginx Basic Auth portal
     -> local infra-tools pairing broker
     -> provider's supported pairing command
-    -> one-time administrative T3 link for port 3773
+    -> one-time administrative link on the primary T3 HTTPS origin
     -> provider-native administrative device session
 ```
 
@@ -88,8 +88,8 @@ Enter the configured Basic Auth username and password, then choose one of the
 portal actions:
 
 - **Pair this browser** creates a one-time credential, then shows
-  a button that opens T3's pairing page. The explicit second click avoids
-  browser-dependent cross-port redirect behavior.
+  a button that opens T3's pairing page on the primary T3 HTTPS endpoint. The
+  explicit second click avoids browser-dependent cross-port redirect behavior.
 - **Pair another T3 Code client** displays the short-lived URL so it
   can be copied into a desktop or mobile T3 Code client.
 
@@ -196,12 +196,12 @@ ssh -N \
   agent@192.168.0.41
 ```
 
-A separately managed trusted HTTPS endpoint is another option, but the current
-portal constructs T3 links from the request hostname and configured T3 port;
-the proxy must preserve that externally reachable mapping. The managed HTTPS
-gateway preserves the external host, pairing port, and WebSocket upgrade
-headers, so an HTTPS page such as `app.t3.codes` can connect without mixed
-content.
+A separately managed trusted HTTPS endpoint is another option, but the portal
+constructs T3 links from the request hostname and configured primary T3 port;
+the proxy must preserve that externally reachable mapping. The managed pairing
+listener trusts forwarded host, protocol, and client-address metadata only from
+the loopback HTTPS gateway, then creates links on the primary T3 HTTPS origin.
+Direct compatibility requests continue to produce direct HTTP T3 links.
 
 The managed HTTPS forwards preserve the external host and WebSocket upgrade
 headers, so the hosted T3 client can connect to the HTTPS T3 URL without a
