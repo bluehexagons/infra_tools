@@ -255,6 +255,50 @@ class TestValidateGogsSettings(unittest.TestCase):
             )
         )
 
+    def test_hostless_gogs_rejects_global_generic_source(self):
+        with self.assertRaisesRegex(ValueError, "Hostless Gogs access sources"):
+            validate_gogs_settings(
+                self._make_config(
+                    gogs=[':3000', '/srv/gogs'],
+                    access_sources=['0.0.0.0/0'],
+                )
+            )
+
+    def test_hostless_gogs_ignores_generic_ipv6_sources(self):
+        validate_gogs_settings(
+            self._make_config(
+                gogs=[':3000', '/srv/gogs'],
+                access_sources=['fc00::/7'],
+            )
+        )
+
+    def test_hostless_cloudflare_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "cannot use --cloudflare"):
+            validate_gogs_settings(
+                self._make_config(
+                    gogs=[':3000', '/srv/gogs'],
+                    enable_cloudflare=True,
+                )
+            )
+
+    def test_hostname_cloudflare_does_not_apply_generic_source_to_gogs(self):
+        validate_gogs_settings(
+            self._make_config(
+                gogs=['git.example.test:3000', '/srv/gogs'],
+                enable_cloudflare=True,
+                access_sources=['0.0.0.0/0'],
+            )
+        )
+
+    def test_ip_address_cannot_be_used_as_gogs_hostname(self):
+        with self.assertRaisesRegex(ValueError, "requires a DNS hostname"):
+            validate_gogs_settings(
+                self._make_config(
+                    gogs=['192.168.0.51:3000', '/srv/gogs'],
+                    enable_ssl=True,
+                )
+            )
+
     def test_port_80_is_reserved_for_nginx_ingress(self):
         with self.assertRaisesRegex(ValueError, "port 80 is reserved"):
             validate_gogs_settings(
@@ -262,6 +306,26 @@ class TestValidateGogsSettings(unittest.TestCase):
                     gogs=[':80', '/srv/gogs'],
                     gogs_sources=['192.168.0.0/24'],
                     enable_ssl=True,
+                )
+            )
+
+    def test_hostless_plaintext_port_80_is_allowed_without_web_server(self):
+        validate_gogs_settings(
+            self._make_config(
+                system_type="server_lite",
+                include_web_server=False,
+                gogs=[':80', '/srv/gogs'],
+                gogs_sources=['192.168.0.0/24'],
+            )
+        )
+
+    def test_hostname_ssl_rejects_source_restricted_acme_port(self):
+        with self.assertRaisesRegex(ValueError, "public port 80"):
+            validate_gogs_settings(
+                self._make_config(
+                    gogs=['git.example.test:3000', '/srv/gogs'],
+                    enable_ssl=True,
+                    access_sources=['192.168.0.0/24'],
                 )
             )
 

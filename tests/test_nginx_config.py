@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.nginx_config import (
+    certificate_is_usable,
     get_ssl_cert_path,
     _make_cache_maps,
     _make_proxy_location,
@@ -49,28 +50,77 @@ class TestGetSslCertPath(unittest.TestCase):
                 return True
             return real_exists(path)
 
-        with patch('os.path.exists', side_effect=fake_exists):
+        with (
+            patch('os.path.exists', side_effect=fake_exists),
+            patch('lib.nginx_config.certificate_is_usable', return_value=True),
+        ):
             cert, key = get_ssl_cert_path(domain)
 
         self.assertEqual(cert, le_cert)
         self.assertEqual(key, le_key)
 
+    @patch("lib.nginx_config.certificate_is_usable", return_value=True)
     @patch("lib.nginx_config.run")
     @patch("lib.nginx_config.os.path.exists", return_value=False)
-    def test_self_signed_ip_certificate_includes_ip_san(self, _exists, mock_run):
+    def test_self_signed_ip_certificate_includes_ip_san(
+        self, _exists, mock_run, _usable
+    ):
         generate_self_signed_cert("192.168.0.51")
 
         command = mock_run.call_args_list[-1].args[0]
         self.assertIn("-subj /CN=192.168.0.51", command)
         self.assertIn("-addext subjectAltName=IP:192.168.0.51", command)
 
+    @patch("lib.nginx_config.certificate_is_usable", return_value=True)
     @patch("lib.nginx_config.run")
     @patch("lib.nginx_config.os.path.exists", return_value=False)
-    def test_self_signed_domain_certificate_includes_dns_san(self, _exists, mock_run):
+    def test_self_signed_domain_certificate_includes_dns_san(
+        self, _exists, mock_run, _usable
+    ):
         generate_self_signed_cert("git.example.test")
 
         command = mock_run.call_args_list[-1].args[0]
         self.assertIn("-addext subjectAltName=DNS:git.example.test", command)
+
+    @patch("lib.nginx_config.certificate_is_usable", return_value=True)
+    @patch("lib.nginx_config.run")
+    @patch("lib.nginx_config.os.path.exists", return_value=False)
+    def test_self_signed_certificate_includes_additional_ip_san(
+        self, _exists, mock_run, _usable
+    ):
+        generate_self_signed_cert("192.168.0.51", ["127.0.0.1"])
+
+        command = mock_run.call_args_list[-1].args[0]
+        self.assertIn(
+            "-addext subjectAltName=IP:192.168.0.51,IP:127.0.0.1",
+            command,
+        )
+
+    @patch("lib.nginx_config.certificate_is_usable", side_effect=[False, True])
+    @patch("lib.nginx_config.run")
+    @patch("lib.nginx_config.os.path.exists", return_value=True)
+    def test_expiring_self_signed_certificate_is_replaced(
+        self, _exists, mock_run, _usable
+    ):
+        generate_self_signed_cert("192.168.0.51")
+
+        self.assertTrue(any("openssl req -x509" in call.args[0] for call in mock_run.call_args_list))
+
+
+class TestCertificateIsUsable(unittest.TestCase):
+    @patch("lib.nginx_config.run")
+    def test_ip_identity_uses_openssl_checkip(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout="digest\n"),
+            MagicMock(returncode=0, stdout="digest\n"),
+        ]
+
+        self.assertTrue(
+            certificate_is_usable("cert.pem", "key.pem", ["192.168.0.51"])
+        )
+        self.assertIn("-checkip 192.168.0.51", mock_run.call_args_list[1].args[0])
 
 
 class TestMakeCacheMaps(unittest.TestCase):

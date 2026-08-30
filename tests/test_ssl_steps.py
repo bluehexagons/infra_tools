@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from web.ssl_steps import obtain_letsencrypt_certificate
+from web.ssl_steps import obtain_letsencrypt_certificate, setup_certificate_renewal
 
 
 class TestObtainLetsEncryptCertificate(unittest.TestCase):
@@ -32,6 +33,24 @@ class TestObtainLetsEncryptCertificate(unittest.TestCase):
         mock_run.return_value = SimpleNamespace(returncode=1)
         self.assertFalse(obtain_letsencrypt_certificate(["example.com"], cert_name="example.com"))
         mock_run.assert_called()
+
+
+class TestCertificateRenewal(unittest.TestCase):
+    def test_installs_nginx_reload_deploy_hook(self):
+        with tempfile.TemporaryDirectory() as directory:
+            hook = os.path.join(directory, "reload-nginx")
+            completed = SimpleNamespace(returncode=0)
+            with (
+                patch("web.ssl_steps.CERTBOT_NGINX_DEPLOY_HOOK", hook),
+                patch("web.ssl_steps.run", return_value=completed),
+            ):
+                setup_certificate_renewal()
+
+            with open(hook, encoding="utf-8") as source:
+                content = source.read()
+            self.assertIn("/usr/sbin/nginx -t", content)
+            self.assertIn("systemctl reload nginx", content)
+            self.assertEqual(os.stat(hook).st_mode & 0o777, 0o755)
 
 
 if __name__ == "__main__":

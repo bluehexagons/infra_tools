@@ -183,6 +183,41 @@ class TestRdpDisplay(unittest.TestCase):
         self.assertIn("Gogs web: https://git.example.test/", rendered)
         self.assertNotIn("git.example.test:3000", rendered)
 
+    def test_ipv6_only_generic_source_does_not_publish_ipv4_only_gogs(self) -> None:
+        config = SetupConfig(
+            host="192.168.0.51",
+            username="gitadmin",
+            system_type="server_web",
+            gogs=[":3000", "/srv/gogs"],
+            access_sources=["fc00::/7"],
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_service_access_summary(config)
+
+        self.assertIn("Gogs web: http://127.0.0.1:3000/", output.getvalue())
+
+    def test_hostless_antistatic_remains_http_when_ssl_is_for_gogs(self) -> None:
+        config = SetupConfig(
+            host="192.168.0.51",
+            username="gitadmin",
+            system_type="server_web",
+            gogs=[":3000", "/srv/gogs"],
+            gogs_sources=["192.168.0.0/24"],
+            antistatic_server=":8080",
+            antistatic_db=":8081",
+            enable_ssl=True,
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_service_access_summary(config)
+
+        rendered = output.getvalue()
+        self.assertIn("Antistatic lobby: http://192.168.0.51:8080/", rendered)
+        self.assertIn("Antistatic DB: http://192.168.0.51:8081/", rendered)
+
     def test_access_summary_marks_loopback_web_interfaces(self) -> None:
         config = SetupConfig(
             host="agent-vm",

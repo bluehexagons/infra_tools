@@ -390,6 +390,7 @@ class TestGenerateGogsConfig(unittest.TestCase):
             content,
         )
         self.assertIn("PROVIDER_CONFIG = /srv/gogs/data/sessions", content)
+        self.assertIn("COOKIE_SECURE = true", content)
         self.assertIn("BRAND_NAME = Gogs", content)
         self.assertNotIn("APP_NAME =", content)
         self.assertIn("[log]\nROOT_PATH = /srv/gogs/log", content)
@@ -413,6 +414,7 @@ class TestGenerateGogsConfig(unittest.TestCase):
 
         self.assertIn("HTTP_ADDR = 127.0.0.1", content)
         self.assertIn("EXTERNAL_URL = http://127.0.0.1:3000/", content)
+        self.assertIn("COOKIE_SECURE = false", content)
 
     def test_hostless_private_source_app_ini_binds_for_firewalled_access(self):
         config = SetupConfig(
@@ -459,6 +461,30 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertIn("EXTERNAL_URL = https://10.0.0.41:3000/", content)
         self.assertIn("HTTP_ADDR = 127.0.0.1", content)
         self.assertIn("HTTP_PORT = 13000", content)
+        self.assertIn("COOKIE_SECURE = true", content)
+
+    def test_generic_ipv6_source_does_not_expose_ipv4_gogs_listener(self):
+        config = SetupConfig(
+            host="10.0.0.41",
+            username="admin",
+            system_type="server_web",
+            gogs=[":3000", "/srv/gogs"],
+            access_sources=["fc00::/7"],
+        )
+        with patch(
+            "web.gogs_steps._load_or_create_gogs_secret_key",
+            return_value="secret",
+        ):
+            content = gogs_steps.generate_gogs_app_ini(
+                config,
+                git_home="/home/git",
+                data_path="/srv/gogs",
+                domain="",
+                port=3000,
+            )
+
+        self.assertIn("HTTP_ADDR = 127.0.0.1", content)
+        self.assertIn("EXTERNAL_URL = http://127.0.0.1:3000/", content)
 
     def test_generate_service_uses_explicit_config_path(self):
         content = gogs_steps.generate_gogs_service("/srv/gogs/custom/conf/app.ini")
@@ -584,6 +610,77 @@ class TestGenerateGogsConfig(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "did not become HTTP-ready"):
             gogs_steps._wait_for_gogs_ready(3000)
+
+    @patch("web.gogs_steps.get_ssl_cert_path", return_value=("/cert.pem", "/key.pem"))
+    @patch("web.gogs_steps.run")
+    def test_frontend_health_checks_requested_tls_port(self, mock_run, _cert_path):
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        config = SetupConfig(
+            host="192.168.0.51",
+            username="admin",
+            system_type="server_web",
+            gogs=[":3000"],
+            gogs_sources=["192.168.0.0/24"],
+            enable_ssl=True,
+        )
+
+        gogs_steps._wait_for_gogs_frontend(config, "", 3000)
+
+        command = mock_run.call_args.args[0]
+        self.assertIn("--cacert /cert.pem", command)
+        self.assertIn("--resolve 192.168.0.51:3000:127.0.0.1", command)
+        self.assertIn("https://192.168.0.51:3000/", command)
+
+    @patch("web.gogs_steps.get_ssl_cert_path", return_value=("/cert.pem", "/key.pem"))
+    @patch("web.gogs_steps.run")
+    def test_loopback_frontend_health_uses_certificate_loopback_san(
+        self, mock_run, _cert_path
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        config = SetupConfig(
+            host="192.168.0.51",
+            username="admin",
+            system_type="server_web",
+            gogs=[":3000"],
+            enable_ssl=True,
+        )
+
+        gogs_steps._wait_for_gogs_frontend(config, "", 3000)
+
+        command = mock_run.call_args.args[0]
+        self.assertIn("--resolve 127.0.0.1:3000:127.0.0.1", command)
+        self.assertIn("https://127.0.0.1:3000/", command)
+
+    @patch("web.gogs_steps.run")
+    def test_cloudflare_frontend_health_checks_private_origin(self, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        config = SetupConfig(
+            host="192.168.0.51",
+            username="admin",
+            system_type="server_web",
+            gogs=["git.example.test:3000"],
+            enable_cloudflare=True,
+        )
+
+        gogs_steps._wait_for_gogs_frontend(config, "git.example.test", 3000)
+
+        command = mock_run.call_args.args[0]
+        self.assertIn("Host: git.example.test", command)
+        self.assertIn("http://127.0.0.1/", command)
+
+    @patch("web.gogs_steps.run")
+    def test_frontend_health_failure_stops_setup(self, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=60, stdout="", stderr="")
+        config = SetupConfig(
+            host="192.168.0.51",
+            username="admin",
+            system_type="server_web",
+            gogs=[":3000"],
+            enable_ssl=True,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "public web endpoint"):
+            gogs_steps._wait_for_gogs_frontend(config, "", 3000)
 
 
 class TestGogsHostlessFirewall(unittest.TestCase):

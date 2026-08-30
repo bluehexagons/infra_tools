@@ -47,23 +47,33 @@ infra-tools setup server_web 192.168.1.10 deploy \
 
 Because a private IP cannot use the normal public-domain certificate flow,
 hostless `--ssl` creates a self-signed certificate with the target IP in its
-subject alternative name. Trust `/etc/nginx/ssl/192.168.1.10.crt` explicitly
-on each client, or use a hostname with Let's Encrypt to avoid certificate
-warnings. The resulting URL is `https://192.168.1.10:3000/`.
+subject alternative name and includes `127.0.0.1` when the listener is
+loopback-only. Infra-tools revalidates the certificate identity, key pair, and
+remaining lifetime on rerun and replaces it when fewer than 30 days remain.
+Trust `/etc/nginx/ssl/192.168.1.10.crt` explicitly on each client, or use a
+hostname with Let's Encrypt to avoid certificate warnings. The resulting URL
+is `https://192.168.1.10:3000/`.
 
 Source-restricted mode requires active UFW. Setup stops the existing Gogs
 service, installs and verifies replacement source rules, removes obsolete
 infra-tools-managed rules, and only then writes the listener. It refuses
-public IPv4 sources, IPv6 sources, and unmanaged allow rules for the same
-port. Omit `--ssl` only when plaintext HTTP is intentional on a trusted
-network. Hostname mode requires `--ssl` or `--cloudflare`. Switching between
-hostless, hostname, direct TLS, and Cloudflare modes removes obsolete managed
-firewall rules and Gogs nginx sites, including the former port-443 listener.
+public IPv4 sources from either `--gogs-source` or the generic
+`--access-source`/`--lan-access` policy, explicit Gogs IPv6 sources, and
+unmanaged allow rules for the same port. Generic IPv6 sources remain available
+to other managed services but do not expose Gogs. Omit `--ssl` only when
+plaintext HTTP is intentional on a trusted network. Hostname mode requires
+`--ssl` or `--cloudflare`; a literal IP is hostless mode, and Cloudflare also
+requires a hostname. Let's Encrypt hostname mode rejects source restrictions
+because its HTTP-01 renewal listener on port 80 must remain publicly reachable.
+Switching between hostless, hostname, direct TLS, and Cloudflare modes removes
+obsolete managed firewall rules and Gogs nginx sites, including the former
+port-443 listener.
 
 The direct public HTTP/HTTPS port defaults to 3000, so `--gogs 3000` is also
 valid. With `--cloudflare`, that value is the private backend port instead.
-Port 80 is reserved for nginx ingress and certificate validation. The optional
-data path must be absolute and defaults to `/var/lib/gogs`.
+Port 80 is reserved whenever nginx, TLS, a hostname, or Cloudflare is involved;
+a hostless plaintext direct listener may deliberately use it. The optional data
+path must be absolute and defaults to `/var/lib/gogs`.
 
 ## First login and Git access
 
@@ -94,7 +104,8 @@ Both the current Gogs API sign-in paths and the login/MFA paths used by older
 managed releases receive the request limit. Cloudflare deployments derive the
 client address from the trusted tunnel header. Plain-HTTP hostless mode does
 not pass through Nginx, so retain its private source restriction or use the
-default SSH tunnel.
+default SSH tunnel. Gogs session cookies are marked secure whenever the managed
+external URL is HTTPS.
 
 The web UI manages repository users and their SSH keys. Clone over HTTPS using
 the configured public port, or over SSH through the `git` account:
@@ -140,11 +151,14 @@ Run `infra-tools gogs health` on the control system. It reads the root-owned
 managed state through non-interactive sudo and reports service and SQLite
 health, the backing filesystem, free bytes and inodes, per-category usage,
 directory access as `git`, the update service/timer, nginx's upload limit, and
-whether a non-loopback LFS HTTP endpoint is configured. It does not perform a
-client-side network or authentication probe, so “configured” is not a claim
-that DNS, routing, an external firewall, or credentials work. Defaults require
-at least 1 GiB and 10,000 inodes free; override them with `--min-free-bytes`
-and `--min-free-inodes`. The check is read-only and never prunes LFS objects.
+whether a non-loopback LFS HTTP endpoint is configured. For reverse-proxied
+deployments it also validates nginx configuration and performs a target-local
+request through the configured TLS listener or Cloudflare origin route. It
+does not perform an external client or authentication probe, so a healthy
+result is not a claim that public DNS, routing, an external firewall, the
+Cloudflare edge, or credentials work. Defaults require at least 1 GiB and
+10,000 inodes free; override them with `--min-free-bytes` and
+`--min-free-inodes`. The check is read-only and never prunes LFS objects.
 
 `auto-update-gogs.timer` checks weekly (Sunday at 05:30). It validates the
 downloaded binary from a private, randomly named temporary workspace, refreshes

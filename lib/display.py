@@ -149,6 +149,8 @@ def print_service_access_summary(
                 )
 
     if config.gogs:
+        from web.gogs_steps import effective_gogs_ipv4_sources
+
         gogs_spec = str(config.gogs[0])
         scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
         domain, port = _split_service_spec(gogs_spec, 3000)
@@ -158,7 +160,7 @@ def print_service_access_summary(
         else:
             access_host = (
                 config.host
-                if config.effective_gogs_sources()
+                if effective_gogs_ipv4_sources(config)
                 else "127.0.0.1"
             )
             gogs_url = _http_url(access_host, port, scheme=scheme)
@@ -168,7 +170,15 @@ def print_service_access_summary(
         )
 
     if config.antistatic_server:
-        scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
+        antistatic_domain, _antistatic_port = _split_service_spec(
+            config.antistatic_server,
+            8080,
+        )
+        scheme = (
+            "https"
+            if antistatic_domain and (config.enable_ssl or config.enable_cloudflare)
+            else "http"
+        )
         server_url, _loopback_only = _service_url(
             config,
             config.antistatic_server,
@@ -186,7 +196,15 @@ def print_service_access_summary(
         )
 
     if config.antistatic_db:
-        scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
+        antistatic_db_domain, _antistatic_db_port = _split_service_spec(
+            config.antistatic_db,
+            8081,
+        )
+        scheme = (
+            "https"
+            if antistatic_db_domain and (config.enable_ssl or config.enable_cloudflare)
+            else "http"
+        )
         db_url, _loopback_only = _service_url(
             config,
             config.antistatic_db,

@@ -4,48 +4,23 @@ from __future__ import annotations
 import os
 import shlex
 from typing import Optional
+
+from lib.atomic_io import write_text_atomic
+from lib.nginx_config import certificate_is_usable
 from lib.types import StrList, Deployments
 
 from lib.config import SetupConfig
 from lib.remote_utils import run, install_package
 
 
+CERTBOT_NGINX_DEPLOY_HOOK = (
+    "/etc/letsencrypt/renewal-hooks/deploy/50-infra-tools-reload-nginx"
+)
+
+
 def _certificate_is_usable(cert_path: str, key_path: str, domains: StrList) -> bool:
     """Return whether a certificate is current, matches its key, and covers every domain."""
-    quoted_cert = shlex.quote(cert_path)
-    quoted_key = shlex.quote(key_path)
-    current = run(
-        f"openssl x509 -checkend 86400 -noout -in {quoted_cert}",
-        check=False,
-        capture_output=True,
-    )
-    if current.returncode != 0:
-        return False
-    for domain in domains:
-        hostname = run(
-            f"openssl x509 -noout -checkhost {shlex.quote(domain)} -in {quoted_cert}",
-            check=False,
-            capture_output=True,
-        )
-        if hostname.returncode != 0:
-            return False
-    cert_digest = run(
-        f"openssl x509 -in {quoted_cert} -pubkey -noout | "
-        "openssl pkey -pubin -outform DER | openssl sha256",
-        check=False,
-        capture_output=True,
-    )
-    key_digest = run(
-        f"openssl pkey -in {quoted_key} -pubout -outform DER | openssl sha256",
-        check=False,
-        capture_output=True,
-    )
-    return (
-        cert_digest.returncode == 0
-        and key_digest.returncode == 0
-        and bool(cert_digest.stdout)
-        and cert_digest.stdout == key_digest.stdout
-    )
+    return certificate_is_usable(cert_path, key_path, domains)
 
 
 def install_certbot(config: SetupConfig) -> None:
@@ -148,7 +123,17 @@ def create_domain_cert_links(domains: list[str], cert_name: str) -> None:
 
 def setup_certificate_renewal() -> None:
     print("  Setting up automatic certificate renewal...")
-    
+
+    run("mkdir -p /etc/letsencrypt/renewal-hooks/deploy")
+    write_text_atomic(
+        CERTBOT_NGINX_DEPLOY_HOOK,
+        """#!/bin/sh
+set -eu
+/usr/sbin/nginx -t
+/usr/bin/systemctl reload nginx
+""",
+        mode=0o755,
+    )
     enable_result = run("systemctl enable certbot.timer", check=False)
     start_result = run("systemctl start certbot.timer", check=False)
     if enable_result.returncode != 0 or start_result.returncode != 0:

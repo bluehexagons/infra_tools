@@ -7,7 +7,7 @@ import os
 import shlex
 import shutil
 import tempfile
-from typing import Optional
+from typing import Optional, Sequence
 
 from lib.types import Deployments, StrList, PathPair
 from lib.remote_utils import run
@@ -167,6 +167,61 @@ def _restore_deployment_sites(
             _write_config_atomic(path, content, mode)
 
 
+def _self_signed_cert_path(name: str) -> PathPair:
+    return (f"/etc/nginx/ssl/{name}.crt", f"/etc/nginx/ssl/{name}.key")
+
+
+def certificate_is_usable(
+    cert_path: str,
+    key_path: str,
+    identities: Sequence[str],
+    *,
+    minimum_valid_seconds: int = 86_400,
+) -> bool:
+    """Return whether a certificate is current, matched, and covers identities."""
+    quoted_cert = shlex.quote(cert_path)
+    quoted_key = shlex.quote(key_path)
+    current = run(
+        f"openssl x509 -checkend {minimum_valid_seconds} -noout -in {quoted_cert}",
+        check=False,
+        capture_output=True,
+    )
+    if current.returncode != 0:
+        return False
+    for identity in identities:
+        try:
+            ipaddress.ip_address(identity)
+        except ValueError:
+            check_option = "-checkhost"
+        else:
+            check_option = "-checkip"
+        identity_result = run(
+            f"openssl x509 -noout {check_option} {shlex.quote(identity)} "
+            f"-in {quoted_cert}",
+            check=False,
+            capture_output=True,
+        )
+        if identity_result.returncode != 0:
+            return False
+    cert_digest = run(
+        f"openssl x509 -in {quoted_cert} -pubkey -noout | "
+        "openssl pkey -pubin -outform DER | openssl sha256",
+        check=False,
+        capture_output=True,
+    )
+    key_digest = run(
+        f"openssl pkey -in {quoted_key} -pubout -outform DER | openssl sha256",
+        check=False,
+        capture_output=True,
+    )
+    return (
+        cert_digest.returncode == 0
+        and key_digest.returncode == 0
+        and bool(cert_digest.stdout.strip())
+        and cert_digest.stdout.strip() == key_digest.stdout.strip()
+    )
+
+
 def get_ssl_cert_path(domain: Optional[str]) -> PathPair:
     """Get SSL certificate paths, preferring Let's Encrypt over self-signed."""
     cert_name = domain or 'default'
@@ -174,34 +229,59 @@ def get_ssl_cert_path(domain: Optional[str]) -> PathPair:
     if domain:
         letsencrypt_cert = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
         letsencrypt_key = f"/etc/letsencrypt/live/{domain}/privkey.pem"
-        if os.path.exists(letsencrypt_cert) and os.path.exists(letsencrypt_key):
+        if (
+            os.path.exists(letsencrypt_cert)
+            and os.path.exists(letsencrypt_key)
+            and certificate_is_usable(
+                letsencrypt_cert,
+                letsencrypt_key,
+                [domain],
+                minimum_valid_seconds=0,
+            )
+        ):
             return (letsencrypt_cert, letsencrypt_key)
     
-    cert_file = f"/etc/nginx/ssl/{cert_name}.crt"
-    key_file = f"/etc/nginx/ssl/{cert_name}.key"
-    return (cert_file, key_file)
+    return _self_signed_cert_path(cert_name)
 
 
-def generate_self_signed_cert(domain: str) -> PathPair:
+def generate_self_signed_cert(
+    domain: str,
+    additional_identities: Sequence[str] = (),
+) -> PathPair:
     """Generate self-signed SSL certificate for a domain."""
-    cert_file, key_file = get_ssl_cert_path(domain)
-    
-    if os.path.exists(cert_file) and os.path.exists(key_file):
+    cert_file, key_file = _self_signed_cert_path(domain)
+    identities = list(dict.fromkeys((domain, *additional_identities)))
+
+    if (
+        os.path.exists(cert_file)
+        and os.path.exists(key_file)
+        and certificate_is_usable(
+            cert_file,
+            key_file,
+            identities,
+            minimum_valid_seconds=30 * 24 * 60 * 60,
+        )
+    ):
         return (cert_file, key_file)
     
     cert_dir = os.path.dirname(cert_file)
     run(f"mkdir -p {cert_dir}")
-    try:
-        ipaddress.ip_address(domain)
-    except ValueError:
-        subject_alt_name = f"DNS:{domain}"
-    else:
-        subject_alt_name = f"IP:{domain}"
+    subject_alt_names: list[str] = []
+    for identity in identities:
+        try:
+            ipaddress.ip_address(identity)
+        except ValueError:
+            subject_alt_names.append(f"DNS:{identity}")
+        else:
+            subject_alt_names.append(f"IP:{identity}")
+    subject_alt_name = ",".join(subject_alt_names)
     run(f"openssl req -x509 -nodes -days 365 -newkey rsa:2048 "
              f"-keyout {shlex.quote(key_file)} -out {shlex.quote(cert_file)} "
              f"-subj {shlex.quote(f'/CN={domain}')} "
              f"-addext {shlex.quote(f'subjectAltName={subject_alt_name}')}")
-    
+    if not certificate_is_usable(cert_file, key_file, identities):
+        raise RuntimeError(f"Generated TLS certificate failed validation: {cert_file}")
+
     return (cert_file, key_file)
 
 

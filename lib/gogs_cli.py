@@ -60,7 +60,7 @@ def _resolve_connection(
 def _remote_health_script(min_free_bytes: int, min_free_inodes: int) -> str:
     """Return a root-side Python health probe with no external dependencies."""
     return f'''
-import configparser, glob, json, os, re, subprocess, time
+import configparser, glob, json, os, re, subprocess, time, urllib.parse
 
 STATE = "/opt/infra_tools/state/gogs.json"
 UPDATE_STATE = "/opt/infra_tools/state/gogs_update.json"
@@ -181,16 +181,52 @@ remote_lfs_endpoint_configured = bool(external_url) and not bool(
 nginx_required = external_url.startswith("https://")
 
 nginx_limit_bytes = None
+nginx_site_path = None
+nginx_content = ""
 for nginx_path in glob.glob("/etc/nginx/sites-enabled/gogs_*"):
     try:
         content = open(nginx_path, encoding="utf-8").read()
     except OSError:
         continue
+    nginx_site_path = nginx_path
+    nginx_content = content
     match = re.search(r"client_max_body_size\\s+(\\d+)([kKmMgG]?)\\s*;", content)
     if match:
         scale = {{"": 1, "k": 1024, "m": 1024 ** 2, "g": 1024 ** 3}}[match.group(2).lower()]
         nginx_limit_bytes = int(match.group(1)) * scale
         break
+
+nginx_service = run("systemctl", "is-active", "nginx")
+nginx_active = nginx_service.returncode == 0 and nginx_service.stdout.strip() == "active"
+nginx_validation = run("nginx", "-t") if nginx_required else None
+nginx_config_valid = not nginx_required or nginx_validation.returncode == 0
+frontend_healthy = not nginx_required
+frontend_mode = "direct"
+if nginx_required and nginx_active and nginx_config_valid and nginx_site_path:
+    parsed_url = urllib.parse.urlsplit(external_url)
+    hostname = parsed_url.hostname or ""
+    public_port = parsed_url.port or 443
+    if re.search(r"listen\\s+[^;]*ssl", nginx_content):
+        frontend_mode = "tls"
+        cert_match = re.search(r"ssl_certificate\\s+([^;]+);", nginx_content)
+        cert_path = cert_match.group(1).strip() if cert_match else ""
+        if hostname and cert_path:
+            frontend = run(
+                "curl", "--fail", "--silent", "--output", "/dev/null",
+                "--noproxy", "*", "--connect-timeout", "3", "--max-time", "5",
+                "--cacert", cert_path,
+                "--resolve", f"{{hostname}}:{{public_port}}:127.0.0.1",
+                external_url,
+            )
+            frontend_healthy = frontend.returncode == 0
+    else:
+        frontend_mode = "cloudflare-origin"
+        frontend = run(
+            "curl", "--fail", "--silent", "--output", "/dev/null",
+            "--noproxy", "*", "--connect-timeout", "3", "--max-time", "5",
+            "-H", f"Host: {{hostname}}", "http://127.0.0.1/",
+        )
+        frontend_healthy = bool(hostname) and frontend.returncode == 0
 
 filesystem = str(mount_value.get("fstype", ""))
 healthy = all((
@@ -206,6 +242,9 @@ healthy = all((
     timer_scheduled,
     update_check_successful,
     not update_check_stale,
+    not nginx_required or nginx_active,
+    nginx_config_valid,
+    frontend_healthy,
     (not nginx_required and nginx_limit_bytes is None) or (nginx_limit_bytes is not None and nginx_limit_bytes >= 512 * 1024 * 1024),
 ))
 
@@ -236,6 +275,13 @@ print(json.dumps({{
         "successful": update_check_successful,
     }},
     "nginx_upload_limit_bytes": nginx_limit_bytes,
+    "nginx": {{
+        "required": nginx_required,
+        "active": nginx_active,
+        "config_valid": nginx_config_valid,
+        "site_path": nginx_site_path,
+    }},
+    "frontend": {{"healthy": frontend_healthy, "mode": frontend_mode}},
     "external_url": external_url,
     "remote_lfs_endpoint_configured": remote_lfs_endpoint_configured,
 }}, sort_keys=True))
@@ -297,6 +343,19 @@ def _format_health(value: dict[str, Any], host: str) -> str:
         f"  Update timer: {'active' if timer.get('active') and timer.get('scheduled') else 'FAILED'}",
         f"  Last update check: {'STALE' if check.get('stale') else 'ok'} ({check.get('age_seconds')} seconds ago)",
         f"  Nginx upload limit: {value.get('nginx_upload_limit_bytes')}",
+        "  Nginx: "
+        + (
+            "not required"
+            if not value.get("nginx", {}).get("required")
+            else (
+                "ok"
+                if value.get("nginx", {}).get("active")
+                and value.get("nginx", {}).get("config_valid")
+                else "FAILED"
+            )
+        ),
+        "  Public web endpoint: "
+        + ("ok" if value.get("frontend", {}).get("healthy") else "FAILED"),
         "  Remote LFS endpoint: "
         + (
             "configured (network reachability not probed)"

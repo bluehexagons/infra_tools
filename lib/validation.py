@@ -337,11 +337,20 @@ def validate_gogs_settings(config: "SetupConfig") -> None:
     if not spec:
         raise ValueError("Gogs target spec must be a non-empty string")
 
-    from web.gogs_steps import DEFAULT_GOGS_DATA_PATH, parse_gogs_spec
+    from web.gogs_steps import (
+        DEFAULT_GOGS_DATA_PATH,
+        effective_gogs_ipv4_sources,
+        parse_gogs_spec,
+    )
     from lib.validators import validate_host
 
     domain, port = parse_gogs_spec(spec, strict=True)
-    if port == 80:
+    if port == 80 and (
+        domain
+        or config.enable_ssl
+        or config.enable_cloudflare
+        or getattr(config, "include_web_server", False)
+    ):
         raise ValueError(
             "Gogs port 80 is reserved for nginx HTTP ingress and TLS certificate "
             "validation; choose another --gogs port"
@@ -356,6 +365,23 @@ def validate_gogs_settings(config: "SetupConfig") -> None:
                 "Hostname-based Gogs requires --ssl or --cloudflare so credentials "
                 "are not sent over plaintext HTTP"
             )
+        if config.enable_ssl and config.effective_access_sources():
+            raise ValueError(
+                "Hostname-based Gogs with --ssl requires public port 80 for "
+                "Let's Encrypt HTTP-01 validation; remove source restrictions "
+                "or use --cloudflare without --ssl"
+            )
+        try:
+            ipaddress.ip_address(domain)
+        except ValueError:
+            pass
+        else:
+            raise ValueError(
+                "Hostname-based Gogs requires a DNS hostname; use --gogs :PORT "
+                "for an IP-address deployment"
+            )
+    elif config.enable_cloudflare:
+        raise ValueError("Hostless Gogs cannot use --cloudflare; supply a DNS hostname")
 
     normalized_sources: set[str] = set()
     for source in sources:
@@ -374,6 +400,15 @@ def validate_gogs_settings(config: "SetupConfig") -> None:
         if canonical_source in normalized_sources:
             raise ValueError(f"Duplicate --gogs-source: {canonical_source}")
         normalized_sources.add(canonical_source)
+
+    if not domain:
+        for source in effective_gogs_ipv4_sources(config):
+            network = ipaddress.ip_network(source, strict=False)
+            if network.is_global:
+                raise ValueError(
+                    "Hostless Gogs access sources must be private or otherwise "
+                    f"non-global: {source}"
+                )
 
     data_path = DEFAULT_GOGS_DATA_PATH
     if len(gogs) == 2:

@@ -36,6 +36,8 @@ def _healthy_result() -> dict[str, object]:
         "update_timer": {"active": True},
         "update_check": {"age_seconds": 60, "stale": False, "successful": True},
         "nginx_upload_limit_bytes": 536_870_912,
+        "nginx": {"required": True, "active": True, "config_valid": True},
+        "frontend": {"healthy": True, "mode": "tls"},
         "remote_lfs_endpoint_configured": True,
     }
 
@@ -95,6 +97,9 @@ class TestRemoteGogsHealth(unittest.TestCase):
         self.assertIn('remote_lfs_endpoint_configured', script)
         self.assertIn('update_check_stale', script)
         self.assertIn('client_max_body_size', script)
+        self.assertIn('run("nginx", "-t")', script)
+        self.assertIn('frontend_healthy', script)
+        self.assertIn('"--cacert", cert_path', script)
 
     def test_negative_threshold_is_rejected_before_ssh(self):
         with patch("lib.gogs_cli.subprocess.run") as runner:
@@ -110,6 +115,8 @@ class TestGogsHealthOutput(unittest.TestCase):
         self.assertIn("Gogs health for git.example.test: healthy", output)
         self.assertIn("/dev/vdb1 (ext4)", output)
         self.assertIn("Remote LFS endpoint: configured", output)
+        self.assertIn("Nginx: ok", output)
+        self.assertIn("Public web endpoint: ok", output)
 
     def test_unhealthy_json_returns_nonzero(self):
         value = _healthy_result()

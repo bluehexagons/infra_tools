@@ -968,14 +968,19 @@ infra-tools setup server_web 192.168.1.10 \
 The Gogs port is the direct public HTTP/HTTPS port and defaults to 3000; Gogs
 does not implicitly claim port 443. With `--cloudflare`, it instead remains the
 private backend port because the tunnel supplies the standard public HTTPS
-endpoint. Port 80 is reserved for nginx ingress and certificate validation.
+endpoint. Port 80 is reserved when Gogs uses nginx, TLS, a hostname, or
+Cloudflare; hostless direct plaintext mode may deliberately use it.
 Hostname mode requires `--ssl` or `--cloudflare`.
 Use `--gogs :3000` for a hostless loopback service reached through an SSH
 tunnel. To expose hostless HTTPS on a trusted private network, add `--ssl` and
 repeat `--gogs-source IP_OR_CIDR`. Hostless TLS uses an IP-SAN self-signed
-certificate that clients must explicitly trust. Only non-global IPv4 sources
-are accepted, active UFW is required, and setup fails before binding externally
-if it cannot verify the rules. Gogs releases require
+certificate that clients must explicitly trust; reruns replace an invalid,
+mismatched, or soon-expiring certificate. Only non-global IPv4 sources from
+the combined generic and Gogs-specific policy are applied, active UFW is
+required, and setup fails before binding externally if it cannot verify the
+rules. A literal IP cannot be used as the hostname, Cloudflare requires a
+hostname, and Let's Encrypt hostname mode rejects source restrictions because
+HTTP-01 renewal needs public port 80. Gogs releases require
 and verify the SHA-256 supplied in GitHub release asset metadata before
 extraction, and activation can
 roll back to the previous release if service, post-update, or health checks
@@ -983,7 +988,7 @@ fail.
 
 | Flag | Description |
 |------|-------------|
-| `--gogs DOMAIN[:PORT] [DATA_PATH]` | Install Gogs on direct public HTTP/HTTPS `PORT` (default 3000), or use `PORT` as the private backend with `--cloudflare`; port 80 is reserved; omit `DOMAIN` for loopback/source-restricted hostless mode |
+| `--gogs DOMAIN[:PORT] [DATA_PATH]` | Install Gogs on direct public HTTP/HTTPS `PORT` (default 3000), or use `PORT` as the private backend with `--cloudflare`; port 80 is reserved when nginx/TLS/hostname/Cloudflare is used; omit `DOMAIN` for loopback/source-restricted hostless mode |
 | `--gogs-source IP_OR_CIDR` | Allow one private IPv4 source to a hostless Gogs listener; repeatable and requires active UFW |
 
 Inspect an installed service from the control system with:
@@ -1001,8 +1006,11 @@ SQLite database, managed paths, local filesystem, update service/timer,
 capacity thresholds, or documented nginx upload limit is unhealthy. JSON also
 reports release identity, per-category usage, the external URL, and whether
 the LFS HTTP endpoint is configured for non-loopback access or is loopback-only.
-This is configuration evidence, not a client-side network or authentication
-probe.
+Reverse-proxied deployments additionally require valid nginx configuration and
+a successful target-local request through the direct TLS listener or
+Cloudflare origin route. This is not an external client or authentication
+probe, so it does not prove public DNS, routing, edge, firewall, or credential
+health.
 
 ## Storage and data movement
 
