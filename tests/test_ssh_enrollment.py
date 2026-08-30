@@ -261,6 +261,48 @@ class TestSshEnrollment(unittest.TestCase):
             )
         run.assert_not_called()
 
+    @patch("lib.ssh_enrollment.subprocess.run")
+    def test_replace_removes_old_ecdsa_key_from_selected_file(self, run):
+        old_key = "192.168.0.42 ecdsa-sha2-nistp256 OLD"
+        new_key = "192.168.0.42 ssh-ed25519 NEW"
+        run.side_effect = [
+            type(
+                "Result",
+                (),
+                {"returncode": 0, "stdout": "256 SHA256:new", "stderr": ""},
+            )(),
+            type(
+                "Result",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": f"# Host 192.168.0.42 found: line 42\n{old_key}\n",
+                    "stderr": "",
+                },
+            )(),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".ssh" / "known_hosts"
+            path.parent.mkdir()
+            path.write_text(
+                old_key + "\nother.example ssh-ed25519 KEEP\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                replace_scanned_host_keys(
+                    "192.168.0.42",
+                    new_key,
+                    known_hosts_path=str(path),
+                ),
+                str(path),
+            )
+
+            self.assertEqual(
+                path.read_text(encoding="utf-8"),
+                "other.example ssh-ed25519 KEEP\n" + new_key + "\n",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

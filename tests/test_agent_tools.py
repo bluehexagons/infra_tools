@@ -1433,6 +1433,7 @@ class TestAgentPayloadInstallation(unittest.TestCase):
                 patch('common.agent_steps._user_home', return_value=home),
                 patch('common.agent_steps._chown_user_directory_chain'),
                 patch('common.agent_steps._chown_path'),
+                patch('builtins.print') as print_output,
             ):
                 copied = _copy_secret_file(
                     config,
@@ -1446,6 +1447,10 @@ class TestAgentPayloadInstallation(unittest.TestCase):
             with open(destination, encoding='utf-8') as file_obj:
                 self.assertEqual(file_obj.read(), source_content)
             self.assertEqual(os.stat(destination).st_mode & 0o777, 0o600)
+            self.assertEqual(
+                [call.args[0] for call in print_output.call_args_list],
+                ['  Refreshed outdated Codex credentials'],
+            )
 
     def test_outdated_codex_source_does_not_replace_target(self):
         config = SetupConfig(

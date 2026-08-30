@@ -9,6 +9,7 @@ from typing import Callable, Optional
 
 from lib.atomic_io import write_text_atomic
 from lib.ssh_utils import get_workspace_known_hosts_path
+from lib.validation import validate_filesystem_path
 from lib.validators import validate_host
 
 
@@ -127,9 +128,26 @@ def get_enrolled_host_key_lines(
     return sorted(_matching_known_host_lines(path, _known_hosts_name(host, port)))
 
 
-def _persist_scan(host: str, scan: str, port: int) -> str:
-    known_hosts = get_workspace_known_hosts_path()
-    os.makedirs(os.path.dirname(known_hosts), mode=0o700, exist_ok=True)
+def _persist_scan(
+    host: str,
+    scan: str,
+    port: int,
+    known_hosts_path: Optional[str] = None,
+) -> str:
+    known_hosts = os.path.abspath(
+        os.path.expanduser(known_hosts_path or get_workspace_known_hosts_path())
+    )
+    validate_filesystem_path(known_hosts, must_exist=False)
+    parent = os.path.dirname(known_hosts)
+    if os.path.lexists(parent):
+        if os.path.islink(parent) or not os.path.isdir(parent):
+            raise RuntimeError(f"refusing unsafe SSH directory: {parent}")
+    else:
+        os.makedirs(parent, mode=0o700)
+    if os.path.lexists(known_hosts) and (
+        os.path.islink(known_hosts) or not os.path.isfile(known_hosts)
+    ):
+        raise RuntimeError(f"refusing unsafe known_hosts file: {known_hosts}")
 
     existing_lines: list[str] = []
     if os.path.exists(known_hosts):
@@ -147,14 +165,25 @@ def _persist_scan(host: str, scan: str, port: int) -> str:
     return known_hosts
 
 
-def replace_scanned_host_keys(host: str, scan: str, *, port: int = 22) -> str:
-    """Replace a workspace host's keys with an already trusted key scan."""
+def replace_scanned_host_keys(
+    host: str,
+    scan: str,
+    *,
+    port: int = 22,
+    known_hosts_path: Optional[str] = None,
+) -> str:
+    """Replace one known-hosts file's keys with an already trusted key scan."""
     if not validate_host(host):
         raise ValueError(f"Invalid host: {host}")
     if not 1 <= port <= 65535:
         raise ValueError("SSH port must be between 1 and 65535")
     normalized_scan, _fingerprints = _normalize_scan(host, scan, port)
-    return _persist_scan(host, normalized_scan, port)
+    return _persist_scan(
+        host,
+        normalized_scan,
+        port,
+        known_hosts_path=known_hosts_path,
+    )
 
 
 def enroll_host_key(

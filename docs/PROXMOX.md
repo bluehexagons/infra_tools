@@ -84,14 +84,15 @@ hashes automatically.
 
 After a newly created VM or LXC begins accepting SSH, infra-tools scans its
 ED25519 host key from the already authenticated Proxmox node and records it in
-the workspace `known_hosts` file before the first direct guest login. The same
-refresh occurs when a later provisioning check confirms a guest whose saved
-infra-tools metadata still identifies the same address, machine type, and
-Proxmox node. This lets a managed guest recover from a legitimate host-key
-change before the first direct SSH check. All following guest SSH still uses
+the workspace `known_hosts` file and the invoking user's default
+`~/.ssh/known_hosts` before the first direct guest login. The same refresh
+occurs on a later setup rerun when saved infra-tools metadata still identifies
+the same address, machine type, and Proxmox node. This lets a managed guest
+recover from a legitimate host-key change before either infra-tools or plain
+`ssh HOST` performs a strict check. All following guest SSH still uses
 `StrictHostKeyChecking=yes`. Existing or adopted guests without matching saved
 metadata are not trusted automatically; verify them independently and use
-`infra-tools ssh-key enroll HOST` when enrollment is required.
+`infra-tools ssh-key enroll HOST` when workspace enrollment is required.
 
 ## Host-safety defaults
 
@@ -303,9 +304,10 @@ After a guest has been provisioned, a later `setup` invocation can retain
 `--provision-on`. If the target has saved local setup metadata, infra-tools
 reuses its recorded Proxmox details and skips the full provider-shape check
 before updating the guest. It still contacts the authenticated Proxmox node to
-rescan and replace the managed guest's workspace SSH host key before the first
-direct connection. Guest-shape options emitted by a saved reconstructed command
-are also accepted when they match that metadata. Changing any of
+rescan and replace the managed guest's workspace and default user SSH host keys
+before the first direct connection. Guest-shape options emitted by a saved
+reconstructed command are also accepted when they match that metadata. Changing
+any of
 `--machine`, `--bridge`, `--memory`, `--balloon-min`, `--balloon-shares`,
 `--allow-memory-overcommit`, `--storage`, `--cores`, `--cpu-type`,
 `--base`, `--image`, or `--image-storage` requests a provisioning check instead.
@@ -373,10 +375,11 @@ values is an ordinary idempotent rerun and does not perform a full provider
 check. Changing `--hostname`, or changing `--name` when it supplies the VM
 hostname, performs the identity check. Regardless of whether a full
 provisioning check is needed, the authenticated Proxmox node refreshes the
-saved guest's workspace SSH host key before infra-tools checks the guest route
-or starts remote setup. A guest without matching saved metadata still requires
-explicit host-key enrollment. Use the explicit host and VMID forms to inspect
-or repair provider-side drift and duplicates created by older releases.
+saved guest's workspace and default user SSH host keys before infra-tools checks
+the guest route or starts remote setup. A guest without matching saved metadata
+still requires explicit host-key enrollment. Use the explicit host and VMID
+forms to inspect or repair provider-side drift and duplicates created by older
+releases.
 
 ## Graphical VM hardware baseline
 

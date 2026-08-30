@@ -612,8 +612,6 @@ def _copy_secret_file(
         if credential_tool == "codex":
             target_metadata = inspect_codex_auth_file(destination)
             warning = codex_auth_warning(target_metadata)
-            if warning:
-                print(f"  Warning: existing target: {warning}")
             source_metadata = inspect_codex_auth_file(source)
             if (
                 target_metadata.get("status") == "refresh_required"
@@ -651,6 +649,8 @@ def _copy_secret_file(
                 _chown_path(config, destination)
                 print("  Refreshed outdated Codex credentials")
                 return True
+            if warning:
+                print(f"  Warning: existing target: {warning}")
         print(
             f"  Existing {label} credentials retained; setup seeds missing "
             "credentials and refreshes only known-outdated Codex credentials"

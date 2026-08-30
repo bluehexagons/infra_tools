@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -162,12 +162,23 @@ class TestProxmoxSshRun(unittest.TestCase):
 
 class TestProvisionedGuestHostKeyEnrollment(unittest.TestCase):
     @patch(
-        "lib.proxmox_guest.replace_scanned_host_keys",
+        "lib.proxmox_guest.get_workspace_known_hosts_path",
         return_value="/workspace/known_hosts",
     )
+    @patch(
+        "lib.proxmox_guest.os.path.expanduser",
+        return_value="/home/loren/.ssh/known_hosts",
+    )
+    @patch(
+        "lib.proxmox_guest.replace_scanned_host_keys",
+    )
     @patch("lib.proxmox_guest._ssh_run")
-    def test_scans_through_proxmox_and_replaces_workspace_key(
-        self, mock_run, mock_replace
+    def test_scans_through_proxmox_and_replaces_workspace_and_user_keys(
+        self,
+        mock_run,
+        mock_replace,
+        _mock_expanduser,
+        _mock_workspace_known_hosts,
     ) -> None:
         scan = "192.0.2.40 ssh-ed25519 AAAA"
         mock_run.return_value = MagicMock(returncode=0, stdout=scan, stderr="")
@@ -184,7 +195,21 @@ class TestProvisionedGuestHostKeyEnrollment(unittest.TestCase):
             mock_run.call_args.args[3],
         )
         self.assertTrue(mock_run.call_args.kwargs["quiet"])
-        mock_replace.assert_called_once_with("192.0.2.40", scan)
+        self.assertEqual(
+            mock_replace.call_args_list,
+            [
+                call(
+                    "192.0.2.40",
+                    scan,
+                    known_hosts_path="/workspace/known_hosts",
+                ),
+                call(
+                    "192.0.2.40",
+                    scan,
+                    known_hosts_path="/home/loren/.ssh/known_hosts",
+                ),
+            ],
+        )
 
     @patch("lib.proxmox_guest.replace_scanned_host_keys")
     @patch("lib.proxmox_guest._ssh_run")

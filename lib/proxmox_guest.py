@@ -1045,8 +1045,8 @@ def enroll_provisioned_guest_host_keys(
     Callers must first establish that the guest is either newly created or
     matches saved infra-tools provisioning metadata. Scanning from the already
     authenticated Proxmox node keeps the discovery on the guest's bridge and
-    lets strict workspace host-key checking remain enabled for every subsequent
-    guest connection.
+    lets strict host-key checking remain enabled for both infra-tools and the
+    invoking user's subsequent direct guest connections.
     """
     if dry_run:
         print(
@@ -1068,13 +1068,28 @@ def enroll_provisioned_guest_host_keys(
         raise ProvisionError(
             f"Could not read the guest SSH host key for {target_ip}: {detail}"
         )
+    workspace_known_hosts = get_workspace_known_hosts_path()
+    user_known_hosts = os.path.abspath(
+        os.path.expanduser("~/.ssh/known_hosts")
+    )
+    known_hosts_paths = list(
+        dict.fromkeys((workspace_known_hosts, user_known_hosts))
+    )
     try:
-        known_hosts = replace_scanned_host_keys(target_ip, scan)
+        for known_hosts in known_hosts_paths:
+            replace_scanned_host_keys(
+                target_ip,
+                scan,
+                known_hosts_path=known_hosts,
+            )
     except (OSError, RuntimeError, ValueError) as exc:
         raise ProvisionError(
             f"Could not enroll the guest SSH host key for {target_ip}: {exc}"
         ) from exc
-    print(f"  ✓ Enrolled guest SSH host key in {known_hosts}")
+    print(
+        "  ✓ Enrolled guest SSH host key in "
+        + ", ".join(known_hosts_paths)
+    )
 
 
 def refresh_managed_guest_host_keys(
