@@ -200,7 +200,9 @@ Proxmox operations, maintenance, and agent commands.
 when a cached provisioned guest should be compared with Proxmox even though
 the saved declaration has not changed; supported provider-side drift, such as
 the guest vCPU count, is reconciled and verified. Managed disks are also
-verified against the cached pool and minimum-size declaration.
+verified against the cached pool and minimum-size declaration. All provider
+reconciliation driven by saved VM metadata is existing-only: if the saved VM
+cannot be found, setup stops instead of silently creating a replacement.
 
 After moving an infra-tools-provisioned QEMU VM with the Proxmox GUI, rerun its
 saved setup command with the destination in `--provision-on`. A changed
@@ -792,10 +794,12 @@ Notes:
   one or more named disks when each addition has a new empty-path
   `--storage-mount`. Existing storage and mount declarations may be omitted
   and are merged from saved metadata, or may be repeated unchanged. The
-  provider verifies every saved disk and enough capacity before attaching only
-  the authorized new identities. Additive cache media, swap disks, `/home`,
-  LXC disks, manual-volume adoption, replacement, detach, and resize remain
-  unsupported.
+  provider verifies every saved disk, enough capacity, and enough SCSI slots
+  for the complete request before attaching only the authorized new
+  identities. Rerunning the same concise declaration after success is valid
+  and performs no duplicate attachment. Additive cache media, swap disks,
+  `/home`, LXC disks, manual-volume adoption, replacement, detach, and resize
+  remain unsupported.
 - `--storage-cache` builds a guest-side LVM cache from two entire blank disks.
   Put the data disk on the durable pool and the cache disk on SSD storage. The
   data disk retains its normal `--storage-mount`; the cache disk must not have
@@ -827,7 +831,9 @@ Notes:
 - Provisioned VMs automatically use a matching key from the registered
   Proxmox host or the local `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa`
   identity. Use `--key PATH` when the guest should use a different identity;
-  the matching `PATH.pub` is installed by cloud-init for the SSH handoff.
+  the matching `PATH.pub` is installed by cloud-init for the SSH handoff when
+  a new VM is created. Existing-only reconciliation of a saved VM does not
+  require that public-key file to remain on the controller.
 - Provisioned VMs keep fixed memory by default while retaining the VirtIO balloon
   device for guest-memory telemetry. Set `--balloon-min` below `--memory` to
   opt into dynamic ballooning; the minimum cannot exceed the maximum. Provisioning

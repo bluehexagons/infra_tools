@@ -66,12 +66,14 @@ guest-data migration.
 The matching `.pub` file must sit beside the private key, and the Proxmox
 `root` account must accept that key.
 
-VM provisioning uses an SSH identity's `.pub` file for cloud-init. The key is
-installed for both root and the configured guest setup username; the latter is
-created with non-interactive sudo and is used for the route and remote setup
-handoff. `--key` is optional: infra-tools first uses a matching key associated
-with the registered Proxmox host, then the local `~/.ssh/id_ed25519`,
-`id_ecdsa`, or `id_rsa` key.
+New VM provisioning uses an SSH identity's `.pub` file for cloud-init. The key
+is installed for both root and the configured guest setup username; the latter
+is created with non-interactive sudo and is used for the route and remote setup
+handoff. Existing-only reconciliation of a saved VM uses its established SSH
+access and does not require the matching `.pub` file to remain on the
+controller. `--key` is optional: infra-tools first uses a matching key
+associated with the registered Proxmox host, then the local
+`~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa` key.
 If the Proxmox node key and guest key differ, pass `--provision-key` for the
 node and `--key` for the guest. VM image downloads and cloud-init snippets are
 placed through Proxmox storage APIs. By default, image staging prefers an
@@ -283,10 +285,13 @@ network defaults are merged automatically when omitted. Existing declarations
 may instead be repeated unchanged. Infra-tools verifies every old managed disk
 before mutation, checks capacity for only the additions, uses the first free
 SCSI slots without touching unrelated disks, and verifies each new stable
-`it-NAME` identity. Target setup then formats only a blank exact-identity disk
-and requires an empty mount path. Multiple new mounted disks may be declared in
-one command. If one attachment succeeds before a later step fails, rerunning
-the same command recognizes the attached identity and continues safely; saved
+`it-NAME` identity. All requested slots, storage capacity, and any accompanying
+memory-floor policy are checked before the first attachment. Target setup then
+formats only a blank exact-identity disk and requires an empty mount path.
+Multiple new mounted disks may be declared in one command. The same concise
+command remains valid after success and is treated as an idempotent subset of
+the saved layout. If one attachment succeeds before a later provider response
+fails, a retry recognizes the attached identity and continues safely; saved
 setup metadata changes only after remote setup succeeds.
 
 This additive path does not adopt a manually attached disk, replace a missing
@@ -335,7 +340,10 @@ Supplying any `--disk-discard`, `--disk-ssd`, or `--disk-backup` policy also
 requests a provider check even when it matches local metadata. This lets an
 explicit setup rerun repair disk-hardware drift or apply policy first recorded
 by an older infra-tools release. A target without saved provisioning metadata
-still requires `--memory` and root `--storage` on its first run.
+still requires `--memory` and root `--storage` on its first run. Any provider
+check associated with saved VM metadata requires that VM to still exist;
+infra-tools does not silently create a replacement when reconciliation cannot
+find it.
 
 Use `--verify-provider` to check a cached provisioned guest against Proxmox even
 when its declaration matches saved local metadata. Setup reconciles and

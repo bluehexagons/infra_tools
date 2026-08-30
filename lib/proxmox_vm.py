@@ -940,31 +940,53 @@ def _reconcile_existing_vm(
         for name in (desired_storage_layout or {})
         if name not in managed_disks
     ]
+    memory_changed = bool(
+        desired_memory_mib is not None
+        and desired_balloon_min_mib is not None
+        and (
+            matched.memory_mib != desired_memory_mib
+            or matched.balloon_min_mib != desired_balloon_min_mib
+        )
+    )
+    if memory_changed:
+        assert desired_memory_mib is not None
+        assert desired_balloon_min_mib is not None
+        memory_floor_safe = _report_memory_capacity(
+            node_ip=node_ip,
+            user=user,
+            ssh_opts=ssh_opts,
+            proposed_minimum_mib=desired_balloon_min_mib,
+            proposed_maximum_mib=desired_memory_mib,
+            replacing_vmid=matched.vmid,
+        )
+        _enforce_memory_floor(memory_floor_safe, allow_memory_overcommit)
+
     attached_disks: list[tuple[str, str]] = []
     if missing_attachments:
         assert desired_storage_layout is not None
         assert desired_disk_hardware is not None
+        used_devices = {device for device, _value in matched.scsi_disks}
+        available_devices = [
+            f"scsi{index}"
+            for index in range(1, 31)
+            if f"scsi{index}" not in used_devices
+        ]
+        if len(available_devices) < len(missing_attachments):
+            raise ProvisionError(
+                f"VM {matched.vmid} has only {len(available_devices)} free "
+                f"SCSI slot(s) for {len(missing_attachments)} requested disks: "
+                + ", ".join(missing_attachments)
+            )
         _preflight_data_disk_capacity(
             [desired_storage_layout[name] for name in missing_attachments],
             node_ip,
             user,
             ssh_opts,
         )
-        used_devices = {device for device, _value in matched.scsi_disks}
-        for logical_name in missing_attachments:
-            available_device = next(
-                (
-                    f"scsi{index}"
-                    for index in range(1, 31)
-                    if f"scsi{index}" not in used_devices
-                ),
-                None,
-            )
-            if available_device is None:
-                raise ProvisionError(
-                    f"VM {matched.vmid} has no free SCSI slot for disk "
-                    f"'{logical_name}'"
-                )
+        for logical_name, available_device in zip(
+            missing_attachments,
+            available_devices,
+        ):
             disk = desired_storage_layout[logical_name]
             hardware = desired_disk_hardware[logical_name]
             disk_value = _disk_hardware_value(
@@ -988,7 +1010,6 @@ def _reconcile_existing_vm(
                     f"Could not attach VM data disk '{logical_name}' at "
                     f"{available_device}: {detail or 'unknown error'}"
                 )
-            used_devices.add(available_device)
             attached_disks.append((logical_name, available_device))
 
         verify_attachments = _ssh_run(
@@ -1026,14 +1047,6 @@ def _reconcile_existing_vm(
     cores_changed = bool(
         desired_cores is not None and matched.cores != desired_cores
     )
-    memory_changed = bool(
-        desired_memory_mib is not None
-        and desired_balloon_min_mib is not None
-        and (
-            matched.memory_mib != desired_memory_mib
-            or matched.balloon_min_mib != desired_balloon_min_mib
-        )
-    )
     shares_changed = bool(
         desired_balloon_shares is not None
         and (matched.balloon_shares or 1000) != desired_balloon_shares
@@ -1052,18 +1065,6 @@ def _reconcile_existing_vm(
             backup=desired_disk_hardware[logical_name].backup,
         )
     ]
-    if memory_changed:
-        assert desired_memory_mib is not None
-        assert desired_balloon_min_mib is not None
-        memory_floor_safe = _report_memory_capacity(
-            node_ip=node_ip,
-            user=user,
-            ssh_opts=ssh_opts,
-            proposed_minimum_mib=desired_balloon_min_mib,
-            proposed_maximum_mib=desired_memory_mib,
-            replacing_vmid=matched.vmid,
-        )
-        _enforce_memory_floor(memory_floor_safe, allow_memory_overcommit)
     set_options: list[str] = []
     if name_changed:
         set_options.extend(["--name", shlex.quote(cast(str, desired_name))])
@@ -2053,9 +2054,10 @@ def provision_vm(
 
     resolved, catalog_entry = _resolve_image(config, image)
 
-    pub_path = _resolve_public_key_path(config.ssh_key) if not dry_run else None
+    needs_public_key = not dry_run and not require_existing_vm
+    pub_path = _resolve_public_key_path(config.ssh_key) if needs_public_key else None
     pubkey_contents: Optional[str] = None
-    if not dry_run:
+    if needs_public_key:
         if not pub_path:
             raise ProvisionError(
                 "VM provisioning requires a readable SSH private key with a matching .pub file"

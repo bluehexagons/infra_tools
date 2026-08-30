@@ -1263,12 +1263,14 @@ def _merge_additive_vm_storage(
     args: argparse.Namespace,
     *,
     provider_rebind: bool = False,
-) -> set[str]:
+) -> Optional[set[str]]:
     """Merge additive mounted disks into a saved managed VM layout.
 
     Existing declarations may be omitted for a concise setup command or
     repeated unchanged. The returned names are the only provider identities
-    that the caller may create; all previously managed disks must still exist.
+    that the caller may create; an empty set is a valid idempotent subset
+    request, while ``None`` means the request is not an additive layout.
+    All previously managed disks must still exist.
     """
 
     if (
@@ -1279,7 +1281,7 @@ def _merge_additive_vm_storage(
         or getattr(args, "container_storage", None) is None
         or getattr(args, "storage_mounts", None) is None
     ):
-        return set()
+        return None
 
     cached_storage = _named_specs(cached_config.container_storage)
     requested_storage = _named_specs(config.container_storage)
@@ -1294,33 +1296,52 @@ def _merge_additive_vm_storage(
         or any(len(spec) < 2 for spec in requested_mounts.values())
         or "root" not in cached_storage
     ):
-        return set()
+        return None
 
     for name in set(cached_storage) & set(requested_storage):
         if requested_storage[name] != cached_storage[name]:
-            return set()
+            return None
     new_storage_names = set(requested_storage) - set(cached_storage)
-    if not new_storage_names:
-        return set()
     if any(
         name in {"root", "template"}
         or len(requested_storage[name]) != 3
         for name in new_storage_names
     ):
-        return set()
+        return None
 
     for name in set(cached_mounts) & set(requested_mounts):
         if _canonical_storage_mount(requested_mounts[name]) != (
             _canonical_storage_mount(cached_mounts[name])
         ):
-            return set()
+            return None
     new_mount_names = set(requested_mounts) - set(cached_mounts)
     if new_mount_names != new_storage_names or any(
         _canonical_storage_mount(requested_mounts[name])[1] == "/home"
         or _canonical_storage_mount(requested_mounts[name])[3] != "empty"
         for name in new_mount_names
     ):
-        return set()
+        return None
+
+    requested_mounted_disks = (
+        set(requested_storage) & set(requested_mounts)
+    ) - {"root", "template"}
+    if not requested_mounted_disks:
+        return None
+
+    merged_disk_settings: Optional[NestedStrList] = None
+    if getattr(args, "vm_disk_settings", None) is not None:
+        cached_settings = _named_specs(cached_config.vm_disk_settings)
+        requested_settings = _named_specs(config.vm_disk_settings)
+        if cached_settings is None or requested_settings is None:
+            return None
+        merged_disk_settings = [
+            *[
+                list(spec)
+                for name, spec in cached_settings.items()
+                if name not in requested_settings
+            ],
+            *[list(spec) for spec in requested_settings.values()],
+        ] or None
 
     config.container_storage = [
         *[list(spec) for spec in cached_config.container_storage or []],
@@ -1340,16 +1361,7 @@ def _merge_additive_vm_storage(
     ]
 
     if getattr(args, "vm_disk_settings", None) is not None:
-        cached_settings = _named_specs(cached_config.vm_disk_settings) or {}
-        requested_settings = _named_specs(config.vm_disk_settings) or {}
-        config.vm_disk_settings = [
-            *[
-                list(spec)
-                for name, spec in cached_settings.items()
-                if name not in requested_settings
-            ],
-            *[list(spec) for spec in requested_settings.values()],
-        ] or None
+        config.vm_disk_settings = merged_disk_settings
 
     return new_storage_names
 
@@ -1360,7 +1372,7 @@ def _unsupported_cached_provisioning_changes(
     args: argparse.Namespace,
     *,
     provider_rebind: bool = False,
-    additive_storage_disks: Optional[set[str]] = None,
+    additive_storage_request: bool = False,
 ) -> list[str]:
     """Return explicit existing-guest changes setup cannot safely reconcile."""
 
@@ -1373,7 +1385,7 @@ def _unsupported_cached_provisioning_changes(
     if cached_config.machine_type == "vm":
         additive_storage_fields = (
             {"container_storage", "storage_mounts"}
-            if additive_storage_disks
+            if additive_storage_request
             else set()
         )
         changed_fields = [
@@ -1711,19 +1723,21 @@ def run_setup_command(args: argparse.Namespace) -> int:
         cached_provisioning,
         args,
     )
-    additive_storage_disks = _merge_additive_vm_storage(
+    additive_storage_result = _merge_additive_vm_storage(
         config,
         cached_provisioning,
         args,
         provider_rebind=provider_rebind,
     )
+    additive_storage_request = additive_storage_result is not None
+    additive_storage_disks = additive_storage_result or set()
     if cached_provisioning is not None:
         unsupported_changes = _unsupported_cached_provisioning_changes(
             config,
             cached_provisioning,
             args,
             provider_rebind=provider_rebind,
-            additive_storage_disks=additive_storage_disks,
+            additive_storage_request=additive_storage_request,
         )
         if unsupported_changes:
             print(
@@ -1854,10 +1868,16 @@ def run_setup_command(args: argparse.Namespace) -> int:
                         **storage_extension_options,
                     )
                 else:
+                    existing_vm_options = (
+                        {"require_existing_vm": True}
+                        if allow_existing_data_disks
+                        else {}
+                    )
                     provision_vm(
                         config,
                         image=config.vm_image,
                         allow_existing_data_disks=allow_existing_data_disks,
+                        **existing_vm_options,
                     )
             except VMAlreadyExists:
                 from lib.swap_config import swap_device_disk_names

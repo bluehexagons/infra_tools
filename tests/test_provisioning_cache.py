@@ -475,7 +475,49 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
                 current,
                 cached,
                 args,
-                additive_storage_disks=additions,
+                additive_storage_request=additions is not None,
+            ),
+            [],
+        )
+
+    def test_repeated_concise_storage_addition_is_an_idempotent_subset(
+        self,
+    ) -> None:
+        cached = _config(
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["team-data", "bulk-lvm", "512G"],
+            ],
+            storage_mounts=[
+                ["team-data", "/srv/team-files", "ext4", "empty"],
+            ],
+        )
+        current = _config(
+            container_storage=[["team-data", "bulk-lvm", "512G"]],
+            storage_mounts=[
+                ["team-data", "/srv/team-files", "ext4", "empty"],
+            ],
+        )
+        args = _args(
+            container_storage=current.container_storage,
+            storage_mounts=current.storage_mounts,
+        )
+
+        additions = infra_tools._merge_additive_vm_storage(
+            current,
+            cached,
+            args,
+        )
+
+        self.assertEqual(additions, set())
+        self.assertEqual(current.container_storage, cached.container_storage)
+        self.assertEqual(current.storage_mounts, cached.storage_mounts)
+        self.assertEqual(
+            infra_tools._unsupported_cached_provisioning_changes(
+                current,
+                cached,
+                args,
+                additive_storage_request=additions is not None,
             ),
             [],
         )
@@ -535,13 +577,13 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             args,
         )
 
-        self.assertEqual(additions, set())
+        self.assertIsNone(additions)
         self.assertEqual(
             infra_tools._unsupported_cached_provisioning_changes(
                 current,
                 cached,
                 args,
-                additive_storage_disks=additions,
+                additive_storage_request=additions is not None,
             ),
             ["--storage", "--storage-mount"],
         )
@@ -559,9 +601,8 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             storage_mounts=current.storage_mounts,
         )
 
-        self.assertEqual(
-            infra_tools._merge_additive_vm_storage(current, cached, args),
-            set(),
+        self.assertIsNone(
+            infra_tools._merge_additive_vm_storage(current, cached, args)
         )
 
     def test_reuses_metadata_when_explicit_guest_shape_matches(self) -> None:
@@ -1018,6 +1059,7 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             current,
             image=current.vm_image,
             allow_existing_data_disks=True,
+            require_existing_vm=True,
         )
         mock_refresh.assert_called_once_with(
             "10.0.0.50",
@@ -1205,6 +1247,53 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
 
         self.assertEqual(result, 1)
         mock_save.assert_not_called()
+
+    def test_repeated_concise_storage_command_skips_provider_mutation(
+        self,
+    ) -> None:
+        current = _config(
+            container_storage=[["team-data", "bulk-lvm", "512G"]],
+            storage_mounts=[["team-data", "/srv/team-files"]],
+        )
+        cached = _config(
+            container_memory="4G",
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["team-data", "bulk-lvm", "512G"],
+            ],
+            storage_mounts=[["team-data", "/srv/team-files"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        args = _args(
+            container_storage=current.container_storage,
+            storage_mounts=current.storage_mounts,
+        )
+
+        with patch("infra_tools.prompt_for_missing_passwords"), \
+             patch("infra_tools.SetupConfig.from_args", return_value=current), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch(
+                 "infra_tools._prepare_runtime_config_for_cli",
+                 side_effect=lambda config: config,
+             ), \
+             patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.print_setup_summary"), \
+             patch("infra_tools.store_cli_credentials"), \
+             patch("infra_tools.save_setup_command"), \
+             patch("infra_tools.register_proxmox_setup_host"), \
+             patch("infra_tools.run_remote_setup", return_value=0), \
+             patch("infra_tools.ensure_guest_ipv4_route"), \
+             patch("infra_tools.refresh_managed_guest_host_keys"), \
+             patch("lib.proxmox_vm.provision_vm") as mock_provision:
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 0)
+        mock_provision.assert_not_called()
+        self.assertEqual(current.container_storage, cached.container_storage)
+        self.assertEqual(current.storage_mounts, cached.storage_mounts)
 
     def test_migrated_vm_is_verified_and_rebound_to_explicit_destination(
         self,

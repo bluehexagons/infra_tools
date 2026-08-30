@@ -10,10 +10,12 @@ import infra_tools
 from lib.config import SetupConfig
 from lib.proxmox_vm import (
     ProvisionError,
+    VMAlreadyExists,
     _disk_hardware_update_verified,
     _disk_hardware_value,
     _reconcile_existing_vm,
     _storage_specs_with_resolved_pools,
+    provision_vm,
     verify_vm_rebind_source_stopped,
 )
 from lib.vm_storage import VMDataDisk, VMDiskHardware
@@ -163,6 +165,58 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
             )
 
         self.assertEqual(len(mock_run.call_args_list), 4)
+
+    @patch("lib.proxmox_vm._preflight_data_disk_capacity")
+    @patch("lib.proxmox_vm._enforce_memory_floor")
+    @patch("lib.proxmox_vm._report_memory_capacity", return_value=False)
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_memory_floor_policy_precedes_additive_disk_attachment(
+        self,
+        mock_run,
+        _mock_memory_capacity,
+        mock_enforce,
+        mock_disk_capacity,
+    ) -> None:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\nmemory: 2048\nballoon: 1024\n"
+                    "scsi0: local-lvm:vm-112-disk-0,size=32G\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+        ]
+        mock_enforce.side_effect = ProvisionError("unsafe floor")
+
+        with self.assertRaisesRegex(ProvisionError, "unsafe floor"):
+            _reconcile_existing_vm(
+                "10.0.0.1",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_memory_mib=8192,
+                desired_balloon_min_mib=4096,
+                desired_disk_hardware={
+                    "root": VMDiskHardware("root", False, False),
+                    "data": VMDiskHardware("data", False, False),
+                },
+                desired_storage_layout={
+                    "root": VMDataDisk("root", "local-lvm", "32G"),
+                    "data": VMDataDisk("data", "bulk-lvm", "64G"),
+                },
+                allow_managed_data_disks=True,
+                attach_missing_data_disks={"data"},
+            )
+
+        mock_disk_capacity.assert_not_called()
+        self.assertFalse(
+            any(call.args[3].startswith("qm set") for call in mock_run.call_args_list)
+        )
 
     def test_resolved_storage_pools_replace_auto_declarations(self) -> None:
         self.assertEqual(
@@ -318,6 +372,60 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
             mock_run.call_args_list[4].args[3],
             "qm set 112 --scsi2 "
             "bulk-lvm:512,iothread=1,serial=it-syncthing-data",
+        )
+
+    @patch("lib.proxmox_vm._preflight_data_disk_capacity")
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_multiple_attachments_require_all_scsi_slots_before_mutation(
+        self,
+        mock_run,
+        mock_capacity,
+    ) -> None:
+        occupied = "\n".join(
+            f"scsi{index}: manual:vm-112-disk-{index},size=8G"
+            for index in range(1, 30)
+        )
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "scsi0: local-lvm:vm-112-disk-0,size=32G\n"
+                    f"{occupied}\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+        ]
+        hardware = {
+            "root": VMDiskHardware("root", False, False),
+            "data-one": VMDiskHardware("data-one", False, False),
+            "data-two": VMDiskHardware("data-two", False, False),
+        }
+        layout = {
+            "root": VMDataDisk("root", "local-lvm", "32G"),
+            "data-one": VMDataDisk("data-one", "bulk-lvm", "64G"),
+            "data-two": VMDataDisk("data-two", "bulk-lvm", "64G"),
+        }
+
+        with self.assertRaisesRegex(ProvisionError, "only 1 free SCSI slot"):
+            _reconcile_existing_vm(
+                "10.0.0.1",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_disk_hardware=hardware,
+                desired_storage_layout=layout,
+                allow_managed_data_disks=True,
+                attach_missing_data_disks={"data-one", "data-two"},
+            )
+
+        mock_capacity.assert_not_called()
+        self.assertFalse(
+            any(call.args[3].startswith("qm set") for call in mock_run.call_args_list)
         )
 
     @patch("lib.proxmox_vm._ssh_run")
@@ -702,6 +810,36 @@ class TestExistingVMMemoryReconciliation(unittest.TestCase):
         verify_vm_rebind_source_stopped(config, dry_run=True)
 
         mock_run.assert_not_called()
+
+    @patch("lib.proxmox_vm._reconcile_existing_vm", return_value=True)
+    @patch("lib.proxmox_vm.auto_detect_bridge", return_value="vmbr0")
+    @patch("lib.proxmox_vm._resolve_public_key_path")
+    @patch("lib.proxmox_vm._resolve_image", return_value=(MagicMock(), None))
+    def test_existing_only_reconciliation_does_not_require_public_key_file(
+        self,
+        _mock_image,
+        mock_public_key,
+        _mock_bridge,
+        _mock_reconcile,
+    ) -> None:
+        config = SetupConfig(
+            host="10.0.0.50",
+            username="agent",
+            system_type="agent_code_vm",
+            machine_type="vm",
+            hosted_node="10.0.0.10",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+            ssh_key="/keys/private-without-pub",
+        )
+
+        with self.assertRaises(VMAlreadyExists):
+            provision_vm(config, require_existing_vm=True)
+
+        mock_public_key.assert_not_called()
 
 
 class TestCachedProvisioningChangeSafety(unittest.TestCase):
