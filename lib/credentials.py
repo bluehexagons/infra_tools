@@ -5,15 +5,28 @@ from __future__ import annotations
 import copy
 import json
 import os
+import subprocess
 
 from lib.atomic_io import write_json_atomic
 from lib.config import SetupConfig
 from lib.git_credentials import (
+    MAX_GIT_CA_BUNDLE_BYTES,
     encode_git_ca_pem,
     normalize_git_https_origin,
+    parse_git_ca_ssh_source,
     validate_git_ca_pem,
 )
-from lib.workspace import ensure_workspace_dir, get_credentials_path
+from lib.ssh_utils import (
+    build_ssh_command,
+    shell_join,
+    ssh_batch_mode,
+    ssh_process_timeout,
+)
+from lib.workspace import (
+    ensure_workspace_dir,
+    get_credentials_path,
+    get_known_hosts_path,
+)
 
 
 CREDENTIALS_VERSION = 1
@@ -263,8 +276,74 @@ def _resolve_share_credentials(config: SetupConfig, credential_map: dict[str, st
     return resolved_credentials
 
 
-def _read_git_ca_bundle(source_path: str) -> str:
-    """Read and validate one controller-local PEM certificate bundle."""
+def _read_git_ca_bundle_from_ssh(
+    source_path: str,
+    workspace: str | None,
+) -> str:
+    """Read a bounded public certificate bundle over host-key-verified SSH."""
+    ssh_source = parse_git_ca_ssh_source(source_path)
+    if ssh_source is None:
+        raise ValueError("Git CA SSH source expected")
+
+    known_hosts_path = get_known_hosts_path(workspace)
+    if os.path.islink(known_hosts_path) or not os.path.isfile(known_hosts_path):
+        raise ValueError(
+            f"SSH host key for Git CA source {ssh_source.host} is not enrolled. "
+            f"Run infra-tools ssh-key enroll {ssh_source.host}"
+        )
+    read_command = [
+        "head",
+        "-c",
+        str(MAX_GIT_CA_BUNDLE_BYTES + 1),
+        "--",
+        ssh_source.path,
+    ]
+    if ssh_source.username != "root":
+        read_command = ["sudo", "-n", *read_command]
+    batch_mode = ssh_batch_mode()
+    command = build_ssh_command(
+        ssh_source.host,
+        ssh_source.username,
+        port=ssh_source.port,
+        remote_command=shell_join(read_command),
+        batch_mode=batch_mode,
+        known_hosts_path=known_hosts_path,
+    )
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=ssh_process_timeout(60, batch_mode=batch_mode),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(
+            f"Could not retrieve Git CA certificate over SSH from "
+            f"{ssh_source.username}@{ssh_source.host}: {exc}"
+        ) from exc
+    if result.returncode != 0:
+        detail = (result.stderr or "SSH certificate retrieval failed").strip()
+        raise ValueError(
+            f"Could not retrieve Git CA certificate over SSH from "
+            f"{ssh_source.username}@{ssh_source.host}: {detail[:240]}"
+        )
+    try:
+        return validate_git_ca_pem(result.stdout)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid Git CA certificate source {source_path}: {exc}"
+        ) from exc
+
+
+def _read_git_ca_bundle(
+    source_path: str,
+    workspace: str | None = None,
+) -> str:
+    """Read and validate one local or authenticated SSH PEM bundle."""
+    if parse_git_ca_ssh_source(source_path) is not None:
+        return _read_git_ca_bundle_from_ssh(source_path, workspace)
+
     from lib.validation import validate_filesystem_path
 
     validate_filesystem_path(source_path, must_exist=True)
@@ -277,7 +356,7 @@ def _read_git_ca_bundle(source_path: str) -> str:
         raise ValueError(
             f"Git CA certificate source must not be group/world-writable: {source_path}"
         )
-    if os.path.getsize(source_path) > 1024 * 1024:
+    if os.path.getsize(source_path) > MAX_GIT_CA_BUNDLE_BYTES:
         raise ValueError(f"Git CA certificate source exceeds 1 MiB: {source_path}")
     with open(source_path, "r", encoding="utf-8") as file_obj:
         content = file_obj.read()
@@ -288,16 +367,19 @@ def _read_git_ca_bundle(source_path: str) -> str:
         raise ValueError(f"Invalid Git CA certificate source {source_path}: {exc}") from exc
 
 
-def _prepare_git_ca_pems(config: SetupConfig) -> list[list[str]] | None:
+def _prepare_git_ca_pems(
+    config: SetupConfig,
+    workspace: str | None = None,
+) -> list[list[str]] | None:
     prepared: list[list[str]] = []
     for ca_spec in config.git_ca_certificates or []:
         if len(ca_spec) != 2:
             raise ValueError(
-                "--git-ca-certificate requires HTTPS_ORIGIN and PATH"
+                "--git-ca-certificate requires HTTPS_ORIGIN and SOURCE"
             )
         origin, source_path = ca_spec
         normalized_origin = normalize_git_https_origin(origin)
-        content = _read_git_ca_bundle(source_path)
+        content = _read_git_ca_bundle(source_path, workspace)
         prepared.append([normalized_origin, encode_git_ca_pem(content)])
     return prepared or None
 
@@ -331,6 +413,6 @@ def prepare_runtime_config(config: SetupConfig, workspace: str | None = None) ->
     credential_map = load_workspace_credentials(workspace)
     runtime_config.share_credentials = _resolve_share_credentials(runtime_config, credential_map) or None
     runtime_config.smb_mounts = _resolve_named_smb_mounts(runtime_config.smb_mounts, credential_map)
-    runtime_config.git_ca_pems = _prepare_git_ca_pems(runtime_config)
+    runtime_config.git_ca_pems = _prepare_git_ca_pems(runtime_config, workspace)
     runtime_config.git_ca_certificates = None
     return runtime_config

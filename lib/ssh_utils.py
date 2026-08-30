@@ -100,6 +100,7 @@ def build_ssh_command(
     connect_timeout: int | None = 30,
     server_alive_interval: int | None = 30,
     control_path: str | None = None,
+    known_hosts_path: str | None = None,
 ) -> list[str]:
     """Build an SSH command with consistent options."""
 
@@ -109,7 +110,12 @@ def build_ssh_command(
     if port is not None:
         command.extend(["-p", str(port)])
 
-    command.extend(["-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}"])
+    resolved_known_hosts = (
+        os.path.abspath(os.path.expanduser(known_hosts_path))
+        if known_hosts_path is not None
+        else get_workspace_known_hosts_path()
+    )
+    command.extend(["-o", f"UserKnownHostsFile={resolved_known_hosts}"])
     command.extend(["-o", "StrictHostKeyChecking=yes"])
     if batch_mode is None:
         batch_mode = ssh_batch_mode()

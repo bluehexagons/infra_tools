@@ -931,10 +931,10 @@ def add_setup_arguments(
             dest="git_ca_certificates",
             action="append",
             nargs=2,
-            metavar=("HTTPS_ORIGIN", "PATH"),
+            metavar=("HTTPS_ORIGIN", "SOURCE"),
             help=(
-                "Trust a controller-local PEM certificate bundle only for one "
-                "Git HTTPS origin; repeat for additional origins"
+                "Trust a local PATH or authenticated ssh://USERNAME@HOST/PATH "
+                "PEM certificate bundle only for one Git HTTPS origin; repeatable"
             ),
         )
     parser.add_argument(

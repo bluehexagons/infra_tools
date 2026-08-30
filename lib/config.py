@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
-import os
 import shlex
 from dataclasses import dataclass, asdict
 from typing import Optional, cast
@@ -441,7 +440,10 @@ class SetupConfig:
         ):
             raise ValueError("git_host must be a non-empty hostname")
 
-        from lib.git_credentials import normalize_git_https_origin
+        from lib.git_credentials import (
+            normalize_git_ca_source,
+            normalize_git_https_origin,
+        )
 
         for specs in (
             self.git_credentials,
@@ -451,6 +453,9 @@ class SetupConfig:
             for spec in specs or []:
                 if len(spec) == 2 and isinstance(spec[0], str):
                     spec[0] = normalize_git_https_origin(spec[0])
+        for spec in self.git_ca_certificates or []:
+            if len(spec) == 2 and isinstance(spec[1], str):
+                spec[1] = normalize_git_ca_source(spec[1])
 
         if self.editor is not None:
             if self.editor not in EDITORS:
@@ -1803,9 +1808,6 @@ class SetupConfig:
             if clear_git_credentials
             else raw_git_ca_certificates
         )
-        for ca_spec in git_ca_certificates or []:
-            if len(ca_spec) == 2:
-                ca_spec[1] = os.path.abspath(ca_spec[1])
         git_ca_pems = (
             None
             if clear_git_credentials

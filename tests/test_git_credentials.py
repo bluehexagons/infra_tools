@@ -14,7 +14,11 @@ from lib.arg_parser import create_setup_argument_parser
 from lib.cache import merge_setup_configs
 from lib.config import SetupConfig
 from lib.credentials import prepare_runtime_config, set_workspace_credential
-from lib.git_credentials import normalize_git_https_origin
+from lib.git_credentials import (
+    normalize_git_ca_source,
+    normalize_git_https_origin,
+    parse_git_ca_ssh_source,
+)
 from lib.validation import validate_agent_git_settings
 from plugins.common import extend_agent_steps
 
@@ -59,6 +63,26 @@ class TestGitCredentialArguments(unittest.TestCase):
             [[ORIGIN, os.path.abspath("gogs.crt")]],
         )
 
+    def test_setup_parser_accepts_authenticated_ssh_ca_source(self) -> None:
+        parser = create_setup_argument_parser("test")
+        source = (
+            "ssh://gitadmin@192.168.0.51/"
+            "etc/nginx/ssl/192.168.0.51.crt"
+        )
+        args = parser.parse_args(
+            [
+                "192.168.0.41",
+                "agent",
+                "--git-ca-certificate",
+                ORIGIN,
+                source,
+            ]
+        )
+
+        config = SetupConfig.from_args(args, "server_lite")
+
+        self.assertEqual(config.git_ca_certificates, [[ORIGIN, source]])
+
     def test_clear_cannot_be_combined_with_a_new_credential(self) -> None:
         parser = create_setup_argument_parser("test")
         args = parser.parse_args(
@@ -92,6 +116,24 @@ class TestGitCredentialConfiguration(unittest.TestCase):
             normalize_git_https_origin("http://git.example.test")
         with self.assertRaisesRegex(ValueError, "repository path"):
             normalize_git_https_origin("https://git.example.test/team/repo.git")
+
+    def test_ssh_ca_source_is_canonical_and_rejects_embedded_password(self) -> None:
+        source = "ssh://agent@[2001:DB8::51]:2222/etc/nginx/ssl/gogs%20ca.crt"
+
+        normalized = normalize_git_ca_source(source)
+        parsed = parse_git_ca_ssh_source(normalized)
+
+        self.assertEqual(
+            normalized,
+            "ssh://agent@[2001:db8::51]:2222/etc/nginx/ssl/gogs%20ca.crt",
+        )
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.host, "2001:db8::51")
+        self.assertEqual(parsed.path, "/etc/nginx/ssl/gogs ca.crt")
+        with self.assertRaisesRegex(ValueError, "must not contain a password"):
+            parse_git_ca_ssh_source(
+                "ssh://agent:secret@192.168.0.51/etc/nginx/ssl/gogs.crt"
+            )
 
     def test_to_dict_keeps_nonsecret_declaration_only(self) -> None:
         config = _config(
@@ -163,6 +205,54 @@ class TestGitCredentialConfiguration(unittest.TestCase):
             parsed_remote.share_credentials,
             [["gitadmin", "chosen-password"]],
         )
+
+    def test_runtime_fetches_ca_over_host_key_verified_ssh(self) -> None:
+        source = (
+            "ssh://gitadmin@192.168.0.51/"
+            "etc/nginx/ssl/192.168.0.51.crt"
+        )
+        pem = (
+            "-----BEGIN CERTIFICATE-----\nQQ==\n"
+            "-----END CERTIFICATE-----\n"
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            known_hosts = os.path.join(workspace, "known_hosts")
+            with open(known_hosts, "w", encoding="utf-8") as file_obj:
+                file_obj.write("192.168.0.51 ssh-ed25519 AAAA\n")
+            with (
+                patch("lib.credentials.build_ssh_command", return_value=["ssh"]) as build,
+                patch("lib.credentials.ssh_batch_mode", return_value=True),
+                patch("lib.credentials.subprocess.run") as run,
+            ):
+                run.return_value = SimpleNamespace(
+                    returncode=0,
+                    stdout=pem,
+                    stderr="",
+                )
+                runtime = prepare_runtime_config(
+                    _config(git_ca_certificates=[[ORIGIN, source]]),
+                    workspace,
+                )
+
+        self.assertIsNotNone(runtime.git_ca_pems)
+        build.assert_called_once()
+        build_kwargs = build.call_args.kwargs
+        self.assertEqual(build.call_args.args, ("192.168.0.51", "gitadmin"))
+        self.assertEqual(build_kwargs["known_hosts_path"], known_hosts)
+        self.assertIn("sudo -n head -c", build_kwargs["remote_command"])
+        run.assert_called_once()
+
+    def test_runtime_ssh_ca_source_requires_enrolled_host_key(self) -> None:
+        source = (
+            "ssh://gitadmin@192.168.0.51/"
+            "etc/nginx/ssl/192.168.0.51.crt"
+        )
+        with tempfile.TemporaryDirectory() as workspace:
+            with self.assertRaisesRegex(ValueError, "ssh-key enroll"):
+                prepare_runtime_config(
+                    _config(git_ca_certificates=[[ORIGIN, source]]),
+                    workspace,
+                )
 
     def test_missing_workspace_password_fails_before_remote_setup(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:

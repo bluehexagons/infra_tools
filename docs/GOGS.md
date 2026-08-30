@@ -194,8 +194,11 @@ infra-tools setup server_dev 192.168.1.41 agent \
   --repo https://git.example.com:3000/team/assets.git
 ```
 
-Add `--git-ca-certificate ORIGIN PATH` when the Gogs certificate is signed by a
-private CA or is the hostless self-signed certificate. `--git-credential`
+Add `--git-ca-certificate ORIGIN SOURCE` when the Gogs certificate is signed by
+a private CA or is the hostless self-signed certificate. A source such as
+`ssh://gitadmin@192.168.0.51/etc/nginx/ssl/192.168.0.51.crt` retrieves the
+certificate through the verified SSH connection and avoids a manual controller
+copy. `--git-credential`
 resolves the matching workspace password and configures both ordinary HTTPS Git
 and Git LFS without putting the password in the repository URL. `--git-lfs`
 does not alter repository URLs or credentials. A loopback-only Gogs deployment

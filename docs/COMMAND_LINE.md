@@ -425,7 +425,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
 | `--git-host HOST` | Select the GitHub CLI credential host; authenticated GitHub setup currently supports `github.com` |
 | `--git-credential HTTPS_ORIGIN USERNAME` | Configure target-user Git and Git LFS authentication for one non-GitHub HTTPS origin using the matching workspace credential; repeatable |
-| `--git-ca-certificate HTTPS_ORIGIN PATH` | Trust a controller-local PEM certificate bundle only for one managed Git HTTPS origin; repeatable |
+| `--git-ca-certificate HTTPS_ORIGIN SOURCE` | Trust a local PEM path or retrieve one from an authenticated `ssh://USERNAME@HOST/ABSOLUTE_PATH` source, scoped only to one managed Git HTTPS origin; repeatable |
 | `--no-git-credentials` | Remove all infra-tools-managed Git HTTPS credentials, helper configuration, and private CA files from the target user |
 | `--git-auth active\|none` | Seed missing active GitHub CLI host credentials, or disable a profile auth default |
 | `--git-auth-file PATH` | Seed a missing selected-host `hosts.yml` entry or one-line GitHub token from a controller-local file |
@@ -540,10 +540,12 @@ existing repository is preserved only when its origin exactly matches.
 Private non-GitHub origins use the separate `--git-credential` flow. Its
 password is resolved from the workspace credential store, never embedded in a
 repository URL or saved setup declaration. `--git-ca-certificate` optionally
-adds origin-scoped trust for an internal CA or self-signed service certificate;
-it does not disable certificate verification globally. The target stores the
-credential in a dedicated mode-`0600` file because unattended Git and Git LFS
-need persistent access.
+adds origin-scoped trust for an internal CA or self-signed service certificate.
+The source may be a local file or a certificate read directly from another
+infra-tools host over host-key-verified SSH, so no intermediate controller copy
+is required. It does not disable certificate verification globally. The target
+stores the credential in a dedicated mode-`0600` file because unattended Git
+and Git LFS need persistent access.
 
 On the configured VM, check selected tools without exposing credential contents:
 

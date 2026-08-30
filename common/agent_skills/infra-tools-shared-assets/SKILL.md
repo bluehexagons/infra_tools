@@ -41,7 +41,9 @@ Managed credentials and private CA settings live below
 `~/.config/infra-tools/git/`. Do not print the credential file. Do not add
 credentials to repository URLs or disable TLS verification; have an operator
 rerun setup with `--git-credential` and, when needed,
-`--git-ca-certificate`.
+`--git-ca-certificate`. Operators can use a host-key-verified
+`ssh://USERNAME@HOST/ABSOLUTE_PATH` certificate source instead of manually
+copying the public certificate through the controller.
 
 Before writing a shared artifact, confirm the intended destination and whether
 another user or job owns it. For a completed archive or export, write a

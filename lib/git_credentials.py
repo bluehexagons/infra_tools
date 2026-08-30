@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import base64
 import binascii
+from dataclasses import dataclass
 import hashlib
 import ipaddress
+import os
+import posixpath
 import re
 import ssl
-from urllib.parse import urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
-from lib.validators import validate_host
+from lib.validators import validate_host, validate_username
 
 
 MAX_GIT_CA_BUNDLE_BYTES = 1024 * 1024
@@ -18,6 +21,28 @@ _PEM_CERTIFICATE_PATTERN = re.compile(
     r"-----BEGIN CERTIFICATE-----\s+.+?\s+-----END CERTIFICATE-----",
     re.DOTALL,
 )
+
+
+@dataclass(frozen=True)
+class GitCaSshSource:
+    """One authenticated SSH source for a public CA certificate bundle."""
+
+    host: str
+    username: str
+    path: str
+    port: int | None = None
+
+
+def _normalize_network_host(hostname: str, *, label: str) -> tuple[str, str]:
+    normalized_host = hostname.lower().rstrip(".")
+    try:
+        address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        if not validate_host(normalized_host):
+            raise ValueError(f"Invalid {label} host: {hostname}")
+        return normalized_host, normalized_host
+    display_host = f"[{address}]" if address.version == 6 else str(address)
+    return str(address), display_host
 
 
 def normalize_git_https_origin(origin: str) -> str:
@@ -42,13 +67,10 @@ def normalize_git_https_origin(origin: str) -> str:
     hostname = parsed.hostname
     if not hostname:
         raise ValueError(f"Invalid Git credential origin host: {origin}")
-    normalized_host = hostname.lower().rstrip(".")
-    try:
-        address = ipaddress.ip_address(normalized_host)
-    except ValueError:
-        address = None
-        if not validate_host(normalized_host):
-            raise ValueError(f"Invalid Git credential origin host: {hostname}")
+    _normalized_host, display_host = _normalize_network_host(
+        hostname,
+        label="Git credential origin",
+    )
     try:
         port = parsed.port
     except ValueError as exc:
@@ -56,12 +78,77 @@ def normalize_git_https_origin(origin: str) -> str:
     if port is not None and not 1 <= port <= 65535:
         raise ValueError(f"Invalid Git credential origin port: {port}")
 
-    if address is None:
-        display_host = normalized_host
-    else:
-        display_host = f"[{address}]" if address.version == 6 else str(address)
     port_suffix = f":{port}" if port is not None and port != 443 else ""
     return f"https://{display_host}{port_suffix}"
+
+
+def parse_git_ca_ssh_source(source: str) -> GitCaSshSource | None:
+    """Parse an SSH-backed CA source, returning ``None`` for a local path."""
+    if not isinstance(source, str) or not source or source != source.strip():
+        raise ValueError("Git CA certificate source must be non-empty")
+    if any(ord(character) < 32 or ord(character) == 127 for character in source):
+        raise ValueError(
+            "Git CA certificate source must not contain control characters"
+        )
+    if not source.lower().startswith("ssh://"):
+        if "://" in source:
+            raise ValueError(
+                "Git CA certificate source must be a local path or ssh:// URL"
+            )
+        return None
+
+    parsed = urlsplit(source)
+    if parsed.scheme.lower() != "ssh" or not parsed.netloc:
+        raise ValueError("Git CA SSH source must use ssh://USERNAME@HOST/ABSOLUTE_PATH")
+    if parsed.password is not None:
+        raise ValueError("Git CA SSH source must not contain a password")
+    if parsed.query or parsed.fragment:
+        raise ValueError("Git CA SSH source must not contain a query or fragment")
+
+    username = unquote(parsed.username or "")
+    if not validate_username(username):
+        raise ValueError(f"Invalid Git CA SSH username: {username!r}")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("Git CA SSH source requires a host")
+    normalized_host, _display_host = _normalize_network_host(
+        hostname,
+        label="Git CA SSH source",
+    )
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"Invalid Git CA SSH source port: {source}") from exc
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError(f"Invalid Git CA SSH source port: {port}")
+
+    path = unquote(parsed.path)
+    if not path.startswith("/") or posixpath.normpath(path) != path:
+        raise ValueError("Git CA SSH source path must be absolute and normalized")
+    if any(ord(character) < 32 or ord(character) == 127 for character in path):
+        raise ValueError("Git CA SSH source path must not contain control characters")
+    return GitCaSshSource(
+        host=normalized_host,
+        username=username,
+        path=path,
+        port=port,
+    )
+
+
+def normalize_git_ca_source(source: str) -> str:
+    """Canonicalize a local or authenticated SSH CA certificate source."""
+    ssh_source = parse_git_ca_ssh_source(source)
+    if ssh_source is None:
+        return os.path.abspath(os.path.expanduser(source))
+    try:
+        address = ipaddress.ip_address(ssh_source.host)
+    except ValueError:
+        display_host = ssh_source.host
+    else:
+        display_host = f"[{address}]" if address.version == 6 else str(address)
+    port_suffix = f":{ssh_source.port}" if ssh_source.port is not None else ""
+    encoded_path = quote(ssh_source.path, safe="/-._~")
+    return f"ssh://{ssh_source.username}@{display_host}{port_suffix}{encoded_path}"
 
 
 def git_ca_filename(origin: str) -> str:

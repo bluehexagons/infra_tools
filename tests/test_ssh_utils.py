@@ -114,6 +114,18 @@ class TestSshUtils(unittest.TestCase):
         self.assertIn("ControlPersist=60s", command)
         self.assertIn("ControlPath=/tmp/infra-tools.sock", command)
 
+    def test_build_ssh_command_accepts_explicit_known_hosts_path(self):
+        command = build_ssh_command(
+            "example.com",
+            "deploy",
+            known_hosts_path="/secure/workspace/known_hosts",
+        )
+
+        self.assertIn(
+            "UserKnownHostsFile=/secure/workspace/known_hosts",
+            command,
+        )
+
     @patch("lib.ssh_utils.ssh_batch_mode", return_value=True)
     @patch("lib.ssh_utils.subprocess.run")
     def test_remote_sudo_succeeds_without_prompt_when_nopasswd_is_available(

@@ -269,7 +269,8 @@ infra-tools credentials set agent-git
 infra-tools setup agent_vm 192.168.0.41 agent \
   --git-access read-write \
   --git-credential https://192.168.0.51:3000 agent-git \
-  --git-ca-certificate https://192.168.0.51:3000 /run/infra/gogs-51.crt \
+  --git-ca-certificate https://192.168.0.51:3000 \
+    ssh://gitadmin@192.168.0.51/etc/nginx/ssl/192.168.0.51.crt \
   --git-lfs \
   --repo https://192.168.0.51:3000/team/project.git
 ```
@@ -280,13 +281,24 @@ username must match the workspace credential key and the account expected by
 the Git server. Prefer a separate least-privilege Gogs account for each VM or
 trust boundary instead of distributing the administrator password.
 
-The optional CA flag accepts a controller-local PEM certificate or certificate
-bundle. For the hostless Gogs TLS mode, copy and independently verify the
-server certificate from `/etc/nginx/ssl/192.168.0.51.crt`, then pass the local
-copy as shown above. The source must be a regular non-symlink file no larger
-than 1 MiB and must not be group- or world-writable (`0644` or stricter is
-accepted). Infra-tools validates the PEM source, transports its public contents
-to the target, and configures `http.<origin>.sslCAInfo`; it never sets
+The optional CA flag accepts either a controller-local PEM bundle or an
+authenticated SSH URL. The SSH form reads the public certificate directly from
+the server using the workspace `known_hosts` file and strict host-key checking;
+it never places an intermediate copy on the controller. For the hostless Gogs
+TLS mode shown above, first enroll and verify the server's SSH host key if it is
+not already present:
+
+```bash
+infra-tools ssh-key enroll 192.168.0.51
+```
+
+SSH certificate sources have the form
+`ssh://USERNAME@HOST[:PORT]/ABSOLUTE_PATH`, cannot contain passwords, and use
+non-interactive `sudo` when the SSH user is not root. A local source must be a
+regular non-symlink file no larger than 1 MiB and must not be group- or
+world-writable (`0644` or stricter is accepted). Infra-tools bounds and
+validates either PEM source, transports only its public contents to the target,
+and configures `http.<origin>.sslCAInfo`; it never sets
 `http.sslVerify=false`. Publicly trusted certificates do not need this flag.
 
 On the target, infra-tools installs a URL-scoped Git include and a dedicated
@@ -504,9 +516,9 @@ operator or provisioning service.
 - Agent-provider credential source options are used during staging and are not
   included in saved setup commands or ordinary setup summaries.
 - Managed Git origins and usernames are saved as non-secret declarations; their
-  passwords are resolved from the workspace store for each run. Optional CA
-  source paths are saved, but certificate contents are only transported for the
-  active setup run.
+  passwords are resolved from the workspace store for each run. Optional local
+  or SSH CA source references are saved, but certificate contents are only
+  retrieved and transported for the active setup run.
 - Credential payloads are staged for the target setup, transferred with
   restrictive permissions, and removed after processing or failure cleanup.
 - Device-pairing htpasswd sources use the same transient staging model. The
@@ -533,8 +545,10 @@ and run `agent auth status` without exposing the token.
 For a self-hosted origin, confirm that the exact scheme, host, and port match
 `--git-credential`, the workspace contains the declared username, and the
 server account can access the repository. For a private CA, confirm that the
-matching `--git-ca-certificate` source is current. Do not work around a trust
-failure with `http.sslVerify=false`.
+matching `--git-ca-certificate` source is current. For an SSH source, confirm
+the host key is enrolled in the active workspace, the SSH account is reachable,
+and it has non-interactive sudo access to the certificate. Do not work around a
+trust failure with `http.sslVerify=false`.
 
 **An active source is missing.** For Codex, Claude Code, and OpenCode, inspect
 the expected active-user paths in the authentication table. The tool may be

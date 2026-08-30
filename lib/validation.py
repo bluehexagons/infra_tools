@@ -1172,6 +1172,7 @@ def validate_agent_git_settings(config: Any) -> None:
     from lib.git_credentials import (
         decode_git_ca_pem,
         normalize_git_https_origin,
+        parse_git_ca_ssh_source,
     )
 
     git_access = getattr(config, "git_access", "none")
@@ -1253,7 +1254,7 @@ def validate_agent_git_settings(config: Any) -> None:
             seen_ca_origins.add(origin)
             if encoded:
                 decode_git_ca_pem(spec[1])
-            else:
+            elif parse_git_ca_ssh_source(spec[1]) is None:
                 validate_filesystem_path(spec[1], must_exist=True)
 
     github_auth_requested = bool(
