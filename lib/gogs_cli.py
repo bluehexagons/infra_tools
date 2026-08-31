@@ -1,4 +1,4 @@
-"""Remote health reporting for infra-tools-managed Gogs services."""
+"""Operator commands for infra-tools-managed Gogs services."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import sys
 from typing import Any
 
 from lib.cache import load_setup_command
+from lib.gogs_repository import configure_github_gogs_repository
 from lib.ssh_utils import build_ssh_command, ssh_batch_mode
 from lib.validators import validate_host, validate_username
 
@@ -21,7 +22,10 @@ DEFAULT_MAX_UPDATE_AGE_SECONDS = 9 * 24 * 60 * 60
 
 def add_gogs_subparser(subparsers: argparse._SubParsersAction) -> None:
     """Register Gogs operator commands."""
-    parser = subparsers.add_parser("gogs", help="Inspect a managed Gogs service")
+    parser = subparsers.add_parser(
+        "gogs",
+        help="Inspect Gogs or configure a local GitHub/Gogs repository",
+    )
     commands = parser.add_subparsers(dest="gogs_command", help="Gogs command")
     health = commands.add_parser(
         "health",
@@ -42,6 +46,48 @@ def add_gogs_subparser(subparsers: argparse._SubParsersAction) -> None:
         type=int,
         default=DEFAULT_MIN_FREE_INODES,
         help="Fail below this many available inodes",
+    )
+    configure = commands.add_parser(
+        "repo-configure",
+        help="Use GitHub for code and Gogs for a Git mirror and all LFS objects",
+    )
+    configure.add_argument(
+        "repository",
+        nargs="?",
+        default=".",
+        help="Clean local Git worktree root (default: current directory)",
+    )
+    configure.add_argument(
+        "--github-url",
+        required=True,
+        help="Canonical GitHub HTTPS repository URL",
+    )
+    configure.add_argument(
+        "--gogs-url",
+        required=True,
+        help="Matching Gogs HTTPS repository URL",
+    )
+    configure.add_argument(
+        "--mirror-remote",
+        default="gogs",
+        help="Gogs remote name (default: gogs)",
+    )
+    configure.add_argument(
+        "--track",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="Add a Git LFS tracking pattern; repeatable",
+    )
+    configure.add_argument(
+        "--no-combined-push",
+        action="store_true",
+        help="Do not make a push to origin also update the Gogs Git mirror",
+    )
+    configure.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and print the Git changes without applying them",
     )
 
 
@@ -368,6 +414,35 @@ def _format_health(value: dict[str, Any], host: str) -> str:
 
 def run_gogs_command(args: argparse.Namespace) -> int:
     """Dispatch Gogs operator commands."""
+    if args.gogs_command == "repo-configure":
+        try:
+            result = configure_github_gogs_repository(
+                args.repository,
+                args.github_url,
+                args.gogs_url,
+                mirror_remote=args.mirror_remote,
+                track_patterns=args.track,
+                combined_push=not args.no_combined_push,
+                dry_run=args.dry_run,
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        prefix = "Would configure" if args.dry_run else "Configured"
+        print(f"{prefix} {result['repository']}")
+        print(f"  GitHub origin: {result['github_url']}")
+        print(f"  Gogs mirror: {result['gogs_url']} ({result['mirror_remote']})")
+        print(f"  Git LFS endpoint: {result['lfs_url']}")
+        if args.dry_run:
+            print("Planned commands:")
+            for action in result["actions"]:
+                print(f"  {action}")
+        else:
+            print(
+                "Review and commit .lfsconfig and .gitattributes, then run "
+                "git push origin."
+            )
+        return 0
     if args.gogs_command != "health":
         print("Error: Gogs command required", file=sys.stderr)
         return 1

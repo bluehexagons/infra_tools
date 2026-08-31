@@ -56,6 +56,7 @@ infra-tools agent workspace <create|list|status|remove> ...
 infra-tools agent maintenance <hold|status|release> [HOST USER] [options]
 infra-tools agent support-bundle [--output PATH] [--browser-smoke]
 infra-tools gogs health HOST [--json] [--min-free-bytes N] [--min-free-inodes N]
+infra-tools gogs repo-configure [REPOSITORY] --github-url URL --gogs-url URL [options]
 infra-tools cicd connect BUILD APP [options]
 infra-tools cicd status BUILD [--json]
 infra-tools cicd test BUILD TARGET
@@ -1068,6 +1069,24 @@ a successful target-local request through the direct TLS listener or
 Cloudflare origin route. This is not an external client or authentication
 probe, so it does not prove public DNS, routing, edge, firewall, or credential
 health.
+
+Configure a clean local worktree so GitHub remains the canonical fetch source,
+Gogs receives mirrored Git refs, and only Gogs stores Git LFS objects:
+
+```bash
+infra-tools gogs repo-configure ~/repos/project \
+  --github-url https://github.com/team/project.git \
+  --gogs-url https://git.example.com:3000/team/project.git \
+  --track 'assets/**' --dry-run
+```
+
+Without `--dry-run`, the command configures repository-local Git LFS, the
+`origin` and `gogs` remotes, two `origin` push URLs, `.lfsconfig`, and any
+repeatable `--track` patterns. It never stages, commits, pushes, creates remote
+repositories, or configures credentials. `--no-combined-push` configures only
+GitHub as the `origin` push URL so the Gogs Git remote can be updated
+explicitly. See [Gogs Git service](./GOGS.md) for the storage, credential, and
+off-network clone boundaries.
 
 ## Storage and data movement
 

@@ -206,6 +206,37 @@ is not remotely LFS-ready unless the client has a persistent HTTP tunnel and a
 matching repository LFS URL; routine LFS use should use the HTTPS hostname mode
 or source-restricted private listener.
 
+## GitHub primary with a local Gogs mirror and LFS
+
+Create the same empty repository path on Gogs before configuring an existing
+GitHub worktree. Then run the local utility from a clean worktree on local
+storage:
+
+```bash
+infra-tools gogs repo-configure ~/repos/project \
+  --github-url https://github.com/team/project.git \
+  --gogs-url https://git.example.com:3000/team/project.git \
+  --track 'assets/**' \
+  --track '*.blend'
+```
+
+The command installs the repository-local Git LFS hook, keeps GitHub as the
+`origin` fetch URL, adds the `gogs` remote, gives `origin` both GitHub and Gogs
+push URLs, and writes a `.lfsconfig` intended to be committed whose endpoint is
+the Gogs repository. One subsequent `git push origin` therefore uploads LFS
+objects to Gogs and sends Git refs and LFS pointer files to both GitHub and
+Gogs. Use `--no-combined-push` when Git refs should be pushed to the `gogs` remote
+separately. The command does not stage, commit, push, create either remote
+repository, or configure credentials.
+
+Run first with `--dry-run` to inspect the exact Git commands. The utility
+rejects a dirty worktree, embedded credentials, non-HTTPS repository URLs,
+unsafe `.lfsconfig` or `.gitattributes` targets, and CIFS, SSHFS, NFS, or other
+known remote worktree filesystems. Review and commit `.lfsconfig` and
+`.gitattributes` before the first push. Every clone that needs asset contents
+must be able to reach and authenticate to Gogs; an off-network clone can use
+`GIT_LFS_SKIP_SMUDGE=1` until the endpoint becomes reachable.
+
 ## Dedicated mixed-media VM
 
 For a modest internal Git and file server, keep the operating system on the

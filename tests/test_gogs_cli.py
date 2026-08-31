@@ -1,4 +1,4 @@
-"""Tests for the Gogs operator health command."""
+"""Tests for Gogs operator commands."""
 
 from __future__ import annotations
 
@@ -65,6 +65,30 @@ class TestGogsHealthParser(unittest.TestCase):
         self.assertTrue(args.json)
         self.assertEqual(args.min_free_bytes, 2048)
         self.assertEqual(args.min_free_inodes, 50)
+
+    def test_parser_accepts_repository_configuration(self):
+        parser = argparse.ArgumentParser()
+        commands = parser.add_subparsers(dest="command")
+        add_gogs_subparser(commands)
+
+        args = parser.parse_args(
+            [
+                "gogs",
+                "repo-configure",
+                "/srv/project",
+                "--github-url",
+                "https://github.com/team/project.git",
+                "--gogs-url",
+                "https://git.example.test/team/project.git",
+                "--track",
+                "assets/**",
+                "--dry-run",
+            ]
+        )
+
+        self.assertEqual(args.gogs_command, "repo-configure")
+        self.assertEqual(args.track, ["assets/**"])
+        self.assertTrue(args.dry_run)
 
 
 class TestRemoteGogsHealth(unittest.TestCase):
