@@ -284,6 +284,17 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         from common.browser_automation_steps import install_browser_automation
 
         steps.append(("Installing agent browser automation", install_browser_automation))
+    elif config.has_agent_features() and not config.disable_browser_automation:
+        from common.browser_automation_steps import (
+            reconcile_existing_browser_automation,
+        )
+
+        steps.append(
+            (
+                "Reconciling existing agent browser automation",
+                reconcile_existing_browser_automation,
+            )
+        )
 
     if config.install_git_lfs:
         steps.append(

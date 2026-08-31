@@ -85,8 +85,62 @@ class BrowserAutomationConfigTests(unittest.TestCase):
             browser_automation_steps.install_browser_automation,
         )
 
+    def test_agent_setup_reconciles_existing_browser_unless_disabled(self) -> None:
+        config = _config("codex", browser_automation=None)
+        steps: list[tuple[str, object]] = []
+
+        extend_agent_steps(config, steps)  # type: ignore[arg-type]
+
+        self.assertIn(
+            (
+                "Reconciling existing agent browser automation",
+                browser_automation_steps.reconcile_existing_browser_automation,
+            ),
+            steps,
+        )
+
+        disabled = SetupConfig(
+            host="example.test",
+            username="agent",
+            system_type="workstation_dev",
+            agent_tools=["codex"],
+            disable_browser_automation=True,
+        )
+        disabled_steps: list[tuple[str, object]] = []
+        extend_agent_steps(disabled, disabled_steps)  # type: ignore[arg-type]
+        self.assertNotIn(
+            "Reconciling existing agent browser automation",
+            [name for name, _function in disabled_steps],
+        )
+
 
 class BrowserAutomationProvisioningTests(unittest.TestCase):
+    def test_existing_install_reconciles_launchers_without_full_reinstall(self) -> None:
+        config = _config("codex", browser_automation=None)
+        with (
+            patch.object(browser_automation_steps, "is_dry_run", return_value=False),
+            patch.object(browser_automation_steps.os.path, "isfile", return_value=True),
+            patch.object(browser_automation_steps, "_write_launchers") as write_launchers,
+            patch.object(browser_automation_steps, "_install_runtime_package") as runtime,
+            patch.object(browser_automation_steps, "_install_browser") as browser,
+        ):
+            browser_automation_steps.reconcile_existing_browser_automation(config)
+
+        write_launchers.assert_called_once_with()
+        runtime.assert_not_called()
+        browser.assert_not_called()
+
+    def test_missing_existing_install_is_not_partially_recreated(self) -> None:
+        config = _config("codex", browser_automation=None)
+        with (
+            patch.object(browser_automation_steps, "is_dry_run", return_value=False),
+            patch.object(browser_automation_steps.os.path, "isfile", return_value=False),
+            patch.object(browser_automation_steps, "_write_launchers") as write_launchers,
+        ):
+            browser_automation_steps.reconcile_existing_browser_automation(config)
+
+        write_launchers.assert_not_called()
+
     def test_runtime_verification_covers_mcp_and_executed_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

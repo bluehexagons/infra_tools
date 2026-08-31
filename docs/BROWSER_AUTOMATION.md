@@ -32,6 +32,10 @@ the VM also need the user-managed Node.js development environment.
 The interactive setup flow offers the same choice after agent selection. A
 saved setup command retains the provider choice, so a later full setup restores
 the browser capability without retaining any browser or website credentials.
+An agent setup that omits the option also refreshes launchers for a complete
+existing managed browser installation; this keeps safety defaults current when
+the controller updates the target source independently of optional capability
+selection. An explicit `--no-browser-automation` suppresses that reconciliation.
 For an explicit `--steps` setup, include `install_browser_automation` after
 installing the selected compatible agent; it is available as a registered
 custom step as well.

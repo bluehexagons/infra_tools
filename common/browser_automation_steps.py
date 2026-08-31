@@ -336,6 +336,32 @@ def _write_launchers() -> None:
     write_text_atomic(PLAYWRIGHT_SMOKE_SCRIPT, _SMOKE_SCRIPT_CONTENT, mode=0o644)
 
 
+def reconcile_existing_browser_automation(config: SetupConfig) -> None:
+    """Refresh launchers for an existing managed browser installation."""
+    if config.browser_automation or config.disable_browser_automation:
+        return
+    if is_dry_run():
+        print(
+            "  [DRY-RUN] Would reconcile existing managed Playwright launchers "
+            "when installed"
+        )
+        return
+
+    required_paths = (
+        PLAYWRIGHT_MCP_CLI,
+        PLAYWRIGHT_CLI,
+        PLAYWRIGHT_MCP_WRAPPER,
+        PLAYWRIGHT_DOCTOR_WRAPPER,
+        PLAYWRIGHT_SMOKE_SCRIPT,
+    )
+    if not all(os.path.isfile(path) for path in required_paths):
+        print("  ✓ No complete existing Playwright browser installation to reconcile")
+        return
+
+    _write_launchers()
+    print("  ✓ Existing Playwright browser launchers reconciled")
+
+
 def _install_browser(config: SetupConfig) -> bool:
     """Install OS dependencies and a user-owned Chromium browser payload."""
     user_home = _user_home(config)

@@ -27,6 +27,12 @@ capability is expected unless setup requested `--browser-automation
 playwright`; report the missing capability instead of installing an unrelated
 browser stack or exposing a browser service.
 
+If the doctor reports a complete installation with stale managed launcher
+defaults, rerun the saved agent setup. Existing launchers reconcile even when
+the browser option is not restated; an explicitly disabled capability does not.
+If the installation is incomplete, rerun setup with
+`--browser-automation playwright` and its compatible agent selection.
+
 If `preview_status` or `preview_open` reports that no preview automation host
 is available, treat that as a handoff rather than an application failure and
 run the browser capability doctor above. State explicitly that the fallback is
