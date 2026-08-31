@@ -204,7 +204,7 @@ def render_web_panel_nginx(
 """
     server_names = " ".join(_url_host(identity) for identity in identities)
     return f"""{_NGINX_MARKER}
-limit_req_zone $binary_remote_addr zone=infra_tools_web_panel_auth:10m rate=5r/m;
+limit_req_zone $binary_remote_addr zone=infra_tools_web_panel_auth:10m rate=120r/m;
 
 map $status $infra_tools_web_panel_auth_failure {{
     default 0;

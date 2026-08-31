@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import contextmanager, nullcontext, redirect_stdout
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -435,6 +435,7 @@ class WebPanelRenderingTest(unittest.TestCase):
 
         self.assertIn("listen 443 ssl", rendered)
         self.assertIn("auth_basic_user_file", rendered)
+        self.assertIn("rate=120r/m", rendered)
         self.assertIn("limit_req zone=infra_tools_web_panel_auth", rendered)
         self.assertIn("proxy_pass http://unix:/run/infra-tools-web-panel/http.sock:/", rendered)
         self.assertIn("ssl_certificate /etc/infra-web/tls/internal.crt", rendered)
@@ -526,6 +527,13 @@ class WebPanelRenderingTest(unittest.TestCase):
     def test_t3_update_uses_the_user_launcher_for_readiness(self) -> None:
         state = WebPanelState(self._t3_manifest())
         completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+
+        @contextmanager
+        def linger_shim(home: str, username: str):
+            self.assertEqual(home, "/home/agent")
+            self.assertEqual(username, "agent")
+            yield "/home/agent/.infra-tools-t3-loginctl-test"
+
         with (
             patch(
                 "common.service_tools.web_panel_service.os.path.expanduser",
@@ -539,11 +547,33 @@ class WebPanelRenderingTest(unittest.TestCase):
                 "common.service_tools.web_panel_service.subprocess.run",
                 side_effect=[completed, completed],
             ) as mock_run,
+            patch(
+                "common.service_tools.web_panel_service._temporary_t3_loginctl_shim",
+                side_effect=linger_shim,
+            ),
         ):
             state._run_t3_update()
 
+        update_environment = mock_run.call_args_list[0].kwargs["env"]
+        self.assertTrue(
+            update_environment["PATH"].startswith(
+                "/home/agent/.infra-tools-t3-loginctl-test:"
+            )
+        )
+        self.assertEqual(
+            update_environment["INFRA_TOOLS_T3_LOGINCTL_SHIM"],
+            "/home/agent/.infra-tools-t3-loginctl-test",
+        )
+        self.assertIn(
+            "$INFRA_TOOLS_T3_LOGINCTL_SHIM:",
+            mock_run.call_args_list[0].args[0][2],
+        )
         launcher_path = mock_run.call_args_list[1].kwargs["env"]["PATH"]
         self.assertTrue(launcher_path.startswith("/home/agent/.local/bin:"))
+        self.assertNotIn(
+            "INFRA_TOOLS_T3_LOGINCTL_SHIM",
+            mock_run.call_args_list[1].kwargs["env"],
+        )
         mock_which.assert_called_once_with("infra-tools", path=launcher_path)
         self.assertEqual(state.action_status, "complete")
 
@@ -558,6 +588,10 @@ class WebPanelRenderingTest(unittest.TestCase):
             patch(
                 "common.service_tools.web_panel_service.shutil.which",
                 return_value=None,
+            ),
+            patch(
+                "common.service_tools.web_panel_service._temporary_t3_loginctl_shim",
+                return_value=nullcontext("/tmp/infra-tools-t3-loginctl-test"),
             ),
         ):
             state._run_t3_update()

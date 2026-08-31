@@ -17,6 +17,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
+from common.t3code_steps import _temporary_t3_loginctl_shim
+
 
 _MAX_CONFIG_BYTES = 256 * 1024
 _MAX_REQUEST_BYTES = 16 * 1024
@@ -26,7 +28,8 @@ _T3_UPDATE_SCRIPT = r'''
 set -eu
 export NVM_DIR="$HOME/.nvm"
 if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; fi
-export PATH="$HOME/.local/share/infra-tools/t3-npm/bin:$PATH"
+export PATH="$INFRA_TOOLS_T3_LOGINCTL_SHIM:$HOME/.local/share/infra-tools/t3-npm/bin:$PATH"
+unset INFRA_TOOLS_T3_LOGINCTL_SHIM
 unset npm_config_dangerously_allow_all_scripts
 unset NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS
 unset npm_config_allow_scripts
@@ -208,6 +211,7 @@ class WebPanelState:
     def _run_t3_update(self) -> None:
         home = os.path.expanduser("~")
         environment = os.environ.copy()
+        environment.pop("INFRA_TOOLS_T3_LOGINCTL_SHIM", None)
         environment["HOME"] = home
         environment["PATH"] = os.pathsep.join(
             (
@@ -222,15 +226,23 @@ class WebPanelState:
             f"unix:path=/run/user/{os.getuid()}/bus",
         )
         try:
-            result = subprocess.run(
-                ["/bin/bash", "-lc", _T3_UPDATE_SCRIPT],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=_T3_UPDATE_TIMEOUT_SECONDS,
-                cwd=home,
-                env=environment,
-            )
+            with _temporary_t3_loginctl_shim(
+                home, self.manifest["username"]
+            ) as shim_path:
+                update_environment = environment.copy()
+                update_environment["INFRA_TOOLS_T3_LOGINCTL_SHIM"] = shim_path
+                update_environment["PATH"] = os.pathsep.join(
+                    (shim_path, environment["PATH"])
+                )
+                result = subprocess.run(
+                    ["/bin/bash", "-lc", _T3_UPDATE_SCRIPT],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=_T3_UPDATE_TIMEOUT_SECONDS,
+                    cwd=home,
+                    env=update_environment,
+                )
         except subprocess.TimeoutExpired as exc:
             output = _subprocess_text(exc.stdout) + _subprocess_text(exc.stderr)
             self._finish_action("failed", "T3 Code update timed out.", output)

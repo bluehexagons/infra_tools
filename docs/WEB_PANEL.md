@@ -68,14 +68,17 @@ The configured machine determines the contents:
 - live `infra-web` forwards and published static sites are discovered when the
   page loads;
 - T3 Code machines receive an **Update to latest** action, which runs T3's
-  supported user-service updater and then the managed readiness repair/check;
+  supported user-service updater and then the managed readiness repair/check.
+  During that update, the panel uses infra-tools' short-lived `loginctl` shim
+  to confirm lingering is already enabled or scope T3's redundant no-argument
+  request to the validated setup user;
 - machines without T3 Code do not receive that action.
 
 The page contains no general command runner, terminal, package form, or
 arbitrary service controls. Maintenance actions are fixed server-side
-operations. Nginx applies Basic Auth, request throttling, and a fail2ban jail;
-the application listens only on a Unix socket and uses a per-process CSRF
-token for state-changing forms.
+operations. Nginx applies Basic Auth, request throttling with headroom for the
+update-status refresh, and a fail2ban jail; the application listens only on a
+Unix socket and uses a per-process CSRF token for state-changing forms.
 
 ## Access and troubleshooting
 
