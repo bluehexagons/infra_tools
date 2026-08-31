@@ -716,6 +716,16 @@ def add_setup_arguments(
         ),
     )
     parser.add_argument(
+        "--av-tools",
+        dest="install_av_tools",
+        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+        default=None if not for_remote else False,
+        help=(
+            "Install ImageMagick, FFmpeg (including ffprobe), and ExifTool for "
+            "image, audio, video, and metadata processing"
+        ),
+    )
+    parser.add_argument(
         "--godot",
         dest="install_godot",
         action=argparse.BooleanOptionalAction if not for_remote else "store_true",

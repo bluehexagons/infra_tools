@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from common.common_steps import (
+    AV_TOOL_PACKAGES,
     CLI_TOOL_PACKAGES,
     CONTROL_PLANE_PACKAGES,
     DATA_ANALYSIS_PACKAGES,
@@ -19,6 +20,7 @@ from common.common_steps import (
     check_debian_package_sources,
     configure_time_sync,
     ensure_python_alias,
+    install_av_tools,
     install_cli_tools,
     install_data_analysis_tools,
     update_and_upgrade_packages,
@@ -187,6 +189,13 @@ class TestDevelopmentToolPackages(unittest.TestCase):
         )
         self.assertTrue(set(CLI_TOOL_PACKAGES).isdisjoint(DATA_ANALYSIS_PACKAGES))
 
+    def test_av_packages_are_not_in_cli_baseline(self):
+        self.assertEqual(
+            set(AV_TOOL_PACKAGES),
+            {"ffmpeg", "imagemagick", "libimage-exiftool-perl"},
+        )
+        self.assertTrue(set(CLI_TOOL_PACKAGES).isdisjoint(AV_TOOL_PACKAGES))
+
     @patch("common.common_steps.run")
     @patch("common.common_steps.is_package_installed")
     def test_cli_installer_requests_every_missing_baseline_package(
@@ -229,6 +238,33 @@ class TestDevelopmentToolPackages(unittest.TestCase):
 
         command = mock_run.call_args.args[0]
         for package in DATA_ANALYSIS_PACKAGES:
+            with self.subTest(package=package):
+                self.assertIn(f" {package}", command)
+        for package in CLI_TOOL_PACKAGES:
+            with self.subTest(default_package=package):
+                self.assertNotIn(f" {package}", command)
+
+    @patch("common.common_steps.run")
+    @patch("common.common_steps.is_package_installed")
+    def test_av_installer_requests_only_opt_in_bundle(
+        self, mock_is_installed, mock_run
+    ):
+        mock_is_installed.side_effect = (
+            [False] * len(AV_TOOL_PACKAGES) + [True] * len(AV_TOOL_PACKAGES)
+        )
+        mock_run.return_value = MagicMock(returncode=0)
+
+        install_av_tools(
+            SetupConfig(
+                host="testhost",
+                username="agent",
+                system_type="agent_vm",
+                install_av_tools=True,
+            )
+        )
+
+        command = mock_run.call_args.args[0]
+        for package in AV_TOOL_PACKAGES:
             with self.subTest(package=package):
                 self.assertIn(f" {package}", command)
         for package in CLI_TOOL_PACKAGES:

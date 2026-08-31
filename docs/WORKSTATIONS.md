@@ -110,6 +110,9 @@ optional and can be selected with their runtime flags. The shared CLI baseline
 includes `ripgrep` (`rg`), `jq`, SQLite, `file`, `tree`, `make`, and `patch`.
 Add `--data-analysis` only when the VM needs the larger NumPy, pandas, SciPy,
 Matplotlib, JupyterLab, and csvkit stack; the flag also enables Python tooling.
+Add `--av-tools` when agents need local media inspection or conversion; it
+installs ImageMagick, FFmpeg with ffprobe, and ExifTool without selecting any
+language runtime.
 The guided `infra-tools shell` workstation-development flow offers the same
 bundle as a separate, default-off choice and uses the saved choice as the
 default when starting from a template.

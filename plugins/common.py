@@ -150,6 +150,7 @@ def extend_runtime_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
 
     from common.steps import (
         configure_auto_update_uv,
+        install_av_tools,
         install_data_analysis_tools,
         install_go,
         install_node,
@@ -167,6 +168,8 @@ def extend_runtime_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
         steps.append(("Configuring uv auto-update", configure_auto_update_uv))
     if config.install_data_analysis_tools:
         steps.append(("Installing data-analysis tools", install_data_analysis_tools))
+    if config.install_av_tools:
+        steps.append(("Installing image, audio, and video tools", install_av_tools))
     if config.install_godot:
         from common.godot_steps import (
             configure_auto_update_godot,

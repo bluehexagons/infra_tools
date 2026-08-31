@@ -14,6 +14,11 @@ DATA_ANALYSIS_MARKER_PACKAGES = (
     "jupyterlab",
     "python3-pandas",
 )
+AV_TOOL_MARKER_PACKAGES = (
+    "ffmpeg",
+    "imagemagick",
+    "libimage-exiftool-perl",
+)
 
 
 def check_command_exists(command: str) -> bool:
@@ -93,6 +98,12 @@ def detect_data_analysis_tools() -> bool:
         check_package_installed(package)
         for package in DATA_ANALYSIS_MARKER_PACKAGES
     )
+
+
+def detect_av_tools() -> bool:
+    """Detect the packages from the managed AV tool bundle."""
+
+    return all(check_package_installed(package) for package in AV_TOOL_MARKER_PACKAGES)
 
 
 def detect_deployments() -> list[tuple[str, str]]:
@@ -214,6 +225,7 @@ def reconstruct_configuration(host: str = "localhost", username: str = "root") -
         "install_node": detect_node(),
         "install_python": detect_python(),
         "install_data_analysis_tools": detect_data_analysis_tools(),
+        "install_av_tools": detect_av_tools(),
         "enable_samba": detect_samba(),
     }
 
@@ -254,6 +266,7 @@ def run_reconstruct_command(compact: bool) -> int:
             "install_node": config.install_node,
             "install_python": config.install_python,
             "install_data_analysis_tools": config.install_data_analysis_tools,
+            "install_av_tools": config.install_av_tools,
             "enable_samba": config.enable_samba,
         }
         output.update(extras)

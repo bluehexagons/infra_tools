@@ -108,6 +108,11 @@ DATA_ANALYSIS_PACKAGES = (
     "python3-pandas",
     "python3-scipy",
 )
+AV_TOOL_PACKAGES = (
+    "ffmpeg",
+    "imagemagick",
+    "libimage-exiftool-perl",
+)
 
 
 def _go_release_arch(machine: Optional[str] = None) -> Optional[str]:
@@ -600,6 +605,28 @@ def install_data_analysis_tools(config: SetupConfig) -> None:
         raise RuntimeError(f"Data-analysis tool installation failed: {failed}")
 
     print(f"  ✓ Installed data-analysis tools: {', '.join(missing)}")
+
+
+def install_av_tools(config: SetupConfig) -> None:
+    """Install the opt-in image, audio, and video processing bundle."""
+
+    del config
+    missing = [
+        package for package in AV_TOOL_PACKAGES if not is_package_installed(package)
+    ]
+    if not missing:
+        print("  ✓ AV tools already installed")
+        return
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    package_args = " ".join(shlex.quote(package) for package in missing)
+    result = run(f"{_APT_GET} install -y -qq {package_args}", check=False)
+    remaining = [package for package in missing if not is_package_installed(package)]
+    if result.returncode != 0 or remaining:
+        failed = ", ".join(remaining or missing)
+        raise RuntimeError(f"AV tool installation failed: {failed}")
+
+    print(f"  ✓ Installed AV tools: {', '.join(missing)}")
 
 
 CONTROL_PLANE_PACKAGES = (
