@@ -513,7 +513,17 @@ WantedBy=multi-user.target
             ):
                 return changed
             time.sleep(0.2)
-        raise RuntimeError("The web panel service did not create its HTTP socket")
+        status = run(
+            f"systemctl status {WEB_PANEL_SERVICE_NAME}.service "
+            "--no-pager --lines=20",
+            check=False,
+            capture_output=True,
+        )
+        detail = (
+            getattr(status, "stderr", "") or getattr(status, "stdout", "")
+        ).strip()
+        message = "The web panel service did not create its HTTP socket"
+        raise RuntimeError(message + (f":\n{detail}" if detail else ""))
     except Exception:
         if changed:
             _restore_service(previous)

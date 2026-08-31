@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import contextmanager, nullcontext, redirect_stdout
@@ -185,6 +187,32 @@ class WebPanelPayloadTest(unittest.TestCase):
 
 
 class WebPanelLifecycleTest(unittest.TestCase):
+    def test_service_script_loads_when_launched_outside_the_source_tree(self) -> None:
+        script = os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "common",
+                "service_tools",
+                "web_panel_service.py",
+            )
+        )
+        environment = os.environ.copy()
+        environment.pop("PYTHONPATH", None)
+        with tempfile.TemporaryDirectory() as temporary:
+            result = subprocess.run(
+                [sys.executable, script, "--help"],
+                cwd=temporary,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Serve the infra-tools web panel", result.stdout)
+
     def test_preserved_auth_must_match_the_setup_username(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config_dir = os.path.join(temporary, "config")
@@ -333,6 +361,43 @@ class WebPanelLifecycleTest(unittest.TestCase):
             self.assertIn('Environment="HOME=/home/agent workspace"', content)
             self.assertIn("ProtectControlGroups=true", content)
             self.assertIn("LockPersonality=true", content)
+
+    def test_service_socket_timeout_includes_systemd_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            service_file = os.path.join(temporary, "web-panel.service")
+            account = SimpleNamespace(pw_uid=os.getuid())
+
+            def run_command(command: str, **_kwargs: object) -> SimpleNamespace:
+                if command.startswith("systemctl status "):
+                    return SimpleNamespace(
+                        returncode=3,
+                        stdout="ModuleNotFoundError: No module named 'common'",
+                        stderr="",
+                    )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with (
+                patch.multiple(
+                    "common.web_panel_steps",
+                    WEB_PANEL_SERVICE_FILE=service_file,
+                    WEB_PANEL_SOCKET=os.path.join(temporary, "missing.sock"),
+                ),
+                patch(
+                    "common.web_panel_steps.pwd.getpwnam",
+                    return_value=account,
+                ),
+                patch(
+                    "common.web_panel_steps.run",
+                    side_effect=run_command,
+                ),
+                patch(
+                    "common.web_panel_steps.is_service_active",
+                    return_value=False,
+                ),
+                patch("common.web_panel_steps.time.sleep"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "ModuleNotFoundError"):
+                    _configure_service(_config(), "/home/agent")
 
     def test_removal_refuses_an_unmanaged_nginx_site_before_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

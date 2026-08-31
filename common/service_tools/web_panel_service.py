@@ -11,11 +11,19 @@ import secrets
 import shutil
 import socketserver
 import subprocess
+import sys
 import threading
 import urllib.parse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
+
+
+SOURCE_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+)
+if SOURCE_ROOT not in sys.path:
+    sys.path.insert(0, SOURCE_ROOT)
 
 from common.t3code_steps import _temporary_t3_loginctl_shim
 
