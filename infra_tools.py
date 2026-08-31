@@ -70,6 +70,7 @@ from lib.display import (
     print_setup_summary,
 )
 from lib.interactive_shell import run_interactive_shell
+from lib.installation_info import installation_version
 from lib.notifications import validate_notification_args
 from lib.orchestrator_bootstrap import LAUNCHER_NAME, run_orchestrator_bootstrap
 from lib.plugin_registry import (
@@ -264,6 +265,13 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     parser.add_argument(
         "--workspace",
         help="Workspace root for saved setups, credentials, known_hosts, and history"
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=(
+            f"%(prog)s {installation_version(os.path.dirname(os.path.abspath(__file__)))}"
+        ),
     )
     
     subparsers = parser.add_subparsers(dest="command", help="Available commands")

@@ -17,10 +17,12 @@ a public plain-HTTP server or edit Nginx and UFW directly.
    export preset in `export_presets.cfg`.
 2. Run `godot --headless --path . --editor --quit-after 1` when imports need to
    be completed before export.
-3. From the project root, run `infra-web publish godot`. It derives a stable
-   game slug from the project. Pass an explicit slug, `--preset`, or `--debug`
-   only when the task requires them.
-4. Replace `GAME` below with the lowercase slug printed by `publish`:
+3. From the project root, run `infra-web publish godot --json`. It derives a
+   stable game slug from the project and suppresses the interactive Godot
+   progress stream. Pass an explicit slug, `--preset`, or `--debug` only when
+   the task requires them. The result reports the URL, elapsed time, artifact
+   sizes, and whether it replaced an earlier publication.
+4. Replace `GAME` below with the lowercase `game` value returned by `publish`:
 
    ```bash
    infra-web url GAME

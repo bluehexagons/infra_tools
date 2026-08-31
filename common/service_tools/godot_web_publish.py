@@ -208,6 +208,30 @@ def _make_export_readable(export_dir: str) -> None:
             os.chmod(path, 0o644)
 
 
+def _artifact_summary(export_dir: str, compressed: list[str]) -> dict[str, int]:
+    """Return bounded publication artifact counts and byte totals."""
+    compressed_paths = set(compressed)
+    artifact_count = 0
+    artifact_bytes = 0
+    compressed_bytes = 0
+    for current_dir, _directory_names, file_names in os.walk(export_dir):
+        for name in file_names:
+            path = os.path.join(current_dir, name)
+            if os.path.islink(path) or not os.path.isfile(path):
+                continue
+            size = os.stat(path, follow_symlinks=False).st_size
+            artifact_count += 1
+            artifact_bytes += size
+            if os.path.relpath(path, export_dir) in compressed_paths:
+                compressed_bytes += size
+    return {
+        "artifact_count": artifact_count,
+        "artifact_bytes": artifact_bytes,
+        "compressed_artifact_count": len(compressed),
+        "compressed_artifact_bytes": compressed_bytes,
+    }
+
+
 def _base_url() -> str | None:
     try:
         with open(BASE_URL_FILE, encoding="utf-8") as url_file:
@@ -353,18 +377,25 @@ def _publish(args: argparse.Namespace) -> tuple[str, str, dict[str, object]]:
 
             compressed = _precompress_export(staging_dir) if args.precompress else []
             published_url = _published_url(account.pw_name, game)
+            destination_dir = os.path.join(user_root, game)
+            replaced = bool(
+                os.path.isdir(destination_dir)
+                and not os.path.islink(destination_dir)
+            )
+            artifact_summary = _artifact_summary(staging_dir, compressed)
             metadata: dict[str, object] = {
+                **artifact_summary,
                 "debug": bool(args.debug),
                 "game": game,
                 "precompressed": compressed,
                 "preset": preset,
                 "project": project_dir,
                 "published_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "replaced": replaced,
                 "title": _project_display_name(project_file, project_dir),
                 "url": published_url,
             }
             _write_metadata(os.path.join(staging_dir, METADATA_FILE), metadata)
-            destination_dir = os.path.join(user_root, game)
             _make_export_readable(staging_dir)
             _replace_export(staging_dir, destination_dir)
             write_user_catalog(user_root, account.pw_name)
@@ -374,12 +405,22 @@ def _publish(args: argparse.Namespace) -> tuple[str, str, dict[str, object]]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    started_at = time.monotonic()
     args = _parser().parse_args(argv)
     try:
         game, published_url, metadata = _publish(args)
     except (OSError, RuntimeError, ValueError) as exc:
         if args.json:
-            print(json.dumps({"error": str(exc), "ok": False}, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "elapsed_seconds": round(time.monotonic() - started_at, 3),
+                        "error": str(exc),
+                        "ok": False,
+                    },
+                    sort_keys=True,
+                )
+            )
         else:
             print(f"Error: {exc}", file=sys.stderr)
         return 2 if isinstance(exc, ValueError) else 1
@@ -388,9 +429,19 @@ def main(argv: list[str] | None = None) -> int:
         print(
             json.dumps(
                 {
+                    "artifact_bytes": metadata["artifact_bytes"],
+                    "artifact_count": metadata["artifact_count"],
+                    "compressed_artifact_bytes": metadata[
+                        "compressed_artifact_bytes"
+                    ],
+                    "compressed_artifact_count": metadata[
+                        "compressed_artifact_count"
+                    ],
+                    "elapsed_seconds": round(time.monotonic() - started_at, 3),
                     "game": game,
                     "metadata": metadata,
                     "ok": True,
+                    "replaced": metadata["replaced"],
                     "url": published_url,
                 },
                 sort_keys=True,

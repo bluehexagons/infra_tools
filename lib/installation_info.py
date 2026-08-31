@@ -156,3 +156,11 @@ def read_installation_metadata(installation_root: str) -> JSONDict | None:
     if dirty is not None and not isinstance(dirty, bool):
         return None
     return dict(value)
+
+
+def installation_version(installation_root: str) -> str:
+    """Return the installed snapshot or source-tree project version."""
+    metadata = read_installation_metadata(installation_root)
+    if metadata is not None:
+        return str(metadata["version"])
+    return _project_version(os.path.abspath(installation_root))

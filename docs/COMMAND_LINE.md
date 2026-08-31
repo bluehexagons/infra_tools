@@ -23,6 +23,7 @@ Related pages:
 ## Commands
 
 ```text
+infra-tools --version
 infra-tools setup <system_type> <host> [username] [options]
 infra-tools patch <host> [username] [options]
 infra-tools shares <host> [username] [options]
@@ -64,6 +65,9 @@ infra-tools network ...
 infra-tools proxmox ...
 infra-tools ssh-key enroll <host> [--port PORT] [--yes]
 ```
+
+`infra-tools --version` prints one stable line containing the installed project
+version, suitable for feedback and support records.
 
 Use `infra-tools agent doctor --capability t3code` to check the managed T3
 service, native runtime, provider authentication, Git identity, pairing helper,
@@ -557,6 +561,7 @@ On the configured VM, check selected tools without exposing credential contents:
 ```bash
 infra-tools agent doctor
 infra-tools agent doctor --tool codex --tool claude --json
+infra-tools agent doctor --all-capabilities --json
 infra-tools agent doctor --tool codex --tool opencode --capability browser
 infra-tools agent doctor --capability browser
 infra-tools agent doctor --capability t3code --capability host
@@ -597,6 +602,10 @@ appears as warnings; critical filesystem pressure or a recorded maintenance
 failure makes the capability unhealthy.
 When `--capability` is supplied without `--tool`, doctor checks only the
 requested capability instead of requiring the default set of terminal agents.
+`--all-capabilities` checks browser, host, and T3 Code readiness together with
+the default terminal tools in the same text or JSON result; explicit `--tool`
+flags can narrow the terminal-tool portion. It is mutually exclusive with a
+narrowed `--capability` selection and works with the remote `HOST USER` form.
 Supplying `HOST USER` runs the same doctor through managed SSH from the control
 system and preserves its text or JSON output and exit status. The target must
 have been configured by infra-tools so `/opt/infra_tools` is present. Add

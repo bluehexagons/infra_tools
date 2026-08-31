@@ -27,6 +27,11 @@ capability is expected unless setup requested `--browser-automation
 playwright`; report the missing capability instead of installing an unrelated
 browser stack or exposing a browser service.
 
+If `preview_status` or `preview_open` reports that no preview automation host
+is available, treat that as a handoff rather than an application failure and
+run the browser capability doctor above. State explicitly that the fallback is
+VM-origin testing when it succeeds.
+
 ## Test a project
 
 Keep development servers on loopback. For an external HTTPS URL, publish the
@@ -37,6 +42,17 @@ Test the URL reported by the application or `infra-web`, not a guessed port.
 Capture a small set of user-visible interactions, console failures, and a
 screenshot when it helps the handoff. Avoid recording passwords, tokens,
 private response bodies, or unrelated user data.
+
+For a canvas, map controls from a screenshot and use the managed
+`browser_mouse_click_xy` vision tool. It is a bounded coordinate input tool;
+do not use an unsafe code-evaluation tool merely to call `page.mouse`. Canvas
+coordinates are viewport-relative CSS pixels, so recapture after resizing.
+
+The managed launcher gives actions one second to settle before the next tool
+call. If a WebGL screenshot is still black or partially rendered immediately
+after input or animation, wait another second and retry once. Verify page
+errors with the console tool: Chromium `ReadPixels` messages emitted during
+capture are browser-process warnings, not page console errors.
 
 Opening a collaborative tab or seeing the requested URL in preview status is
 not proof that the page loaded. Confirm rendered text or a snapshot. A hidden
@@ -73,7 +89,9 @@ browser check should navigate to the complete fragment URL.
 
 The managed Playwright fallback keeps generated evidence in the private,
 bounded `~/.local/state/infra_tools/playwright-mcp` directory rather than the
-current repository. Name an explicit output file only when the user requested
+current repository. Omit `filename` for routine evidence; the returned result
+links to the resolved private artifact. Playwright treats an explicit
+`filename` as a workspace deliverable, so name one only when the user requested
 an artifact that belongs with the task deliverables.
 
 ## HTTPS trust

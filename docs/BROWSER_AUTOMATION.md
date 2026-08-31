@@ -62,7 +62,8 @@ owns the `infra-tools-playwright` entry while preserving unrelated settings and
 MCP servers.
 Malformed or symlinked target configuration is rejected.
 
-The MCP launcher always starts Chromium in headless, isolated mode. Each MCP
+The MCP launcher always starts Chromium in headless, isolated mode and enables
+Playwright's bounded vision capability. Each MCP
 connection receives a temporary browser profile; cookies and login state do not
 persist between sessions. This avoids profile locking between simultaneous
 agents and prevents one task from silently inheriting another task's browser
@@ -75,13 +76,18 @@ default to the private
 project. The launcher applies a 256 MiB output ceiling so older evidence is
 evicted without dirtying or filling active Git worktrees. An agent may still
 name an explicit output file when the evidence belongs in a requested
-deliverable.
+deliverable. Omit `filename` for routine evidence: Playwright resolves unnamed
+artifacts below the private output directory and returns their paths, while an
+explicit name deliberately resolves in the active workspace.
 
 ## What agents can do
 
 Once provisioned, Codex or OpenCode can ask the `infra-tools-playwright` MCP server to open
 pages, inspect rendered content, click controls, fill forms, and capture
-screenshots. Browser traffic originates from the VM and is subject to its DNS,
+screenshots. The vision tools include safe viewport-coordinate mouse input for
+canvas applications that expose no internal DOM controls, avoiding unrestricted
+code evaluation for ordinary canvas clicks. Browser traffic originates from
+the VM and is subject to its DNS,
 routing, firewall, proxy, and destination-site controls. The provisioning smoke
 test does not require internet access: it launches Chromium, interacts with a
 local in-memory page, verifies rendering, and closes the browser. The doctor
@@ -89,6 +95,13 @@ allows slow browser operations up to two minutes, with a three-minute hard
 process limit, so a cold browser can complete while a small ballooned VM is
 temporarily swapping. Exceeding that limit reports likely memory, swap, or
 storage pressure instead of an ambiguous locator timeout.
+
+Managed actions settle for one second before returning, which gives WebGL
+canvases more time to present a complete frame after input. A still-empty
+capture should be retried once after another short wait. Chromium GPU capture
+messages such as `ReadPixels` warnings are browser-process diagnostics; use the
+browser console tool to determine whether the page itself logged warnings or
+errors.
 
 Website authentication is deliberately not part of infra-tools credential
 copying. Supply site-specific credentials through the application or a scoped
@@ -118,6 +131,11 @@ private-URL navigation fails, separate the failure layers:
 4. use the explicitly provisioned VM-local browser when a VM-origin rendering
    check is appropriate and the current agent integration permits it.
 
+When T3 reports that no preview automation host is available, run
+`infra-tools agent doctor --capability browser --json` as the explicit fallback
+probe. This is a handoff to a separate VM-origin browser, not evidence that the
+application or collaborative preview URL is unhealthy.
+
 A client-only reachability failure is not evidence that the hosted site is
 down. Do not respond by weakening TLS, expanding gateway/firewall exposure, or
 rebinding the application. Report which network origin passed and which one
@@ -134,11 +152,14 @@ infra-tools agent doctor \
 ```
 
 Add `--json` for automation. The capability is healthy only when both managed
-launchers are executable, every installed compatible agent has the managed MCP
-registration, and the local interaction/rendering smoke test passes. If only
-one compatible agent was provisioned, list only that tool. The default doctor
-tool set still includes all terminal agents, so explicit `--tool` flags are
-useful on deliberately minimal VMs.
+launchers are executable, current private-evidence, safe-coordinate, and
+one-second-settle defaults are present, every installed compatible agent has
+the managed MCP registration, and the local interaction/rendering smoke test
+passes. A stale launcher is unhealthy even when its older smoke test passes;
+rerun the saved setup to reconcile it. If only one compatible agent was
+provisioned, list only that tool. The default doctor tool set still includes
+all terminal agents, so explicit `--tool` flags are useful on deliberately
+minimal VMs.
 
 For lower-level checks:
 

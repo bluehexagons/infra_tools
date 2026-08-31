@@ -278,6 +278,7 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
 
         self.assertIn("--headless", content)
         self.assertIn("--isolated", content)
+        self.assertIn("--caps vision", content)
         self.assertIn('umask 077', content)
         self.assertIn(
             'output_dir="$HOME/.local/state/infra_tools/playwright-mcp"',
@@ -286,6 +287,10 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
         self.assertIn('--output-dir "$output_dir"', content)
         self.assertIn(
             f"--output-max-size {browser_automation_steps.PLAYWRIGHT_MCP_OUTPUT_MAX_BYTES}",
+            content,
+        )
+        self.assertIn(
+            f"--timeout-settle {browser_automation_steps.PLAYWRIGHT_MCP_SETTLE_TIMEOUT_MS}",
             content,
         )
         self.assertNotIn("--no-sandbox", content)
@@ -334,6 +339,15 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             patch.object(agent_cli.os, "access", return_value=True),
             patch.object(
                 agent_cli,
+                "_browser_launcher_features",
+                return_value={
+                    "private_evidence": True,
+                    "coordinate_input": True,
+                    "webgl_settle_delay": True,
+                },
+            ),
+            patch.object(
+                agent_cli,
                 "_tool_path",
                 side_effect=lambda tool, _home: "/tmp/codex" if tool == "codex" else None,
             ),
@@ -355,7 +369,14 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             home.mkdir()
             mcp_wrapper = root / "playwright-mcp"
             doctor_wrapper = root / "playwright-doctor"
-            mcp_wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            mcp_wrapper.write_text(
+                "#!/bin/sh\n"
+                "umask 077\n"
+                'output_dir="$HOME/.local/state/infra_tools/playwright-mcp"\n'
+                "exec playwright-mcp --caps vision "
+                '--output-dir "$output_dir" --timeout-settle 1000\n',
+                encoding="utf-8",
+            )
             doctor_wrapper.write_text("#!/bin/sh\necho browser-ready\n", encoding="utf-8")
             os.chmod(mcp_wrapper, 0o755)
             os.chmod(doctor_wrapper, 0o755)
@@ -379,8 +400,28 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
 
         self.assertTrue(result["installed"])
         self.assertTrue(result["smoke_test"])
+        self.assertTrue(result["managed_defaults"])
         self.assertEqual(result["registrations"], {"codex": True})
         self.assertTrue(result["healthy"])
+
+    def test_doctor_rejects_stale_launcher_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            wrapper = Path(temporary_directory) / "playwright-mcp"
+            wrapper.write_text(
+                "#!/bin/sh\nexec playwright-mcp --headless\n",
+                encoding="utf-8",
+            )
+
+            features = agent_cli._browser_launcher_features(str(wrapper))
+
+        self.assertEqual(
+            features,
+            {
+                "private_evidence": False,
+                "coordinate_input": False,
+                "webgl_settle_delay": False,
+            },
+        )
 
     def test_doctor_accepts_opencode_jsonc_registration(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from contextlib import redirect_stdout
+import io
 import json
 import os
 import subprocess
@@ -153,6 +155,16 @@ class TestInstallationSnapshot(unittest.TestCase):
 
             with self.assertRaisesRegex(ChannelError, "neither"):
                 managed_repository_path(script)
+
+    def test_top_level_version_flag_is_stable_and_machine_readable(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaises(SystemExit) as raised:
+            parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+            parser.parse_args(["--version"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(output.getvalue(), "infra-tools 2.0.0\n")
 
 
 if __name__ == "__main__":

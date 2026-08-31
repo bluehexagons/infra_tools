@@ -60,6 +60,7 @@ SYSTEM_TIMEOUT = "/usr/bin/timeout"
 PLAYWRIGHT_SMOKE_ACTION_TIMEOUT_MS = 120_000
 PLAYWRIGHT_SMOKE_PROCESS_TIMEOUT_SECONDS = 180
 PLAYWRIGHT_MCP_OUTPUT_MAX_BYTES = 256 * 1024 * 1024
+PLAYWRIGHT_MCP_SETTLE_TIMEOUT_MS = 1_000
 PLAYWRIGHT_DEPS_MARKER = (
     f"/var/lib/infra_tools/state/playwright-deps-{PLAYWRIGHT_VERSION}"
 )
@@ -74,7 +75,9 @@ _MCP_WRAPPER_CONTENT = (
     'mkdir -p "$output_dir"\n'
     'chmod 0700 "$output_dir"\n'
     f"exec {SYSTEM_NODE} {PLAYWRIGHT_MCP_CLI} --headless --isolated \\\n"
+    "  --caps vision \\\n"
     '  --output-dir "$output_dir" \\\n'
+    f"  --timeout-settle {PLAYWRIGHT_MCP_SETTLE_TIMEOUT_MS} \\\n"
     f'  --output-max-size {PLAYWRIGHT_MCP_OUTPUT_MAX_BYTES} "$@"\n'
 )
 

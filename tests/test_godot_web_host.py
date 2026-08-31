@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -397,6 +399,53 @@ class TestGodotWebPublisher(unittest.TestCase):
 
             self.assertEqual(result, 0)
             self.assertTrue(os.path.isfile(os.path.join(user_root, "my-great-game", "index.html")))
+
+    def test_json_publish_reports_artifact_sizes_elapsed_time_and_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            project_dir = os.path.join(temporary_dir, "project")
+            games_root = os.path.join(temporary_dir, "games")
+            user_root = os.path.join(games_root, "agent")
+            os.makedirs(project_dir)
+            os.makedirs(user_root)
+            with open(os.path.join(project_dir, "project.godot"), "w", encoding="utf-8"):
+                pass
+            url_file = os.path.join(temporary_dir, "base-url")
+            with open(url_file, "w", encoding="utf-8") as file_obj:
+                file_obj.write("https://games.example:8443\n")
+            account = SimpleNamespace(pw_uid=os.getuid(), pw_name="agent")
+
+            def create_export(command: list[str], **_kwargs: object) -> SimpleNamespace:
+                export_dir = os.path.dirname(command[-1])
+                with open(command[-1], "w", encoding="utf-8") as export_file:
+                    export_file.write("game")
+                with open(os.path.join(export_dir, "demo.wasm"), "wb") as wasm:
+                    wasm.write(b"wasm" * 1024)
+                return SimpleNamespace(returncode=0)
+
+            results: list[dict[str, object]] = []
+            with (
+                patch.object(godot_web_publish, "GAMES_ROOT", games_root),
+                patch.object(godot_web_publish, "BASE_URL_FILE", url_file),
+                patch.object(godot_web_publish, "_current_account", return_value=account),
+                patch.object(godot_web_publish.subprocess, "run", side_effect=create_export),
+            ):
+                for _attempt in range(2):
+                    output = io.StringIO()
+                    with redirect_stdout(output):
+                        result = godot_web_publish.main(
+                            ["demo", "--project", project_dir, "--json"]
+                        )
+                    self.assertEqual(result, 0)
+                    results.append(json.loads(output.getvalue()))
+
+            self.assertFalse(results[0]["replaced"])
+            self.assertTrue(results[1]["replaced"])
+            self.assertEqual(results[0]["artifact_count"], 3)
+            self.assertEqual(results[0]["compressed_artifact_count"], 1)
+            self.assertGreater(results[0]["artifact_bytes"], 4096)
+            self.assertGreater(results[0]["compressed_artifact_bytes"], 0)
+            self.assertGreaterEqual(results[0]["elapsed_seconds"], 0)
+            self.assertEqual(results[0]["url"], "https://games.example:8443/games/agent/demo/")
 
 
 if __name__ == "__main__":

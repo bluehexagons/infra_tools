@@ -82,7 +82,15 @@ redacted readiness records. Release a hold promptly after protected work.
 ## Browser previews
 
 Use the `infra-tools-browser-testing` skill. Prefer T3 Code's collaborative
-preview when attached; the optional VM-local browser is only an SSH fallback.
+preview when attached. If preview status or opening reports that no automation
+host is available, immediately probe the separate VM-local fallback with:
+
+```bash
+infra-tools agent doctor --capability browser --json
+```
+
+The optional VM-local browser is an SSH fallback and tests a different network
+origin from the connected client's preview.
 
 ## Pairing
 

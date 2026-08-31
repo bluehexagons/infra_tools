@@ -148,12 +148,21 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         choices=AGENT_DOCTOR_TOOLS,
         help="Tool to require; repeat as needed",
     )
-    doctor.add_argument(
+    capability_selection = doctor.add_mutually_exclusive_group()
+    capability_selection.add_argument(
         "--capability",
         dest="agent_doctor_capabilities",
         action="append",
         choices=AGENT_DOCTOR_CAPABILITIES,
         help="Provisioned agent capability to verify; repeat as needed",
+    )
+    capability_selection.add_argument(
+        "--all-capabilities",
+        action="store_true",
+        help=(
+            "Check every provisioned capability; default tools are also "
+            "checked unless --tool narrows them"
+        ),
     )
     doctor.add_argument(
         "--json",
@@ -887,6 +896,25 @@ def _opencode_browser_registration(home: str) -> bool:
     )
 
 
+def _browser_launcher_features(path: Optional[str] = None) -> JSONDict:
+    """Report whether the launcher has the current safe browser defaults."""
+    launcher_path = path or _BROWSER_MCP_WRAPPER
+    try:
+        with open(launcher_path, encoding="utf-8") as file_obj:
+            content = file_obj.read()
+    except OSError:
+        content = ""
+    return {
+        "private_evidence": (
+            'output_dir="$HOME/.local/state/infra_tools/playwright-mcp"' in content
+            and '--output-dir "$output_dir"' in content
+            and "umask 077" in content
+        ),
+        "coordinate_input": "--caps vision" in content,
+        "webgl_settle_delay": "--timeout-settle 1000" in content,
+    }
+
+
 def inspect_browser_automation(
     home: Optional[str] = None,
     *,
@@ -898,6 +926,8 @@ def inspect_browser_automation(
         os.path.isfile(path) and os.access(path, os.X_OK)
         for path in (_BROWSER_MCP_WRAPPER, _BROWSER_DOCTOR_WRAPPER)
     )
+    launcher_features = _browser_launcher_features()
+    managed_defaults = all(bool(value) for value in launcher_features.values())
 
     registrations: JSONDict = {}
     if _tool_path("codex", user_home):
@@ -925,6 +955,7 @@ def inspect_browser_automation(
 
     configured = bool(
         launchers_installed
+        and managed_defaults
         and registrations
         and all(bool(value) for value in registrations.values())
     )
@@ -933,6 +964,8 @@ def inspect_browser_automation(
         "capability": "browser",
         "installed": launchers_installed,
         "path": _BROWSER_MCP_WRAPPER if launchers_installed else None,
+        "launcher_features": launcher_features,
+        "managed_defaults": managed_defaults,
         "registrations": registrations,
         "configured": configured,
         "smoke_test": smoke_test,
@@ -1955,6 +1988,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
     requested_capabilities = list(
         getattr(args, "agent_doctor_capabilities", None) or []
     )
+    all_capabilities_requested = bool(
+        getattr(args, "all_capabilities", False)
+    )
+    if all_capabilities_requested:
+        requested_capabilities = list(AGENT_DOCTOR_CAPABILITIES)
     capabilities_explicit = bool(requested_capabilities)
     record_requested = bool(getattr(args, "record", False))
     last_record_requested = bool(getattr(args, "last_record", False))
@@ -1971,8 +2009,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
         remote_arguments = []
         for tool in requested_tools or []:
             remote_arguments.extend(("--tool", tool))
-        for capability in requested_capabilities:
-            remote_arguments.extend(("--capability", capability))
+        if all_capabilities_requested:
+            remote_arguments.append("--all-capabilities")
+        else:
+            for capability in requested_capabilities:
+                remote_arguments.extend(("--capability", capability))
         if getattr(args, "fix", False):
             remote_arguments.append("--fix")
         if record_requested:
@@ -2016,7 +2057,7 @@ def run_agent_command(args: argparse.Namespace) -> int:
             requested_capabilities.append("t3code")
     if requested_tools:
         selected = list(requested_tools)
-    elif capabilities_explicit:
+    elif capabilities_explicit and not all_capabilities_requested:
         selected = []
     else:
         selected = list(DEFAULT_DOCTOR_TOOLS)
@@ -2091,6 +2132,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
                 print(f"  ✓ browser: {result['path']} (smoke test passed)")
             elif not result["installed"]:
                 print("  ✗ browser: Playwright launchers are not installed")
+            elif not result.get("managed_defaults"):
+                print(
+                    "  ✗ browser: managed launcher defaults are stale; "
+                    "rerun the saved setup"
+                )
             elif not result["smoke_test"]:
                 print("  ✗ browser: local smoke test failed")
             else:

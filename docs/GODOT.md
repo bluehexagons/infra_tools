@@ -55,9 +55,9 @@ without writing a game-specific service or Nginx configuration:
 
 ```bash
 cd ~/repos/my-game
-infra-web publish godot
+infra-web publish godot --json
 # Use another preset or create a debug export when needed:
-infra-web publish godot my-game --preset "Web Threads" --debug
+infra-web publish godot my-game --preset "Web Threads" --debug --json
 ```
 
 The resulting URL is
@@ -90,7 +90,9 @@ infra-web remove my-game --yes
 
 `doctor` verifies trusted HTTPS, the secure-context and cross-origin isolation
 headers, and the `application/wasm` content type. `--json` is available on
-publish, list, and doctor for agent automation. `--open` opens a successful
+publish, list, and doctor for agent automation. Publication JSON suppresses
+Godot's progress stream and reports elapsed time, exported artifact counts and
+sizes, and whether the prior snapshot was replaced. `--open` opens a successful
 publication in the user's default browser. Treat the URL returned by
 `infra-web` as authoritative: static games are paths behind the shared Nginx
 HTTPS listener, not processes bound to game-specific ports.
