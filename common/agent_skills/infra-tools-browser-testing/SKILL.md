@@ -15,6 +15,14 @@ to the connected user. That browser runs in the connected client's network and
 trust context; it does not necessarily share the agent VM's routes, source IP,
 DNS, or certificate store.
 
+Collaborative-browser availability is opportunistic. The T3 application may
+normally be minimized, its preview pane may be closed, or the current session
+may have no automation host. Treat those states as a browser-coverage choice,
+not as evidence that the application is unhealthy or that other work must
+pause. Call `preview_status` first. If it reports no automation-capable tab,
+call `preview_open` once before choosing the fallback path; do not repeatedly
+reopen or poll for a browser the user is not currently presenting.
+
 For an SSH-only session, verify the optional VM-local browser before relying on
 it:
 
@@ -32,7 +40,9 @@ before collecting more evidence.
 Use the managed browser integration only when that check succeeds. A missing
 capability is expected unless setup requested `--browser-automation
 playwright`; report the missing capability instead of installing an unrelated
-browser stack or exposing a browser service.
+browser stack or exposing a browser service. When neither browser path is
+available, continue with safe non-browser checks and report the browser
+coverage gap rather than treating routine unavailability as a blocker.
 
 If the doctor reports a complete installation with stale managed launcher
 defaults, rerun the saved agent setup. Existing launchers reconcile even when
@@ -44,6 +54,16 @@ If `preview_status` or `preview_open` reports that no preview automation host
 is available, treat that as a handoff rather than an application failure and
 run the browser capability doctor above. State explicitly that the fallback is
 VM-origin testing when it succeeds.
+
+`visible: false` can describe either a usable background tab or a minimized T3
+application. Navigation and keyboard input may still work, while raster
+snapshot or recording capture may fail. After navigation, attempt one snapshot
+to establish rendered state. If it fails or times out while the tab remains
+available and invisible, do not infer an application, WebGL, TLS, or network
+failure and do not loop on capture. Continue with the healthy VM-origin
+fallback when appropriate. If collaborative evidence matters, tell the user
+that restoring T3 should make the existing tab capturable; after restoration,
+recheck status and retry that tab instead of opening another one.
 
 ## Test a project
 
@@ -69,8 +89,15 @@ capture are browser-process warnings, not page console errors.
 
 Opening a collaborative tab or seeing the requested URL in preview status is
 not proof that the page loaded. Confirm rendered text or a snapshot. A hidden
-preview (`visible: false`) can still be automation-capable; visibility and
-network reachability are separate.
+preview can still be automation-capable, but a minimized window may make
+visual capture unavailable; visibility, capture capability, and network
+reachability are separate.
+
+For WebAssembly and WebGL applications, the browser's load milestone can
+precede runtime initialization. A snapshot of a splash screen or progress bar
+proves that the document rendered, not that the application is ready. When the
+preview is visible, wait one bounded startup interval and capture the expected
+application frame once before assessing the result.
 
 A generic navigation failure also does not prove that the preview host
 detached. If preview status remains available, inspect a snapshot before

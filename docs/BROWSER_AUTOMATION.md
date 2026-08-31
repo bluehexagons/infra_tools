@@ -123,6 +123,30 @@ an internal `infra-web` URL such as `https://192.168.x.x:8443/...` can pass
 when the client lacks a route to that LAN, is outside the gateway's allowed
 source ranges, or has not enrolled the local CA.
 
+Collaborative preview is an opportunistic test surface. During normal agent
+work, T3 may be minimized, its preview pane may be closed, or no preview
+automation host may be attached. These are expected coverage states, not
+application-health failures and not reasons to pause unrelated implementation
+or non-browser verification.
+
+Agents should call preview status first and open a preview once when no
+automation-capable tab is attached. A tab with `visible: false` may still
+navigate and accept input, but a minimized T3 window can make snapshots or
+recordings fail. Attempt one snapshot after navigation. If capture fails or
+times out while the tab remains available and invisible, do not repeatedly
+retry or diagnose the application, WebGL, TLS, or network from that result.
+Use the healthy VM-local fallback when its different network origin is
+appropriate, or finish with non-browser checks and report the coverage gap.
+When collaborative evidence is important, restoring T3 should make the
+existing tab capturable; recheck status and retry that tab rather than opening
+duplicates.
+
+For WebAssembly and WebGL applications, successful browser navigation can
+precede runtime initialization. A snapshot containing only a splash screen or
+progress bar confirms document rendering but not application readiness. Wait
+one bounded startup interval and capture the expected application frame once;
+do not turn ordinary runtime startup into an unbounded polling loop.
+
 An opened preview tab or a status result containing the requested URL does not
 prove the document rendered. Confirm a snapshot or user-visible content. When
 private-URL navigation fails, separate the failure layers:
@@ -142,7 +166,10 @@ private-URL navigation fails, separate the failure layers:
 When T3 reports that no preview automation host is available, run
 `infra-tools agent doctor --capability browser --json` as the explicit fallback
 probe. This is a handoff to a separate VM-origin browser, not evidence that the
-application or collaborative preview URL is unhealthy.
+application or collaborative preview URL is unhealthy. If that optional
+capability is absent or unhealthy, continue with safe non-browser checks and
+state what browser coverage could not be collected; do not install a separate
+automation stack ad hoc.
 
 A client-only reachability failure is not evidence that the hosted site is
 down. Do not respond by weakening TLS, expanding gateway/firewall exposure, or
