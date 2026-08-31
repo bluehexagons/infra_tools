@@ -8,6 +8,7 @@ import html
 import json
 import os
 import secrets
+import shlex
 import shutil
 import socketserver
 import subprocess
@@ -769,13 +770,53 @@ h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.015em; }
 .metric-value { display: block; font-size: 1.15rem; font-weight: 750; }
 .metric-description { display: block; margin-top: 4px; color: var(--muted); font-size: .82rem; }
 .trust-panel {
+  padding: 17px 18px 18px;
+}
+.trust-disclosure {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.trust-disclosure > summary {
+  display: flex;
+  width: auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  color: var(--text);
+  list-style: none;
+}
+.trust-disclosure > summary::-webkit-details-marker { display: none; }
+.trust-disclosure > summary::after {
+  content: "+";
+  color: var(--accent);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+.trust-disclosure[open] > summary { border-bottom: 1px solid var(--line); }
+.trust-disclosure[open] > summary::after { content: "−"; }
+.trust-summary-label { display: block; font-weight: 750; }
+.trust-summary-note { display: block; color: var(--muted); font-size: .85rem; }
+.trust-panel > strong { display: block; }
+.trust-panel > p { margin: 5px 0 0; color: var(--muted); }
+.trust-panel details { margin-top: 14px; }
+.trust-panel details > summary { width: auto; font-weight: 700; }
+.trust-panel details[open] > summary { margin-bottom: 10px; }
+.trust-panel .trust-actions + .fingerprint { margin-top: 13px; }
+.trust-gui { margin: 0; padding-left: 22px; }
+.trust-gui li { margin-top: 8px; }
+.trust-gui li:first-child { margin-top: 0; }
+.trust-panel-public {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
   box-shadow: var(--shadow);
 }
-.trust-panel > p { margin: 5px 0 0; color: var(--muted); }
+.trust-panel-public > p { margin: 5px 0 0; color: var(--muted); }
 .trust-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 15px; }
 .trust-download {
   display: inline-block;
@@ -787,8 +828,10 @@ h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.015em; }
   text-decoration: none;
 }
 .fingerprint { display: block; margin-top: 13px; overflow-wrap: anywhere; }
-.trust-steps { margin: 10px 0 0; padding-left: 22px; }
-.trust-steps li { margin-top: 8px; }
+.trust-intro { margin: 10px 0; }
+.platform-script { margin-top: 15px; }
+.platform-script h3 { margin: 0 0 5px; font-size: .95rem; }
+.platform-script pre { margin: 0; max-height: none; user-select: all; }
 .access-list {
   list-style: none;
   padding: 0;
@@ -888,6 +931,187 @@ def _system_type_label(value: str) -> str:
     return " ".join("VM" if word.lower() == "vm" else word.capitalize() for word in words)
 
 
+def _linux_trust_script(
+    fingerprint: str,
+    download_url: str,
+    install_commands: str,
+) -> str:
+    return f"""(
+  set -eu
+  download_url={shlex.quote(download_url)}
+  expected_sha256='{fingerprint}'
+  certificate='./infra-tools-ca.crt'
+  temporary="${{certificate}}.download"
+  trap 'rm -f "$temporary"' EXIT
+  # TLS is untrusted until this CA is installed; SHA-256 is checked below.
+  if command -v curl >/dev/null 2>&1; then
+    curl --fail --location --show-error --insecure --output "$temporary" "$download_url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget --no-check-certificate --output-document="$temporary" "$download_url"
+  else
+    echo 'Install curl or wget, then run this script again.'
+    exit 1
+  fi
+  actual_sha256=$(sha256sum "$temporary")
+  actual_sha256=${{actual_sha256%% *}}
+  if [ "$actual_sha256" != "$expected_sha256" ]; then
+    echo 'SHA-256 mismatch; certificate was not installed.'
+    exit 1
+  fi
+  mv "$temporary" "$certificate"
+  trap - EXIT
+{install_commands}
+  echo 'Certificate downloaded, verified, and installed. Fully restart your browser.'
+)"""
+
+
+def _macos_trust_script(fingerprint: str, download_url: str) -> str:
+    return f"""(
+  set -eu
+  download_url={shlex.quote(download_url)}
+  expected_sha256='{fingerprint}'
+  certificate='./infra-tools-ca.crt'
+  temporary="${{certificate}}.download"
+  trap 'rm -f "$temporary"' EXIT
+  # TLS is untrusted until this CA is installed; SHA-256 is checked below.
+  curl --fail --location --show-error --insecure --output "$temporary" "$download_url"
+  actual_sha256=$(shasum -a 256 "$temporary")
+  actual_sha256=${{actual_sha256%% *}}
+  if [ "$actual_sha256" != "$expected_sha256" ]; then
+    echo 'SHA-256 mismatch; certificate was not installed.'
+    exit 1
+  fi
+  mv "$temporary" "$certificate"
+  trap - EXIT
+  sudo security add-trusted-cert -d -r trustRoot \\
+    -k /Library/Keychains/System.keychain "$certificate"
+  echo 'Certificate downloaded, verified, and installed. Fully restart your browser.'
+)"""
+
+
+def _platform_script(label: str, script: str) -> str:
+    return (
+        '<div class="platform-script"><h3>'
+        + html.escape(label)
+        + "</h3><pre><code>"
+        + html.escape(script)
+        + "</code></pre></div>"
+    )
+
+
+def _render_certificate_trust(
+    trust: dict[str, str | bool] | None,
+) -> str:
+    if not trust:
+        return ""
+    if trust.get("publicly_trusted") is True:
+        return '''<section aria-labelledby="trust-heading">
+<div class="section-heading"><div><p class="section-kicker">Secure connection</p>
+<h2 id="trust-heading">Certificate trust</h2></div></div>
+<div class="trust-panel-public"><strong>No certificate installation required</strong>
+<p>The shared web-hosting certificate is issued by a publicly trusted authority.</p></div></section>'''
+
+    download_url = str(trust["url"])
+    trust_url = html.escape(download_url, quote=True)
+    fingerprint = str(trust["sha256"])
+    powershell_url = download_url.replace("'", "''")
+    scripts = "".join(
+        (
+            _platform_script(
+                "Debian / Ubuntu",
+                _linux_trust_script(
+                    fingerprint,
+                    download_url,
+                    "  sudo install -m 0644 \"$certificate\" "
+                    "/usr/local/share/ca-certificates/infra-tools-ca.crt\n"
+                    "  sudo update-ca-certificates",
+                ),
+            ),
+            _platform_script(
+                "Arch Linux",
+                _linux_trust_script(
+                    fingerprint,
+                    download_url,
+                    "  if ! sudo trust anchor \"$certificate\"; then\n"
+                    "    sudo install -Dm0644 \"$certificate\" "
+                    "/etc/ca-certificates/trust-source/anchors/infra-tools-ca.crt\n"
+                    "  fi\n"
+                    "  sudo update-ca-trust",
+                ),
+            ),
+            _platform_script(
+                "Fedora / RHEL",
+                _linux_trust_script(
+                    fingerprint,
+                    download_url,
+                    "  sudo install -Dm0644 \"$certificate\" "
+                    "/etc/pki/ca-trust/source/anchors/infra-tools-ca.crt\n"
+                    "  sudo update-ca-trust extract",
+                ),
+            ),
+            _platform_script(
+                "macOS",
+                _macos_trust_script(fingerprint, download_url),
+            ),
+            _platform_script(
+                "Windows PowerShell",
+                f'''$DownloadUrl = '{powershell_url}'
+$ExpectedSha256 = "{fingerprint}"
+$Certificate = Join-Path (Get-Location) "infra-tools-ca.crt"
+$Temporary = "$Certificate.download"
+Remove-Item -LiteralPath $Temporary -Force -ErrorAction SilentlyContinue
+try {{
+  # TLS verification is skipped only for this CA bootstrap; SHA-256 is checked below.
+  if ((Get-Command Invoke-WebRequest).Parameters.ContainsKey("SkipCertificateCheck")) {{
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $Temporary -SkipCertificateCheck
+  }} else {{
+    $PreviousCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+    try {{
+      [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{ $true }}
+      Invoke-WebRequest -Uri $DownloadUrl -OutFile $Temporary -UseBasicParsing
+    }} finally {{
+      [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $PreviousCallback
+    }}
+  }}
+  $ActualSha256 = (Get-FileHash -LiteralPath $Temporary -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($ActualSha256 -ne $ExpectedSha256) {{
+    throw "SHA-256 mismatch; certificate was not installed."
+  }}
+  Move-Item -LiteralPath $Temporary -Destination $Certificate -Force
+}} catch {{
+  Remove-Item -LiteralPath $Temporary -Force -ErrorAction SilentlyContinue
+  throw
+}}
+& certutil.exe -user -addstore -f Root $Certificate
+if ($LASTEXITCODE -ne 0) {{ throw "certutil failed with exit code $LASTEXITCODE" }}
+Write-Host "Certificate downloaded, verified, and installed. Fully restart your browser."''',
+            ),
+        )
+    )
+    escaped_fingerprint = html.escape(fingerprint)
+    return f'''<section aria-label="Certificate trust">
+<details class="trust-disclosure"><summary><span><span class="trust-summary-label">Certificate trust</span>
+<span class="trust-summary-note">One-time setup for browsers and other devices</span></span></summary>
+<div class="trust-panel"><strong>Trust this machine on another device</strong>
+<p>Install this machine's public CA once to trust the web panel, hosted sites, and managed HTTPS services. The help stays collapsed when you do not need it.</p>
+<div class="trust-actions"><a class="trust-download" href="{trust_url}">Download VM CA certificate</a></div>
+<code class="fingerprint">SHA-256 {escaped_fingerprint}</code>
+<details><summary>Download, verify, and install with a script</summary>
+<p class="trust-intro">Open a terminal in your Downloads folder (or wherever you want to keep the certificate), then paste the matching script. It downloads the file, verifies this machine's exact fingerprint, and stops before installation if verification fails.</p>
+{scripts}
+</details>
+<details><summary>Manual / GUI installation</summary><p class="trust-intro">Download the certificate above and verify its SHA-256 matches the displayed fingerprint before following the platform steps.</p><ul class="trust-gui">
+<li><strong>Windows:</strong> download the certificate, open it, choose Install Certificate → Current User, then place it in Trusted Root Certification Authorities.</li>
+<li><strong>macOS:</strong> download it, import it into the System keychain with Keychain Access, open the certificate, and set Trust to Always Trust.</li>
+<li><strong>Firefox on Linux:</strong> Settings → Privacy &amp; Security → Certificates → View Certificates → Authorities → Import. Chromium-based browsers use the operating-system store, so use the script above.</li>
+<li><strong>ChromeOS:</strong> Certificate Manager → Authorities → Import, then enable website trust.</li>
+<li><strong>Android:</strong> Security &amp; privacy → Install a certificate → CA certificate.</li>
+<li><strong>iPhone / iPad:</strong> install the downloaded profile, then enable it under Settings → General → About → Certificate Trust Settings.</li>
+</ul></details>
+<p class="trust-intro">For a manual transfer, copy <code>/srv/infra-tools/web/infra-tools-ca.crt</code> over SSH and compare its SHA-256 with the value above before installing it.</p>
+</div></details></section>'''
+
+
 def render_page(state: WebPanelState) -> str:
     """Render a small no-JavaScript dashboard from current capability state."""
 
@@ -935,32 +1159,7 @@ def render_page(state: WebPanelState) -> str:
         for record in overview
     )
 
-    trust = discover_certificate_trust()
-    trust_section = ""
-    if trust and trust.get("publicly_trusted") is True:
-        trust_section = '''<section aria-labelledby="trust-heading">
-<div class="section-heading"><div><p class="section-kicker">Secure connection</p>
-<h2 id="trust-heading">Certificate trust</h2></div></div>
-<div class="trust-panel"><strong>No certificate installation required</strong>
-<p>The shared web-hosting certificate is issued by a publicly trusted authority.</p></div></section>'''
-    elif trust:
-        trust_url = html.escape(str(trust["url"]), quote=True)
-        fingerprint = html.escape(str(trust["sha256"]))
-        trust_section = f'''<section aria-labelledby="trust-heading">
-<div class="section-heading"><div><p class="section-kicker">One-time setup</p>
-<h2 id="trust-heading">Certificate trust</h2></div></div>
-<div class="trust-panel"><strong>Trust this machine on another device</strong>
-<p>Install this machine's public CA once to trust the web panel, hosted sites, and managed HTTPS services. Compare the fingerprint before installing it.</p>
-<div class="trust-actions"><a class="trust-download" href="{trust_url}">Download VM CA certificate</a></div>
-<code class="fingerprint">SHA-256 {fingerprint}</code>
-<details><summary>Installation help</summary><ol class="trust-steps">
-<li><strong>Verify first:</strong> run <code>sha256sum infra-tools-ca.crt</code> on Linux or <code>Get-FileHash .\\infra-tools-ca.crt -Algorithm SHA256</code> in PowerShell and compare it with the fingerprint above.</li>
-<li><strong>If the download is blocked:</strong> copy <code>/srv/infra-tools/web/infra-tools-ca.crt</code> over SSH, then verify it the same way.</li>
-<li><strong>Debian / Ubuntu:</strong> copy the verified certificate to <code>/usr/local/share/ca-certificates/infra-tools.crt</code>, then run <code>sudo update-ca-certificates</code>.</li>
-<li><strong>Windows:</strong> run <code>certutil -user -addstore -f Root infra-tools-ca.crt</code>.</li>
-<li><strong>ChromeOS:</strong> import it under Certificate Manager → Authorities and enable website trust.</li>
-<li><strong>Android:</strong> use Security &amp; privacy → Install a certificate → CA certificate.</li>
-</ol></details></div></section>'''
+    trust_section = _render_certificate_trust(discover_certificate_trust())
 
     action = ""
     if state.t3_update_available():

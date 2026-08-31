@@ -25,6 +25,8 @@ from common.web_panel_steps import (
 from common.service_tools.web_panel_service import (
     WebPanelState,
     _internal_web_landing_service,
+    _linux_trust_script,
+    _macos_trust_script,
     _safe_url,
     collect_system_overview,
     discover_certificate_trust,
@@ -784,11 +786,57 @@ class WebPanelRenderingTest(unittest.TestCase):
             rendered = render_page(state)
 
         self.assertIn("Certificate trust", rendered)
+        self.assertIn('<details class="trust-disclosure">', rendered)
+        self.assertNotIn('<details class="trust-disclosure" open>', rendered)
         self.assertIn("Download VM CA certificate", rendered)
         self.assertIn("SHA-256 " + "a" * 64, rendered)
-        self.assertIn("sha256sum infra-tools-ca.crt", rendered)
+        self.assertIn("Download, verify, and install with a script", rendered)
+        self.assertIn("Debian / Ubuntu", rendered)
+        self.assertIn("Arch Linux", rendered)
+        self.assertIn("Fedora / RHEL", rendered)
+        self.assertIn("macOS", rendered)
+        self.assertIn("Windows PowerShell", rendered)
+        self.assertIn("sha256sum", rendered)
+        self.assertIn("shasum -a 256", rendered)
+        self.assertIn("Invoke-WebRequest", rendered)
+        self.assertIn("update-ca-certificates", rendered)
+        self.assertIn("/etc/ca-certificates/trust-source/anchors", rendered)
+        self.assertIn("/etc/pki/ca-trust/source/anchors", rendered)
+        self.assertIn("security add-trusted-cert", rendered)
         self.assertIn("/srv/infra-tools/web/infra-tools-ca.crt", rendered)
-        self.assertIn("certutil -user -addstore", rendered)
+        self.assertIn("certutil.exe -user -addstore", rendered)
+        self.assertIn("Manual / GUI installation", rendered)
+        self.assertIn("iPhone / iPad", rendered)
+
+    def test_certificate_install_scripts_are_valid_shell(self) -> None:
+        fingerprint = "a" * 64
+        download_url = "https://agent-vm.local:8443/infra-tools-ca.crt"
+        scripts = (
+            _linux_trust_script(
+                fingerprint,
+                download_url,
+                "  sudo update-ca-certificates",
+            ),
+            _macos_trust_script(fingerprint, download_url),
+        )
+
+        for script in scripts:
+            with self.subTest(script=script.splitlines()[-2]):
+                result = subprocess.run(
+                    ["/bin/bash", "-n"],
+                    input=script,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(download_url, script)
+                self.assertIn(fingerprint, script)
+                self.assertLess(
+                    script.index("actual_sha256"),
+                    script.index("sudo "),
+                )
 
     def test_page_renders_a_live_system_overview(self) -> None:
         state = WebPanelState(self._t3_manifest())

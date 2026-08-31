@@ -72,9 +72,13 @@ The configured machine determines the contents:
 - a compact live overview reports uptime, memory and root-disk use, whether a
   reboot is pending, and the managed automatic-package-update timer state;
 - when the shared gateway uses the machine-local CA, a certificate-trust section
-  provides its public download, SHA-256 fingerprint, and concise device setup
-  guidance. Publicly trusted certificates are identified without offering an
-  unnecessary download;
+  provides its public download, SHA-256 fingerprint, compact GUI guidance, and
+  copy/paste scripts for Debian/Ubuntu, Arch, Fedora/RHEL, macOS, and Windows.
+  Every script downloads the certificate into the current (typically
+  Downloads) folder and verifies the machine-specific fingerprint before
+  changing the trust store. The whole guide and its script collection are
+  collapsed until requested. Publicly trusted certificates are identified
+  without offering an unnecessary download;
 - T3 Code machines receive an **Update to latest** action, which runs T3's
   supported user-service updater and then the managed readiness repair/check.
   During that update, the panel uses infra-tools' short-lived `loginctl` shim
