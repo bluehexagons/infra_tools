@@ -65,8 +65,16 @@ The configured machine determines the contents:
 
 - configured Gogs, Antistatic, RDP, SSH, and Samba access is rendered from the
   saved setup;
+- when the shared `infra-web` gateway is installed, its web-hosting landing page
+  is linked even before any individual sites or forwards have been published;
 - live `infra-web` forwards and published static sites are discovered when the
   page loads;
+- a compact live overview reports uptime, memory and root-disk use, whether a
+  reboot is pending, and the managed automatic-package-update timer state;
+- when the shared gateway uses the machine-local CA, a certificate-trust section
+  provides its public download, SHA-256 fingerprint, and concise device setup
+  guidance. Publicly trusted certificates are identified without offering an
+  unnecessary download;
 - T3 Code machines receive an **Update to latest** action, which runs T3's
   supported user-service updater and then the managed readiness repair/check.
   During that update, the panel uses infra-tools' short-lived `loginctl` shim
@@ -82,6 +90,12 @@ arbitrary service controls. Maintenance actions are fixed server-side
 operations. Nginx applies Basic Auth, request throttling with headroom for the
 update-status refresh, and a fail2ban jail; the application listens only on a
 Unix socket and uses a per-process CSRF token for state-changing forms.
+
+The panel intentionally does not offer a general package-update button. APT
+updates are privileged, can hold package-manager locks for an extended period,
+and may require reboot coordination; configured systems already expose their
+managed automatic-update schedule in the overview. Use setup with
+`--refresh-packages` for a deliberate immediate reconciliation.
 
 ## Access and troubleshooting
 

@@ -24,7 +24,11 @@ from common.web_panel_steps import (
 )
 from common.service_tools.web_panel_service import (
     WebPanelState,
+    _internal_web_landing_service,
     _safe_url,
+    collect_system_overview,
+    discover_certificate_trust,
+    discover_infra_web_services,
     render_page,
 )
 from lib.arg_parser import create_setup_argument_parser
@@ -650,6 +654,213 @@ class WebPanelRenderingTest(unittest.TestCase):
             _safe_url("https://example.test:8443/"),
             "https://example.test:8443/",
         )
+
+    def test_discovers_the_web_host_landing_page_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            url_file = os.path.join(temporary, "base-url")
+            with open(url_file, "w", encoding="utf-8") as file_obj:
+                file_obj.write("https://agent-vm.local:8443\n")
+
+            service = _internal_web_landing_service(
+                "/usr/local/bin/infra-web",
+                url_file=url_file,
+            )
+
+        self.assertEqual(
+            service,
+            {
+                "label": "Web hosting",
+                "url": "https://agent-vm.local:8443/",
+                "description": "Published sites, previews, and certificate trust",
+            },
+        )
+
+    def test_web_host_landing_page_is_included_without_publications(self) -> None:
+        landing = {
+            "label": "Web hosting",
+            "url": "https://agent-vm.local:8443/",
+            "description": "Published sites, previews, and certificate trust",
+        }
+        with (
+            patch(
+                "common.service_tools.web_panel_service.shutil.which",
+                return_value="/usr/local/bin/infra-web",
+            ),
+            patch(
+                "common.service_tools.web_panel_service._internal_web_landing_service",
+                return_value=landing,
+            ),
+            patch(
+                "common.service_tools.web_panel_service._run_json",
+                return_value={},
+            ),
+        ):
+            services = discover_infra_web_services()
+
+        self.assertEqual(services, [landing])
+
+    def test_discovers_local_certificate_trust_metadata(self) -> None:
+        with (
+            patch(
+                "common.service_tools.web_panel_service.shutil.which",
+                return_value="/usr/local/bin/infra-web",
+            ),
+            patch(
+                "common.service_tools.web_panel_service._run_json",
+                return_value={
+                    "publicly_trusted": False,
+                    "url": "https://agent-vm.local:8443/infra-tools-ca.crt",
+                    "sha256": "A" * 64,
+                },
+            ),
+        ):
+            trust = discover_certificate_trust()
+
+        self.assertEqual(
+            trust,
+            {
+                "publicly_trusted": False,
+                "url": "https://agent-vm.local:8443/infra-tools-ca.crt",
+                "sha256": "a" * 64,
+            },
+        )
+
+    def test_rejects_certificate_metadata_with_the_wrong_download_path(self) -> None:
+        with (
+            patch(
+                "common.service_tools.web_panel_service.shutil.which",
+                return_value="/usr/local/bin/infra-web",
+            ),
+            patch(
+                "common.service_tools.web_panel_service._run_json",
+                return_value={
+                    "publicly_trusted": False,
+                    "url": "https://agent-vm.local:8443/not-the-ca.crt",
+                    "sha256": "a" * 64,
+                },
+            ),
+        ):
+            trust = discover_certificate_trust()
+
+        self.assertIsNone(trust)
+
+    def test_discovers_publicly_trusted_certificate(self) -> None:
+        with (
+            patch(
+                "common.service_tools.web_panel_service.shutil.which",
+                return_value="/usr/local/bin/infra-web",
+            ),
+            patch(
+                "common.service_tools.web_panel_service._run_json",
+                return_value={"publicly_trusted": True},
+            ),
+        ):
+            trust = discover_certificate_trust()
+
+        self.assertEqual(trust, {"publicly_trusted": True})
+
+    def test_page_renders_certificate_download_and_install_help(self) -> None:
+        state = WebPanelState(self._t3_manifest())
+        trust = {
+            "publicly_trusted": False,
+            "url": "https://agent-vm.local:8443/infra-tools-ca.crt",
+            "sha256": "a" * 64,
+        }
+        with (
+            patch(
+                "common.service_tools.web_panel_service.discover_infra_web_services",
+                return_value=[],
+            ),
+            patch(
+                "common.service_tools.web_panel_service.discover_certificate_trust",
+                return_value=trust,
+            ),
+            patch.object(state, "system_overview", return_value=[]),
+            patch(
+                "common.service_tools.web_panel_service.os.path.isdir",
+                return_value=True,
+            ),
+        ):
+            rendered = render_page(state)
+
+        self.assertIn("Certificate trust", rendered)
+        self.assertIn("Download VM CA certificate", rendered)
+        self.assertIn("SHA-256 " + "a" * 64, rendered)
+        self.assertIn("sha256sum infra-tools-ca.crt", rendered)
+        self.assertIn("/srv/infra-tools/web/infra-tools-ca.crt", rendered)
+        self.assertIn("certutil -user -addstore", rendered)
+
+    def test_page_renders_a_live_system_overview(self) -> None:
+        state = WebPanelState(self._t3_manifest())
+        overview = [
+            {
+                "label": "Memory",
+                "value": "42% used",
+                "description": "2.3 GiB available of 4.0 GiB",
+            },
+            {
+                "label": "Maintenance",
+                "value": "No reboot pending",
+                "description": "Automatic package updates are scheduled",
+            },
+        ]
+        with (
+            patch(
+                "common.service_tools.web_panel_service.discover_infra_web_services",
+                return_value=[],
+            ),
+            patch.object(state, "system_overview", return_value=overview),
+            patch(
+                "common.service_tools.web_panel_service.os.path.isdir",
+                return_value=True,
+            ),
+        ):
+            rendered = render_page(state)
+
+        self.assertIn("System overview", rendered)
+        self.assertIn("42% used", rendered)
+        self.assertIn("Automatic package updates are scheduled", rendered)
+
+    def test_collects_bounded_system_overview_values(self) -> None:
+        def open_file(path: str, **_kwargs: object) -> StringIO:
+            if path == "/proc/uptime":
+                return StringIO("183900.0 100.0\n")
+            if path == "/proc/meminfo":
+                return StringIO(
+                    "MemTotal:       8388608 kB\n"
+                    "MemAvailable:   4194304 kB\n"
+                )
+            raise FileNotFoundError(path)
+
+        with (
+            patch("builtins.open", side_effect=open_file),
+            patch(
+                "common.service_tools.web_panel_service.shutil.disk_usage",
+                return_value=SimpleNamespace(
+                    total=128 * 1024**3,
+                    used=64 * 1024**3,
+                    free=64 * 1024**3,
+                ),
+            ),
+            patch(
+                "common.service_tools.web_panel_service._timer_properties",
+                return_value={
+                    "LoadState": "loaded",
+                    "ActiveState": "active",
+                    "NextElapseUSecRealtime": "Tue 2026-09-01 06:00:00 CDT",
+                },
+            ),
+            patch(
+                "common.service_tools.web_panel_service.os.path.exists",
+                return_value=False,
+            ),
+        ):
+            overview = collect_system_overview()
+
+        self.assertEqual(overview[0]["value"], "2d 3h")
+        self.assertEqual(overview[1]["value"], "50% used")
+        self.assertEqual(overview[2]["value"], "50% used")
+        self.assertIn("Tue 2026-09-01", overview[3]["description"])
 
     def test_t3_update_uses_the_user_launcher_for_readiness(self) -> None:
         state = WebPanelState(self._t3_manifest())

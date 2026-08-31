@@ -13,6 +13,7 @@ import socketserver
 import subprocess
 import sys
 import threading
+import time
 import urllib.parse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -31,6 +32,8 @@ from common.t3code_steps import _temporary_t3_loginctl_shim
 _MAX_CONFIG_BYTES = 256 * 1024
 _MAX_REQUEST_BYTES = 16 * 1024
 _MAX_OUTPUT_BYTES = 24 * 1024
+_SYSTEM_OVERVIEW_CACHE_SECONDS = 30
+_INTERNAL_WEB_URL_FILE = "/etc/infra-tools/internal-web/base-url"
 _T3_UPDATE_TIMEOUT_SECONDS = 30 * 60
 _T3_CORE_READINESS_CHECKS = (
     "service_active",
@@ -151,6 +154,40 @@ def _run_json(command: list[str]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _internal_web_landing_service(
+    utility: str,
+    *,
+    url_file: str = _INTERNAL_WEB_URL_FILE,
+) -> dict[str, str] | None:
+    """Return the shared web-hosting landing page when it is installed."""
+
+    if not utility or os.path.islink(url_file) or not os.path.isfile(url_file):
+        return None
+    try:
+        if os.path.getsize(url_file) > 2048:
+            return None
+        with open(url_file, encoding="utf-8") as file_obj:
+            value = file_obj.read().strip().rstrip("/") + "/"
+    except OSError:
+        return None
+    url = _safe_url(value)
+    if not url:
+        return None
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.path != "/"
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    return {
+        "label": "Web hosting",
+        "url": url,
+        "description": "Published sites, previews, and certificate trust",
+    }
+
+
 def discover_infra_web_services() -> list[dict[str, str]]:
     """Return live routes owned by the web panel service user."""
 
@@ -158,6 +195,9 @@ def discover_infra_web_services() -> list[dict[str, str]]:
     if not utility:
         return []
     services: list[dict[str, str]] = []
+    landing = _internal_web_landing_service(utility)
+    if landing:
+        services.append(landing)
     for command, collection, name_field, label_prefix in (
         ([utility, "forward", "list", "--json"], "forwards", "name", "HTTPS service"),
         ([utility, "site", "list", "--json"], "sites", "name", "Published site"),
@@ -180,6 +220,171 @@ def discover_infra_web_services() -> list[dict[str, str]]:
                     }
                 )
     return services
+
+
+def discover_certificate_trust() -> dict[str, str | bool] | None:
+    """Return safe trust metadata for the shared internal-web certificate."""
+
+    utility = shutil.which("infra-web")
+    if not utility:
+        return None
+    payload = _run_json([utility, "ca", "--json"])
+    if payload.get("publicly_trusted") is True:
+        return {"publicly_trusted": True}
+    url = _safe_url(payload.get("url"))
+    fingerprint = payload.get("sha256")
+    parsed = urllib.parse.urlsplit(url) if url else None
+    if (
+        not url
+        or parsed is None
+        or parsed.scheme != "https"
+        or parsed.path != "/infra-tools-ca.crt"
+        or parsed.query
+        or parsed.fragment
+        or not isinstance(fingerprint, str)
+        or len(fingerprint) != 64
+        or any(character not in "0123456789abcdefABCDEF" for character in fingerprint)
+    ):
+        return None
+    return {
+        "publicly_trusted": False,
+        "url": url,
+        "sha256": fingerprint.lower(),
+    }
+
+
+def _read_proc_values(path: str) -> dict[str, int]:
+    values: dict[str, int] = {}
+    try:
+        with open(path, encoding="utf-8") as file_obj:
+            for line in file_obj:
+                name, separator, raw_value = line.partition(":")
+                if not separator:
+                    continue
+                fields = raw_value.split()
+                if fields and fields[0].isdigit():
+                    values[name] = int(fields[0]) * 1024
+    except OSError:
+        return {}
+    return values
+
+
+def _format_bytes(value: int) -> str:
+    size = float(max(0, value))
+    for suffix in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if size < 1024 or suffix == "TiB":
+            precision = 0 if suffix in {"B", "KiB", "MiB"} else 1
+            return f"{size:.{precision}f} {suffix}"
+        size /= 1024
+    return "0 B"
+
+
+def _format_uptime(seconds: float) -> str:
+    total_minutes = max(0, int(seconds // 60))
+    days, remaining_minutes = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(remaining_minutes, 60)
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def _timer_properties(unit: str) -> dict[str, str]:
+    try:
+        result = subprocess.run(
+            [
+                "systemctl",
+                "show",
+                unit,
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--property=NextElapseUSecRealtime",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if result.returncode != 0:
+        return {}
+    properties: dict[str, str] = {}
+    for line in (result.stdout or "").splitlines():
+        name, separator, value = line.partition("=")
+        if separator:
+            properties[name] = value
+    return properties
+
+
+def collect_system_overview() -> list[dict[str, str]]:
+    """Collect a small, non-sensitive live host report for the dashboard."""
+
+    try:
+        with open("/proc/uptime", encoding="utf-8") as file_obj:
+            uptime = _format_uptime(float(file_obj.read(128).split()[0]))
+    except (OSError, ValueError, IndexError):
+        uptime = "Unavailable"
+
+    memory = _read_proc_values("/proc/meminfo")
+    memory_total = memory.get("MemTotal", 0)
+    memory_available = memory.get("MemAvailable", 0)
+    if memory_total:
+        memory_used = max(0, memory_total - memory_available)
+        memory_percent = round(memory_used * 100 / memory_total)
+        memory_value = f"{memory_percent}% used"
+        memory_description = (
+            f"{_format_bytes(memory_available)} available of "
+            f"{_format_bytes(memory_total)}"
+        )
+    else:
+        memory_value = "Unavailable"
+        memory_description = "Memory information could not be read"
+
+    try:
+        disk = shutil.disk_usage("/")
+        disk_percent = round(disk.used * 100 / disk.total) if disk.total else 0
+        disk_value = f"{disk_percent}% used"
+        disk_description = (
+            f"{_format_bytes(disk.free)} free of {_format_bytes(disk.total)}"
+        )
+    except OSError:
+        disk_value = "Unavailable"
+        disk_description = "Root filesystem usage could not be read"
+
+    timer = _timer_properties("auto-update-apt.timer")
+    if timer.get("LoadState") == "loaded" and timer.get("ActiveState") == "active":
+        next_run = timer.get("NextElapseUSecRealtime")
+        update_description = (
+            f"Automatic package updates; next run {next_run}"
+            if next_run and next_run != "n/a"
+            else "Automatic package updates are scheduled"
+        )
+    elif timer.get("LoadState") == "loaded":
+        update_description = "Automatic package update timer needs attention"
+    else:
+        update_description = "Automatic package updates are not configured"
+    reboot_required = os.path.exists("/var/run/reboot-required")
+
+    return [
+        {"label": "Uptime", "value": uptime, "description": "Since the last boot"},
+        {
+            "label": "Memory",
+            "value": memory_value,
+            "description": memory_description,
+        },
+        {
+            "label": "Root disk",
+            "value": disk_value,
+            "description": disk_description,
+        },
+        {
+            "label": "Maintenance",
+            "value": "Reboot required" if reboot_required else "No reboot pending",
+            "description": update_description,
+        },
+    ]
 
 
 def _deduplicate_services(
@@ -266,6 +471,21 @@ class WebPanelState:
         self.action_status = "idle"
         self.action_message = ""
         self.action_output = ""
+        self._overview: list[dict[str, str]] = []
+        self._overview_at = 0.0
+
+    def system_overview(self) -> list[dict[str, str]]:
+        """Return a briefly cached host report to keep refreshes inexpensive."""
+
+        now = time.monotonic()
+        with self._lock:
+            if self._overview and now - self._overview_at < _SYSTEM_OVERVIEW_CACHE_SECONDS:
+                return list(self._overview)
+        overview = collect_system_overview()
+        with self._lock:
+            self._overview = overview
+            self._overview_at = now
+            return list(self._overview)
 
     def t3_update_available(self) -> bool:
         """Return whether T3 Code is both configured and present for this user."""
@@ -530,6 +750,45 @@ h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.015em; }
   font-size: .8rem;
   overflow-wrap: anywhere;
 }
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 11px;
+  margin: 0;
+}
+.metric {
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.metric dt { color: var(--muted); font-size: .82rem; }
+.metric dd { margin: 5px 0 0; }
+.metric-value { display: block; font-size: 1.15rem; font-weight: 750; }
+.metric-description { display: block; margin-top: 4px; color: var(--muted); font-size: .82rem; }
+.trust-panel {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.trust-panel > p { margin: 5px 0 0; color: var(--muted); }
+.trust-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 15px; }
+.trust-download {
+  display: inline-block;
+  padding: 9px 13px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--panel);
+  font-weight: 750;
+  text-decoration: none;
+}
+.fingerprint { display: block; margin-top: 13px; overflow-wrap: anywhere; }
+.trust-steps { margin: 10px 0 0; padding-left: 22px; }
+.trust-steps li { margin-top: 8px; }
 .access-list {
   list-style: none;
   padding: 0;
@@ -665,6 +924,44 @@ def render_page(state: WebPanelState) -> str:
         else '<p class="empty">No additional access methods are configured.</p>'
     )
 
+    overview = state.system_overview()
+    overview_cards = "".join(
+        '<div class="metric"><dt>{}</dt><dd><span class="metric-value">{}</span>'
+        '<span class="metric-description">{}</span></dd></div>'.format(
+            html.escape(record["label"]),
+            html.escape(record["value"]),
+            html.escape(record["description"]),
+        )
+        for record in overview
+    )
+
+    trust = discover_certificate_trust()
+    trust_section = ""
+    if trust and trust.get("publicly_trusted") is True:
+        trust_section = '''<section aria-labelledby="trust-heading">
+<div class="section-heading"><div><p class="section-kicker">Secure connection</p>
+<h2 id="trust-heading">Certificate trust</h2></div></div>
+<div class="trust-panel"><strong>No certificate installation required</strong>
+<p>The shared web-hosting certificate is issued by a publicly trusted authority.</p></div></section>'''
+    elif trust:
+        trust_url = html.escape(str(trust["url"]), quote=True)
+        fingerprint = html.escape(str(trust["sha256"]))
+        trust_section = f'''<section aria-labelledby="trust-heading">
+<div class="section-heading"><div><p class="section-kicker">One-time setup</p>
+<h2 id="trust-heading">Certificate trust</h2></div></div>
+<div class="trust-panel"><strong>Trust this machine on another device</strong>
+<p>Install this machine's public CA once to trust the web panel, hosted sites, and managed HTTPS services. Compare the fingerprint before installing it.</p>
+<div class="trust-actions"><a class="trust-download" href="{trust_url}">Download VM CA certificate</a></div>
+<code class="fingerprint">SHA-256 {fingerprint}</code>
+<details><summary>Installation help</summary><ol class="trust-steps">
+<li><strong>Verify first:</strong> run <code>sha256sum infra-tools-ca.crt</code> on Linux or <code>Get-FileHash .\\infra-tools-ca.crt -Algorithm SHA256</code> in PowerShell and compare it with the fingerprint above.</li>
+<li><strong>If the download is blocked:</strong> copy <code>/srv/infra-tools/web/infra-tools-ca.crt</code> over SSH, then verify it the same way.</li>
+<li><strong>Debian / Ubuntu:</strong> copy the verified certificate to <code>/usr/local/share/ca-certificates/infra-tools.crt</code>, then run <code>sudo update-ca-certificates</code>.</li>
+<li><strong>Windows:</strong> run <code>certutil -user -addstore -f Root infra-tools-ca.crt</code>.</li>
+<li><strong>ChromeOS:</strong> import it under Certificate Manager → Authorities and enable website trust.</li>
+<li><strong>Android:</strong> use Security &amp; privacy → Install a certificate → CA certificate.</li>
+</ol></details></div></section>'''
+
     action = ""
     if state.t3_update_available():
         running = state.action_status == "running"
@@ -722,9 +1019,13 @@ def render_page(state: WebPanelState) -> str:
 {status}<section aria-labelledby="services-heading"><div class="section-heading"><div>
 <p class="section-kicker">Open in browser</p><h2 id="services-heading">Web services</h2></div>
 <span class="count">{service_count}</span></div><div class="grid">{service_cards}</div></section>
+<section aria-labelledby="overview-heading"><div class="section-heading"><div>
+<p class="section-kicker">Live snapshot</p><h2 id="overview-heading">System overview</h2></div>
+<span class="count">Refreshed periodically</span></div>
+<dl class="overview-grid">{overview_cards}</dl></section>
 <section aria-labelledby="access-heading"><div class="section-heading"><div>
 <p class="section-kicker">Connect directly</p><h2 id="access-heading">Access</h2></div>
-<span class="count">{access_label}</span></div>{access_content}</section>{action}
+<span class="count">{access_label}</span></div>{access_content}</section>{trust_section}{action}
 <footer><span>Managed by infra-tools</span><span>Authenticated as {username}</span></footer>
 </main></body></html>'''
 
