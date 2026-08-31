@@ -72,6 +72,12 @@ not proof that the page loaded. Confirm rendered text or a snapshot. A hidden
 preview (`visible: false`) can still be automation-capable; visibility and
 network reachability are separate.
 
+A generic navigation failure also does not prove that the preview host
+detached. If preview status remains available, inspect a snapshot before
+falling back. A `chrome-error://chromewebdata/` document whose network entry
+contains `net::ERR_CERT_AUTHORITY_INVALID` is an explicit client trust error;
+follow the HTTPS procedure below. A timeout or unreachable-host error is not.
+
 ## Private URLs and network origin
 
 An `infra-web` URL commonly uses an RFC1918 address such as `192.168.x.x`.
@@ -122,4 +128,42 @@ infra-web ca
 Use its enrollment URL and fingerprint on the client. If VM-local automation
 fails trust instead, report the failed capability. Rerun the saved setup to
 repair the managed VM trust store only when the task includes that repair.
-For any other HTTPS origin, follow that origin's documented trust process.
+
+Installing a root changes the connected client's security state. Give the
+user the URL, SHA-256 fingerprint, and only the matching platform steps; do not
+claim to install it on the client. If the HTTPS download is blocked before
+enrollment, transfer the public `/srv/infra-tools/web/infra-tools-ca.crt` over
+SSH or another trusted channel. Never request the CA private key or bypass TLS.
+Have the user compare `sha256sum infra-tools-ca.crt` on Linux or
+`Get-FileHash .\infra-tools-ca.crt -Algorithm SHA256` on Windows with the
+fingerprint from `infra-web ca` before installation.
+
+- Debian-based: copy the verified `.crt` to
+  `/usr/local/share/ca-certificates/infra-tools-ca.crt`, then run
+  `sudo update-ca-certificates`.
+- Arch-based: run `sudo trust anchor infra-tools-ca.crt` followed by
+  `sudo update-ca-trust`. If there is no writable trust location, copy it to
+  `/etc/ca-certificates/trust-source/anchors/infra-tools-ca.crt` first.
+- Fedora/RHEL-based: copy it to
+  `/etc/pki/ca-trust/source/anchors/infra-tools-ca.crt`, then run
+  `sudo update-ca-trust extract`.
+- Windows current user: run
+  `certutil -user -addstore -f Root .\infra-tools-ca.crt`; use the Local
+  Machine Trusted Root store only when an administrator intends machine-wide
+  trust.
+- ChromeOS personal device: open `chrome://certificate-manager`, then import
+  the verified file under **Authorities** and enable website trust. On a
+  managed school device, do not bypass disabled user controls; have an
+  authorized administrator upload the CA under Google Admin **Devices >
+  Networks > Certificates** for the narrowest appropriate organizational unit
+  and select **Chromebook**.
+- Android: use **Security & privacy > More security settings > Encryption &
+  credentials > Install a certificate > CA certificate**; names vary by
+  vendor. Android apps may decline user-added CAs, so a browser succeeding
+  while the embedded preview fails is an app trust limitation.
+
+Fully restart T3 Code or the browser after enrollment, then retry navigation
+and confirm rendered content or a snapshot. Some Linux applications use a
+separate certificate store; guide the user through that application's
+Authorities UI only after normal system tools trust the URL. For any other
+HTTPS origin, follow that origin's documented trust process.

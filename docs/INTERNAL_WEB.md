@@ -178,6 +178,11 @@ and SHA-256 fingerprint:
 infra-web ca
 ```
 
+Verify the printed fingerprint before installing the public CA. See
+[Client CA trust](CLIENT_CA_TRUST.md) for safe transfer, Linux, Windows,
+ChromeOS, and Android enrollment, application-specific trust limitations, and
+removal.
+
 Do not disable TLS verification. `site doctor` and the general `doctor`
 command verify the same trusted HTTPS endpoints that browsers should use. For
 an authenticated forward, a `401` response with a `WWW-Authenticate` challenge

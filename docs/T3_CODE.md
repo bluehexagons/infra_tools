@@ -40,6 +40,13 @@ infra-tools setup agent_code_vm vm.example agent \
   --browser-automation playwright
 ```
 
+The collaborative preview uses the connected device's routes and certificate
+store, not the VM's. If it remains attached but renders
+`ERR_CERT_AUTHORITY_INVALID` for an `infra-web` URL, follow
+[Client CA trust](CLIENT_CA_TRUST.md) for verified enrollment on Linux,
+Windows, ChromeOS, or Android. A timeout or unreachable private address needs
+network diagnosis instead.
+
 Agent-enabled T3 setups install the base Codex/OpenCode workflow skills plus
 focused T3 Code and HTTPS-gateway guidance. See
 [Managed agent workflow skills](AGENT_SKILLS.md) for the installation matrix.
@@ -285,6 +292,8 @@ and recorded maintenance failures do.
 ## Related documentation
 
 - [Device pairing](DEVICE_PAIRING.md)
+- [Agent browser automation](BROWSER_AUTOMATION.md)
+- [Client CA trust](CLIENT_CA_TRUST.md)
 - [Managed agent workflow skills](AGENT_SKILLS.md)
 - [Command-line reference](COMMAND_LINE.md)
 - [Workstation and agent profiles](WORKSTATIONS.md)

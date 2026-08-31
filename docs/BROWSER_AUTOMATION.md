@@ -129,10 +129,14 @@ private-URL navigation fails, separate the failure layers:
 
 1. verify the exact URL and a non-sensitive artifact from the VM with normal
    TLS verification;
-2. check whether the client reports a certificate error, as opposed to a
+2. if preview status remains available, inspect a snapshot and its network
+   error before treating a generic navigation failure as a detached preview;
+3. check whether the client reports a certificate error, as opposed to a
    timeout or unreachable route;
-3. use `infra-web ca` only for client certificate trust;
-4. use the explicitly provisioned VM-local browser when a VM-origin rendering
+4. use `infra-web ca` only for explicit client certificate trust errors, then
+   follow [Client CA trust](CLIENT_CA_TRUST.md) for fingerprint verification
+   and Linux, Windows, ChromeOS, or Android enrollment;
+5. use the explicitly provisioned VM-local browser when a VM-origin rendering
    check is appropriate and the current agent integration permits it.
 
 When T3 reports that no preview automation host is available, run

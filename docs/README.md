@@ -24,6 +24,7 @@ references and may describe future work separately from this live contract.
 | [Managed agent workflow skills](AGENT_SKILLS.md) | Installed Codex/OpenCode skills, capability routing, reconciliation, and maintenance |
 | [Authentication hardening](AUTHENTICATION_HARDENING.md) | Reachability, rate limits, failure bans, and verification for login surfaces |
 | [Agent browser automation](BROWSER_AUTOMATION.md) | Playwright provisioning, Codex/OpenCode registration, verification, and security boundaries |
+| [Client CA trust](CLIENT_CA_TRUST.md) | Diagnosing private-CA errors and enrolling the infra-tools CA on Linux, Windows, ChromeOS, or Android clients |
 | [Internal HTTPS sites and previews](INTERNAL_WEB.md) | Static-site publishing, supervised live previews, managed forwards, TLS trust, and cleanup |
 | [Godot Engine](GODOT.md) | Verified graphical/headless installation, web/publishing bundles, agent access, and updates |
 | [T3 Code server](T3_CODE.md) | Headless service, deliberate updates, pairing, remote clients, and security boundaries |

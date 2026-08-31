@@ -163,8 +163,9 @@ VM at:
 
 Run `infra-web ca` to print the active CA path and SHA-256 fingerprint. When an
 existing publicly trusted certificate is in use, the command reports that no
-private CA enrollment is required. Never use an insecure TLS bypass for an
-agent or browser check.
+private CA enrollment is required. Follow [Client CA trust](CLIENT_CA_TRUST.md)
+to verify and enroll the public CA on a Linux, Windows, ChromeOS, or Android
+client. Never use an insecure TLS bypass for an agent or browser check.
 
 The private CA key remains root-only. Re-running setup preserves the CA and
 renews the server certificate when its names change or it approaches expiry.

@@ -82,8 +82,15 @@ redacted readiness records. Release a hold promptly after protected work.
 ## Browser previews
 
 Use the `infra-tools-browser-testing` skill. Prefer T3 Code's collaborative
-preview when attached. If preview status or opening reports that no automation
-host is available, immediately probe the separate VM-local fallback with:
+preview when attached. Do not interpret a navigation failure alone as a lost
+preview host. If preview status still works, inspect a snapshot and its network
+entry. A `chrome-error://chromewebdata/` document with
+`net::ERR_CERT_AUTHORITY_INVALID` means the connected client must follow the
+browser-testing skill's fingerprint verification and CA enrollment procedure;
+it is not a T3 service failure or a reason to weaken TLS.
+
+If preview status or opening explicitly reports that no automation host is
+available, immediately probe the separate VM-local fallback with:
 
 ```bash
 infra-tools agent doctor --capability browser --json
