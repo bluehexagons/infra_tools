@@ -238,6 +238,59 @@ def reinstall_global_packages(source_version: str, target_version: str) -> tuple
     return True, None
 
 
+def rollback_target_version(
+    update_track: str,
+    target_version: str,
+    source_version: str,
+) -> tuple[bool, MaybeStr]:
+    """Restore the previous runtime after a new version cannot be completed."""
+    normalized_target = normalize_node_version(target_version)
+    normalized_source = normalize_node_version(source_version)
+    if not normalized_target or not normalized_source:
+        return False, "Could not identify the Node.js versions needed for rollback"
+    if update_track not in {"lts", "latest"}:
+        return False, f"Unsupported Node.js update track for rollback: {update_track}"
+    if normalized_target == normalized_source:
+        return False, "Refusing to remove the active Node.js source version"
+
+    if update_track == "lts":
+        alias_command = ["nvm", "alias", "default", normalized_source]
+        alias_result = run_nvm_command(alias_command)
+        alias_action = f"Restored Node.js default alias to {normalized_source}"
+        if not log_subprocess_result(
+            logger,
+            alias_action,
+            alias_result,
+            failure_level=ERROR,
+        ):
+            details = (
+                alias_result.stderr.strip()
+                or alias_result.stdout.strip()
+                or shlex.join(alias_command)
+            )
+            return (
+                False,
+                f"{alias_action} failed; retained {normalized_target}: {details}",
+            )
+
+    uninstall_command = ["nvm", "uninstall", normalized_target]
+    uninstall_result = run_nvm_command(uninstall_command)
+    uninstall_action = f"Removed incomplete Node.js {normalized_target}"
+    if not log_subprocess_result(
+        logger,
+        uninstall_action,
+        uninstall_result,
+        failure_level=ERROR,
+    ):
+        details = (
+            uninstall_result.stderr.strip()
+            or uninstall_result.stdout.strip()
+            or shlex.join(uninstall_command)
+        )
+        return False, f"{uninstall_action} failed: {details}"
+    return True, None
+
+
 def install_target_version(
     update_track: str,
     target_version: str,
@@ -251,10 +304,35 @@ def install_target_version(
         return False, details
 
     if update_track == "lts" and not set_default_lts_alias():
-        return False, "Failed to set nvm default alias to LTS"
+        rolled_back, rollback_error = rollback_target_version(
+            update_track,
+            target_version,
+            source_version,
+        )
+        details = "Failed to set nvm default alias to LTS"
+        if rolled_back:
+            details += "; restored the previous Node.js runtime"
+        elif rollback_error:
+            details += f"; rollback failed: {rollback_error}"
+        return False, details
 
     if source_version and normalize_node_version(source_version) != normalize_node_version(target_version):
-        return reinstall_global_packages(source_version, target_version)
+        migrated, migration_error = reinstall_global_packages(
+            source_version,
+            target_version,
+        )
+        if not migrated:
+            rolled_back, rollback_error = rollback_target_version(
+                update_track,
+                target_version,
+                source_version,
+            )
+            details = migration_error or "Global npm package migration failed"
+            if rolled_back:
+                details += "; restored the previous Node.js runtime"
+            elif rollback_error:
+                details += f"; rollback failed: {rollback_error}"
+            return False, details
 
     return True, None
 

@@ -228,6 +228,80 @@ stable -> 22.3 (-> v22.3.0) (default)
         self.assertNotIn("npm@latest", reinstall_commands[0])
 
     @patch("web.service_tools.auto_update_node.run_nvm_command")
+    def test_install_target_rolls_back_failed_package_migration(self, mock_run_nvm):
+        def run_command(args):
+            if args[:6] == ["nvm", "exec", "v20.12.2", "npm", "list", "-g"]:
+                return subprocess.CompletedProcess(
+                    args=args,
+                    returncode=0,
+                    stdout='{"dependencies":{"pnpm":{"version":"9.1.0"}}}',
+                    stderr="",
+                )
+            if args[:6] == ["nvm", "exec", "v20.12.3", "npm", "install", "-g"]:
+                return subprocess.CompletedProcess(
+                    args=args,
+                    returncode=1,
+                    stdout="",
+                    stderr="package installation failed",
+                )
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout="",
+                stderr="",
+            )
+
+        mock_run_nvm.side_effect = run_command
+
+        success, details = auto_update_node.install_target_version(
+            "lts",
+            "v20.12.3",
+            "v20.12.2",
+        )
+
+        self.assertFalse(success)
+        self.assertIn("restored the previous Node.js runtime", details or "")
+        commands = [call_args.args[0] for call_args in mock_run_nvm.call_args_list]
+        self.assertIn(["nvm", "alias", "default", "v20.12.2"], commands)
+        self.assertIn(["nvm", "uninstall", "v20.12.3"], commands)
+
+    @patch("web.service_tools.auto_update_node.run_nvm_command")
+    def test_rollback_retains_target_when_default_cannot_be_restored(
+        self,
+        mock_run_nvm,
+    ):
+        mock_run_nvm.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="alias update failed",
+        )
+
+        success, details = auto_update_node.rollback_target_version(
+            "lts",
+            "v20.12.3",
+            "v20.12.2",
+        )
+
+        self.assertFalse(success)
+        self.assertIn("retained v20.12.3", details or "")
+        mock_run_nvm.assert_called_once_with(
+            ["nvm", "alias", "default", "v20.12.2"]
+        )
+
+    @patch("web.service_tools.auto_update_node.run_nvm_command")
+    def test_rollback_refuses_to_remove_source_version(self, mock_run_nvm):
+        success, details = auto_update_node.rollback_target_version(
+            "lts",
+            "v20.12.2",
+            "v20.12.2",
+        )
+
+        self.assertFalse(success)
+        self.assertIn("Refusing to remove", details or "")
+        mock_run_nvm.assert_not_called()
+
+    @patch("web.service_tools.auto_update_node.run_nvm_command")
     def test_package_migration_fails_closed_when_version_metadata_is_missing(self, mock_run_nvm):
         mock_run_nvm.return_value = subprocess.CompletedProcess(
             args=[],
