@@ -77,6 +77,8 @@ class TestAgentPayloadPreparation(unittest.TestCase):
                     json.load(file_obj),
                     {'name': 'Octo Cat', 'email': 'octo@example.test'},
                 )
+            self.assertTrue(config.github_auth_payload)
+            self.assertTrue(config.git_identity_payload)
             self.assertEqual(os.stat(identity_path).st_mode & 0o777, 0o600)
             self.assertEqual(
                 [call.args[0] for call in run_command.call_args_list],

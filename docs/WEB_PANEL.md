@@ -71,7 +71,10 @@ The configured machine determines the contents:
   supported user-service updater and then the managed readiness repair/check.
   During that update, the panel uses infra-tools' short-lived `loginctl` shim
   to confirm lingering is already enabled or scope T3's redundant no-argument
-  request to the validated setup user;
+  request to the validated setup user. Service, runtime, endpoint, pairing, and
+  managed-skill checks are always required. Git identity is required only when
+  one was staged, while GitHub authentication and its credential helper are
+  required only when GitHub credentials were staged;
 - machines without T3 Code do not receive that action.
 
 The page contains no general command runner, terminal, package form, or

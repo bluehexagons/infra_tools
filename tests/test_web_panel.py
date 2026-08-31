@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -42,6 +43,33 @@ def _config(**overrides: object) -> SetupConfig:
     }
     values.update(overrides)
     return SetupConfig(**values)
+
+
+def _t3_doctor_output(**overrides: bool) -> str:
+    checks = {
+        "service_active": True,
+        "service_enabled": True,
+        "runtime": True,
+        "native_runtime": True,
+        "wrapper": True,
+        "pairing_helper": True,
+        "endpoint": True,
+        "git_identity": False,
+        "t3_agent_skill": True,
+        "gh_authenticated": False,
+        "git_credential_helper": False,
+    }
+    checks.update(overrides)
+    return json.dumps(
+        [
+            {
+                "capability": "t3code",
+                "healthy": all(checks.values()),
+                "checks": checks,
+                "fixes": [],
+            }
+        ]
+    )
 
 
 class WebPanelConfigTest(unittest.TestCase):
@@ -102,6 +130,18 @@ class WebPanelConfigTest(unittest.TestCase):
         self.assertIn("--web-panel 80", remote)
         self.assertIn("--web-panel-payload", remote)
         self.assertNotIn("web_panel_payload", config.to_dict())
+
+    def test_agent_readiness_payload_facts_are_forwarded_but_not_saved(self) -> None:
+        config = _config(
+            github_auth_payload=True,
+            git_identity_payload=True,
+        )
+        remote = " ".join(config.to_remote_args())
+
+        self.assertIn("--github-auth-payload", remote)
+        self.assertIn("--git-identity-payload", remote)
+        self.assertNotIn("github_auth_payload", config.to_dict())
+        self.assertNotIn("git_identity_payload", config.to_dict())
 
     def test_rejects_reserved_and_conflicting_ports(self) -> None:
         with self.assertRaisesRegex(ValueError, "8443 is reserved"):
@@ -466,7 +506,11 @@ class WebPanelRenderingTest(unittest.TestCase):
             "username": "agent",
             "services": [],
             "access": [],
-            "features": {"t3_update": True},
+            "features": {
+                "t3_update": True,
+                "t3_github_readiness": False,
+                "t3_git_identity_readiness": False,
+            },
         }
 
     def test_manifest_reflects_installed_capabilities(self) -> None:
@@ -485,10 +529,28 @@ class WebPanelRenderingTest(unittest.TestCase):
 
         self.assertEqual(manifest["title"], "Coding VM")
         self.assertTrue(manifest["features"]["t3_update"])
+        self.assertFalse(manifest["features"]["t3_github_readiness"])
+        self.assertFalse(manifest["features"]["t3_git_identity_readiness"])
         values = [record["value"] for record in manifest["access"]]
         self.assertIn("ssh agent@agent-vm.local", values)
         self.assertIn("agent-vm.local:3389", values)
         self.assertIn("smb://agent-vm.local/work_write", values)
+
+    def test_manifest_requires_github_checks_only_for_staged_credentials(self) -> None:
+        manifest = build_web_panel_manifest(
+            _config(
+                agent_tools=["gh", "codex"],
+                web_interfaces=["t3code"],
+                git_access="read-write",
+                agent_payload=True,
+                github_auth_payload=True,
+                git_identity_payload=True,
+            ),
+            ["agent-vm.local"],
+        )
+
+        self.assertTrue(manifest["features"]["t3_github_readiness"])
+        self.assertTrue(manifest["features"]["t3_git_identity_readiness"])
 
     def test_nginx_requires_basic_auth_and_can_share_tls_certificate(self) -> None:
         rendered = render_web_panel_nginx(
@@ -591,7 +653,12 @@ class WebPanelRenderingTest(unittest.TestCase):
 
     def test_t3_update_uses_the_user_launcher_for_readiness(self) -> None:
         state = WebPanelState(self._t3_manifest())
-        completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+        updated = SimpleNamespace(returncode=0, stdout="updated\n", stderr="")
+        checked = SimpleNamespace(
+            returncode=1,
+            stdout=_t3_doctor_output(),
+            stderr="",
+        )
 
         @contextmanager
         def linger_shim(home: str, username: str):
@@ -610,7 +677,7 @@ class WebPanelRenderingTest(unittest.TestCase):
             ) as mock_which,
             patch(
                 "common.service_tools.web_panel_service.subprocess.run",
-                side_effect=[completed, completed],
+                side_effect=[updated, checked],
             ) as mock_run,
             patch(
                 "common.service_tools.web_panel_service._temporary_t3_loginctl_shim",
@@ -640,7 +707,69 @@ class WebPanelRenderingTest(unittest.TestCase):
             mock_run.call_args_list[1].kwargs["env"],
         )
         mock_which.assert_called_once_with("infra-tools", path=launcher_path)
+        self.assertIn("--json", mock_run.call_args_list[1].args[0])
         self.assertEqual(state.action_status, "complete")
+        self.assertIn("Not required by this setup", state.action_output)
+
+    def test_t3_update_requires_github_checks_when_credentials_were_staged(self) -> None:
+        manifest = self._t3_manifest()
+        manifest["features"] = {
+            "t3_update": True,
+            "t3_github_readiness": True,
+            "t3_git_identity_readiness": True,
+        }
+        state = WebPanelState(manifest)
+        updated = SimpleNamespace(returncode=0, stdout="updated\n", stderr="")
+        checked = SimpleNamespace(
+            returncode=1,
+            stdout=_t3_doctor_output(),
+            stderr="",
+        )
+        with (
+            patch(
+                "common.service_tools.web_panel_service.subprocess.run",
+                side_effect=[updated, checked],
+            ),
+            patch(
+                "common.service_tools.web_panel_service.shutil.which",
+                return_value="/home/agent/.local/bin/infra-tools",
+            ),
+            patch(
+                "common.service_tools.web_panel_service._temporary_t3_loginctl_shim",
+                return_value=nullcontext("/tmp/infra-tools-t3-loginctl-test"),
+            ),
+        ):
+            state._run_t3_update()
+
+        self.assertEqual(state.action_status, "failed")
+        self.assertIn("GitHub CLI authenticated", state.action_output)
+
+    def test_t3_update_still_requires_core_service_checks(self) -> None:
+        state = WebPanelState(self._t3_manifest())
+        updated = SimpleNamespace(returncode=0, stdout="updated\n", stderr="")
+        checked = SimpleNamespace(
+            returncode=1,
+            stdout=_t3_doctor_output(endpoint=False),
+            stderr="",
+        )
+        with (
+            patch(
+                "common.service_tools.web_panel_service.subprocess.run",
+                side_effect=[updated, checked],
+            ),
+            patch(
+                "common.service_tools.web_panel_service.shutil.which",
+                return_value="/home/agent/.local/bin/infra-tools",
+            ),
+            patch(
+                "common.service_tools.web_panel_service._temporary_t3_loginctl_shim",
+                return_value=nullcontext("/tmp/infra-tools-t3-loginctl-test"),
+            ),
+        ):
+            state._run_t3_update()
+
+        self.assertEqual(state.action_status, "failed")
+        self.assertIn("web endpoint responding", state.action_output)
 
     def test_t3_update_fails_closed_without_readiness_command(self) -> None:
         state = WebPanelState(self._t3_manifest())

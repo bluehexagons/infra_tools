@@ -952,6 +952,8 @@ def _stage_active_agent_config(config: SetupConfig, payload_dir: str, local_home
 
 
 def prepare_agent_payload(config: SetupConfig, payload_dir: str) -> None:
+    config.github_auth_payload = False
+    config.git_identity_payload = False
     if not (config.copy_agent_config or config.copy_agent_keys):
         return
     if not config.selected_agent_tools():
@@ -998,8 +1000,15 @@ def prepare_agent_payload(config: SetupConfig, payload_dir: str) -> None:
                 f"{tool} credentials",
             )
 
-    if os.path.isfile(os.path.join(payload_dir, "secrets", "gh", "hosts.yml")):
+    github_auth = os.path.isfile(
+        os.path.join(payload_dir, "secrets", "gh", "hosts.yml")
+    )
+    if github_auth:
         _stage_git_identity(payload_dir, local_home)
+    config.github_auth_payload = github_auth
+    config.git_identity_payload = os.path.isfile(
+        os.path.join(payload_dir, _GIT_IDENTITY_PAYLOAD_PATH)
+    )
 
 
 def create_tar_from_dir(source_dir: str) -> bytes:

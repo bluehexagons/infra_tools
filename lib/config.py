@@ -324,6 +324,8 @@ class SetupConfig:
     disable_agent_auth: bool = False
     agent_config_source: MaybeStr = None
     agent_payload: bool = False
+    github_auth_payload: bool = False
+    git_identity_payload: bool = False
     agent_workspace: MaybeStr = None
     install_git_lfs: bool = False
     custom_steps: Optional[str] = None
@@ -912,6 +914,10 @@ class SetupConfig:
             args.append("--no-git-credentials")
         if self.copy_agent_config or self.copy_agent_keys or self.agent_payload:
             args.append("--agent-payload")
+        if self.github_auth_payload:
+            args.append("--github-auth-payload")
+        if self.git_identity_payload:
+            args.append("--git-identity-payload")
 
         if self.agent_repos:
             for git_url in self.agent_repos:
@@ -1616,6 +1622,8 @@ class SetupConfig:
             'agent_auth_files',
             'agent_config_source',
             'agent_payload',
+            'github_auth_payload',
+            'git_identity_payload',
             'device_pairing_auth_file',
             'device_pairing_auth_username',
             'device_pairing_auth_password',
@@ -2183,6 +2191,12 @@ class SetupConfig:
             disable_agent_auth=disable_agent_auth,
             agent_config_source=agent_config_source,
             agent_payload=_optional_bool_arg(args, 'agent_payload') is True,
+            github_auth_payload=(
+                _optional_bool_arg(args, 'github_auth_payload') is True
+            ),
+            git_identity_payload=(
+                _optional_bool_arg(args, 'git_identity_payload') is True
+            ),
             agent_workspace=_optional_str_arg(args, 'agent_workspace'),
             install_git_lfs=getattr(args, 'install_git_lfs', False),
             custom_steps=getattr(args, 'custom_steps', None),

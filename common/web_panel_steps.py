@@ -178,7 +178,11 @@ def build_web_panel_manifest(
         "username": config.username,
         "services": services,
         "access": access,
-        "features": {"t3_update": "t3code" in (config.web_interfaces or [])},
+        "features": {
+            "t3_update": "t3code" in (config.web_interfaces or []),
+            "t3_github_readiness": config.github_auth_payload,
+            "t3_git_identity_readiness": config.git_identity_payload,
+        },
     }
 
 

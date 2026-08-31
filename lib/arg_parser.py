@@ -1011,6 +1011,16 @@ def add_setup_arguments(
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--github-auth-payload",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--git-identity-payload",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     if not for_remote:
         git_auth_group = parser.add_mutually_exclusive_group()
         git_auth_group.add_argument(

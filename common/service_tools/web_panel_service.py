@@ -32,6 +32,34 @@ _MAX_CONFIG_BYTES = 256 * 1024
 _MAX_REQUEST_BYTES = 16 * 1024
 _MAX_OUTPUT_BYTES = 24 * 1024
 _T3_UPDATE_TIMEOUT_SECONDS = 30 * 60
+_T3_CORE_READINESS_CHECKS = (
+    "service_active",
+    "service_enabled",
+    "runtime",
+    "native_runtime",
+    "wrapper",
+    "pairing_helper",
+    "endpoint",
+    "t3_agent_skill",
+)
+_T3_GITHUB_READINESS_CHECKS = (
+    "git_identity",
+    "gh_authenticated",
+    "git_credential_helper",
+)
+_T3_READINESS_LABELS = {
+    "service_active": "service active",
+    "service_enabled": "service enabled at boot",
+    "runtime": "T3 runtime installed",
+    "native_runtime": "native runtime ready",
+    "wrapper": "pairing provider installed",
+    "pairing_helper": "pairing helper installed",
+    "endpoint": "web endpoint responding",
+    "t3_agent_skill": "managed T3 skills installed",
+    "git_identity": "Git author identity configured",
+    "gh_authenticated": "GitHub CLI authenticated",
+    "git_credential_helper": "Git credential helper configured",
+}
 _T3_UPDATE_SCRIPT = r'''
 set -eu
 export NVM_DIR="$HOME/.nvm"
@@ -78,6 +106,9 @@ def _load_manifest(path: str) -> dict[str, Any]:
             raise RuntimeError(f"Web panel manifest has no valid {name}")
     if not isinstance(value.get("features"), dict):
         raise RuntimeError("Web panel manifest has no valid features")
+    for name in ("t3_github_readiness", "t3_git_identity_readiness"):
+        if not isinstance(value["features"].get(name, False), bool):
+            raise RuntimeError("Web panel manifest has invalid T3 readiness settings")
     return value
 
 
@@ -173,6 +204,56 @@ def _deduplicate_services(
         )
         seen.add(url)
     return services
+
+
+def _evaluate_t3_readiness(
+    manifest: dict[str, Any], output: str
+) -> tuple[bool, str] | None:
+    """Evaluate doctor JSON against the capabilities selected during setup."""
+
+    try:
+        records = json.loads(output)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(records, list):
+        return None
+    result = next(
+        (
+            record
+            for record in records
+            if isinstance(record, dict) and record.get("capability") == "t3code"
+        ),
+        None,
+    )
+    if not isinstance(result, dict) or not isinstance(result.get("checks"), dict):
+        return None
+
+    checks = result["checks"]
+    required = list(_T3_CORE_READINESS_CHECKS)
+    if manifest["features"].get("t3_git_identity_readiness") is True:
+        required.append("git_identity")
+    if manifest["features"].get("t3_github_readiness") is True:
+        required.extend(("gh_authenticated", "git_credential_helper"))
+    failed = [name for name in required if checks.get(name) is not True]
+    optional_failed = [
+        name
+        for name in _T3_GITHUB_READINESS_CHECKS
+        if name not in required and checks.get(name) is False
+    ]
+
+    lines = ["Readiness checks:"]
+    for name in required:
+        marker = "✓" if checks.get(name) is True else "✗"
+        lines.append(f"  {marker} {_T3_READINESS_LABELS[name]}")
+    if optional_failed:
+        labels = ", ".join(_T3_READINESS_LABELS[name] for name in optional_failed)
+        lines.append(f"  • Not required by this setup: {labels}")
+    fixes = result.get("fixes")
+    if isinstance(fixes, list):
+        for fix in fixes:
+            if isinstance(fix, str) and fix:
+                lines.append(f"  ✓ Repair applied: {fix}")
+    return not failed, "\n".join(lines) + "\n"
 
 
 class WebPanelState:
@@ -278,7 +359,15 @@ class WebPanelState:
             return
         try:
             check = subprocess.run(
-                [doctor, "agent", "doctor", "--capability", "t3code", "--fix"],
+                [
+                    doctor,
+                    "agent",
+                    "doctor",
+                    "--capability",
+                    "t3code",
+                    "--fix",
+                    "--json",
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -301,8 +390,18 @@ class WebPanelState:
                 output + str(exc),
             )
             return
-        output += (check.stdout or "") + (check.stderr or "")
-        if check.returncode != 0:
+        readiness = _evaluate_t3_readiness(self.manifest, check.stdout or "")
+        if readiness is None:
+            output += (check.stdout or "") + (check.stderr or "")
+            self._finish_action(
+                "failed",
+                "T3 Code updated, but its readiness result was invalid.",
+                output,
+            )
+            return
+        ready, readiness_output = readiness
+        output += (check.stderr or "") + readiness_output
+        if not ready:
             self._finish_action(
                 "failed",
                 "T3 Code updated, but its readiness check failed.",
