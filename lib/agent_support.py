@@ -12,8 +12,17 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from lib.atomic_io import write_json_atomic
+from lib.installation_info import build_setup_snapshot_metadata
 from lib.types import JSONDict
 from lib.validation import validate_filesystem_path
+
+
+_INSTALLATION_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_BROWSER_LAUNCHER_FEATURES = (
+    "private_evidence",
+    "coordinate_input",
+    "webgl_settle_delay",
+)
 
 
 def _effective_home() -> str:
@@ -87,13 +96,23 @@ def build_agent_support_bundle(
     )
 
     user_home = os.path.abspath(home or _effective_home())
+    installation = build_setup_snapshot_metadata(_INSTALLATION_ROOT)
     tools = inspect_agent_tools(list(DEFAULT_DOCTOR_TOOLS), home=user_home)
     host = inspect_host_readiness(user_home)
     t3code = inspect_t3code(user_home)
     browser = inspect_browser_automation(user_home, run_smoke=browser_smoke)
+    raw_launcher_features = browser.get("launcher_features")
+    launcher_features = (
+        raw_launcher_features if isinstance(raw_launcher_features, dict) else {}
+    )
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "infra_tools": {
+            "version": installation["version"],
+            "commit": installation.get("commit"),
+            "dirty": installation.get("dirty"),
+        },
         "system": {
             "platform": platform.system(),
             "release": platform.release(),
@@ -141,6 +160,13 @@ def build_agent_support_bundle(
         },
         "browser": {
             "installed": browser["installed"],
+            "launchers_secure": browser.get("launchers_secure") is True,
+            "launcher_features": {
+                feature: launcher_features.get(feature) is True
+                for feature in _BROWSER_LAUNCHER_FEATURES
+                if feature in launcher_features
+            },
+            "managed_defaults": browser.get("managed_defaults") is True,
             "registrations": browser["registrations"],
             "configured": browser["configured"],
             "smoke_test": browser["smoke_test"],
@@ -150,6 +176,7 @@ def build_agent_support_bundle(
         "privacy": {
             "log_contents_included": False,
             "repository_contents_included": False,
+            "installation_branch_included": False,
             "credential_contents_included": False,
             "user_identity_included": False,
         },

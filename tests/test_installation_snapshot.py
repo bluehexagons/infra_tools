@@ -22,6 +22,7 @@ from lib.channel_manager import (
 )
 from lib.installation_info import (
     INSTALLATION_METADATA_FILENAME,
+    installation_version,
     read_installation_metadata,
     write_setup_snapshot_metadata,
 )
@@ -81,6 +82,7 @@ class TestInstallationSnapshot(unittest.TestCase):
             self.assertEqual(metadata["commit"], _git(source, "rev-parse", "HEAD"))
             self.assertEqual(metadata["branch"], "main")
             self.assertFalse(metadata["dirty"])
+            self.assertEqual(installation_version(destination), "2.0.0")
 
             with open(
                 os.path.join(source, "infra_tools.py"),

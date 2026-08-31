@@ -92,6 +92,23 @@ class TestAgentReadinessState(unittest.TestCase):
                         "service_log": "/secret/home/t3.log",
                         "fixes": [],
                     },
+                    {
+                        "capability": "browser",
+                        "healthy": True,
+                        "installed": True,
+                        "launchers_secure": True,
+                        "launcher_features": {
+                            "private_evidence": True,
+                            "coordinate_input": True,
+                            "webgl_settle_delay": True,
+                            "private_path": "/secret/browser-output",
+                        },
+                        "managed_defaults": True,
+                        "registrations": {"codex": True},
+                        "configured": True,
+                        "smoke_test": True,
+                        "path": "/secret/browser",
+                    },
                 ],
                 trigger="manual",
                 now=datetime(2026, 8, 27, tzinfo=timezone.utc),
@@ -105,6 +122,21 @@ class TestAgentReadinessState(unittest.TestCase):
         self.assertNotIn(secret, rendered)
         self.assertFalse(record["privacy"]["paths_included"])
         self.assertFalse(record["privacy"]["user_identity_included"])
+        browser = next(
+            capability
+            for capability in record["capabilities"]
+            if capability["capability"] == "browser"
+        )
+        self.assertEqual(
+            browser["launcher_features"],
+            {
+                "private_evidence": True,
+                "coordinate_input": True,
+                "webgl_settle_delay": True,
+            },
+        )
+        self.assertTrue(browser["managed_defaults"])
+        self.assertTrue(browser["launchers_secure"])
 
     def test_private_record_detects_current_and_previous_boots(self) -> None:
         with tempfile.TemporaryDirectory() as home:

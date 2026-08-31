@@ -9,6 +9,7 @@ import os
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -915,6 +916,23 @@ def _browser_launcher_features(path: Optional[str] = None) -> JSONDict:
     }
 
 
+def _browser_launchers_secure(paths: Optional[tuple[str, ...]] = None) -> bool:
+    """Return whether managed browser launchers are root-owned safe files."""
+    launcher_paths = paths or (_BROWSER_MCP_WRAPPER, _BROWSER_DOCTOR_WRAPPER)
+    for path in launcher_paths:
+        try:
+            metadata = os.lstat(path)
+        except OSError:
+            return False
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            return False
+    return True
+
+
 def inspect_browser_automation(
     home: Optional[str] = None,
     *,
@@ -926,6 +944,7 @@ def inspect_browser_automation(
         os.path.isfile(path) and os.access(path, os.X_OK)
         for path in (_BROWSER_MCP_WRAPPER, _BROWSER_DOCTOR_WRAPPER)
     )
+    launchers_secure = _browser_launchers_secure()
     launcher_features = _browser_launcher_features()
     managed_defaults = all(bool(value) for value in launcher_features.values())
 
@@ -955,6 +974,7 @@ def inspect_browser_automation(
 
     configured = bool(
         launchers_installed
+        and launchers_secure
         and managed_defaults
         and registrations
         and all(bool(value) for value in registrations.values())
@@ -964,6 +984,7 @@ def inspect_browser_automation(
         "capability": "browser",
         "installed": launchers_installed,
         "path": _BROWSER_MCP_WRAPPER if launchers_installed else None,
+        "launchers_secure": launchers_secure,
         "launcher_features": launcher_features,
         "managed_defaults": managed_defaults,
         "registrations": registrations,
@@ -2132,6 +2153,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
                 print(f"  ✓ browser: {result['path']} (smoke test passed)")
             elif not result["installed"]:
                 print("  ✗ browser: Playwright launchers are not installed")
+            elif not result.get("launchers_secure"):
+                print(
+                    "  ✗ browser: managed launchers have unsafe ownership, "
+                    "type, or permissions; inspect them and rerun the saved setup"
+                )
             elif not result.get("managed_defaults"):
                 print(
                     "  ✗ browser: managed launcher defaults are stale; "

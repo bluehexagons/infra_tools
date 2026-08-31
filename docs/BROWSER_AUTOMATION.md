@@ -152,14 +152,15 @@ infra-tools agent doctor \
 ```
 
 Add `--json` for automation. The capability is healthy only when both managed
-launchers are executable, current private-evidence, safe-coordinate, and
-one-second-settle defaults are present, every installed compatible agent has
-the managed MCP registration, and the local interaction/rendering smoke test
-passes. A stale launcher is unhealthy even when its older smoke test passes;
-rerun the saved setup to reconcile it. If only one compatible agent was
-provisioned, list only that tool. The default doctor tool set still includes
-all terminal agents, so explicit `--tool` flags are useful on deliberately
-minimal VMs.
+launchers are executable, root-owned regular files without group or world write
+access; current private-evidence, safe-coordinate, and one-second-settle
+defaults are present; every installed compatible agent has the managed MCP
+registration; and the local interaction/rendering smoke test passes. A stale
+or unsafe launcher is unhealthy even when its smoke test passes; inspect an
+unsafe path, then rerun the saved setup to reconcile it. If only one compatible
+agent was provisioned, list only that tool. The default doctor tool set still
+includes all terminal agents, so explicit `--tool` flags are useful on
+deliberately minimal VMs.
 
 For lower-level checks:
 

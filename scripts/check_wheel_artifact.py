@@ -132,6 +132,29 @@ def _smoke_installed_wheel(wheel: Path, work_dir: Path) -> None:
         env=environment,
         stdout=subprocess.DEVNULL,
     )
+    installed_version = subprocess.run(
+        [
+            str(python),
+            "-I",
+            "-c",
+            "from importlib.metadata import version; print(version('infra_tools'))",
+        ],
+        check=True,
+        cwd=work_dir,
+        env=environment,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    version_result = subprocess.run(
+        [str(_venv_command(venv_dir, "infra-tools")), "--version"],
+        check=True,
+        cwd=work_dir,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    if version_result.stdout.strip() != f"infra-tools {installed_version}":
+        raise RuntimeError("Installed infra-tools launcher returned the wrong version")
     subprocess.run(
         [str(_venv_command(venv_dir, "webhook_manager")), "--help"],
         check=True,

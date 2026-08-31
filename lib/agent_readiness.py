@@ -26,6 +26,11 @@ _BOOT_ID_RE = re.compile(
 )
 _MAX_RECORD_BYTES = 256 * 1024
 _TRIGGERS = frozenset(("agent_update", "manual"))
+_BROWSER_LAUNCHER_FEATURES = (
+    "private_evidence",
+    "coordinate_input",
+    "webgl_settle_delay",
+)
 
 
 def _within(path: str, parent: str) -> bool:
@@ -139,10 +144,18 @@ def _sanitize_capability(record: JSONDict) -> Optional[JSONDict]:
             else [],
         }
     if capability == "browser":
+        launcher_features = _safe_mapping(record.get("launcher_features"))
         return {
             "capability": "browser",
             "healthy": record.get("healthy") is True,
             "installed": record.get("installed") is True,
+            "launchers_secure": record.get("launchers_secure") is True,
+            "launcher_features": {
+                feature: launcher_features.get(feature) is True
+                for feature in _BROWSER_LAUNCHER_FEATURES
+                if feature in launcher_features
+            },
+            "managed_defaults": record.get("managed_defaults") is True,
             "registrations": _safe_mapping(record.get("registrations")),
             "configured": record.get("configured") is True,
             "smoke_test": record.get("smoke_test"),

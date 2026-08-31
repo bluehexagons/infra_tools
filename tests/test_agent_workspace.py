@@ -148,6 +148,15 @@ class AgentSupportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             with (
                 patch(
+                    "lib.agent_support.build_setup_snapshot_metadata",
+                    return_value={
+                        "version": "2.0.0",
+                        "commit": "a" * 40,
+                        "branch": "private-feature-name",
+                        "dirty": False,
+                    },
+                ),
+                patch(
                     "lib.agent_cli.inspect_agent_tools",
                     return_value=[
                         {
@@ -181,6 +190,14 @@ class AgentSupportTests(unittest.TestCase):
                     return_value={
                         "installed": False,
                         "path": "/secret/browser",
+                        "launchers_secure": True,
+                        "launcher_features": {
+                            "private_evidence": True,
+                            "coordinate_input": True,
+                            "webgl_settle_delay": False,
+                            "private_path": "/secret/browser-output",
+                        },
+                        "managed_defaults": False,
                         "registrations": {},
                         "configured": False,
                         "smoke_test": False,
@@ -194,8 +211,28 @@ class AgentSupportTests(unittest.TestCase):
             self.assertNotIn("/secret", rendered)
             self.assertNotIn("Private Name", rendered)
             self.assertNotIn("private@example.test", rendered)
+            self.assertNotIn("private-feature-name", rendered)
             self.assertFalse(bundle["privacy"]["log_contents_included"])
+            self.assertFalse(bundle["privacy"]["installation_branch_included"])
             self.assertEqual(bundle["host"]["maintenance_hold"]["status"], "active")
+            self.assertEqual(
+                bundle["infra_tools"],
+                {
+                    "version": "2.0.0",
+                    "commit": "a" * 40,
+                    "dirty": False,
+                },
+            )
+            self.assertEqual(
+                bundle["browser"]["launcher_features"],
+                {
+                    "private_evidence": True,
+                    "coordinate_input": True,
+                    "webgl_settle_delay": False,
+                },
+            )
+            self.assertFalse(bundle["browser"]["managed_defaults"])
+            self.assertTrue(bundle["browser"]["launchers_secure"])
 
     def test_support_bundle_writes_new_private_file_below_home(self) -> None:
         with tempfile.TemporaryDirectory() as home:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -337,6 +338,7 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
         with (
             patch.object(agent_cli.os.path, "isfile", return_value=True),
             patch.object(agent_cli.os, "access", return_value=True),
+            patch.object(agent_cli, "_browser_launchers_secure", return_value=True),
             patch.object(
                 agent_cli,
                 "_browser_launcher_features",
@@ -394,11 +396,13 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             with (
                 patch.object(agent_cli, "_BROWSER_MCP_WRAPPER", str(mcp_wrapper)),
                 patch.object(agent_cli, "_BROWSER_DOCTOR_WRAPPER", str(doctor_wrapper)),
+                patch.object(agent_cli, "_browser_launchers_secure", return_value=True),
                 patch.object(agent_cli, "_tool_path", side_effect=tool_path),
             ):
                 result = agent_cli.inspect_browser_automation(str(home))
 
         self.assertTrue(result["installed"])
+        self.assertTrue(result["launchers_secure"])
         self.assertTrue(result["smoke_test"])
         self.assertTrue(result["managed_defaults"])
         self.assertEqual(result["registrations"], {"codex": True})
@@ -422,6 +426,21 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
                 "webgl_settle_delay": False,
             },
         )
+
+    def test_doctor_rejects_writable_or_non_root_launchers(self) -> None:
+        secure = SimpleNamespace(st_mode=stat.S_IFREG | 0o755, st_uid=0)
+        writable = SimpleNamespace(st_mode=stat.S_IFREG | 0o775, st_uid=0)
+        user_owned = SimpleNamespace(st_mode=stat.S_IFREG | 0o755, st_uid=1000)
+        symlink = SimpleNamespace(st_mode=stat.S_IFLNK | 0o777, st_uid=0)
+
+        with patch.object(agent_cli.os, "lstat", return_value=secure):
+            self.assertTrue(agent_cli._browser_launchers_secure(("one", "two")))
+        with patch.object(agent_cli.os, "lstat", return_value=writable):
+            self.assertFalse(agent_cli._browser_launchers_secure(("one",)))
+        with patch.object(agent_cli.os, "lstat", return_value=user_owned):
+            self.assertFalse(agent_cli._browser_launchers_secure(("one",)))
+        with patch.object(agent_cli.os, "lstat", return_value=symlink):
+            self.assertFalse(agent_cli._browser_launchers_secure(("one",)))
 
     def test_doctor_accepts_opencode_jsonc_registration(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

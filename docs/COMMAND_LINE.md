@@ -646,13 +646,17 @@ restart proceeds even if a session, hold, or recognized workload remains.
 
 `agent support-bundle` composes a stable local JSON snapshot from the agent,
 T3 Code, browser, host, and maintenance diagnostics. It includes aggregate T3
-log sizes and counts, not log text. Tool paths, home paths, Git identity,
-repository contents and status names, prompts, sessions, and credential
-contents are omitted. Without `--output` it prints JSON; an output path must be
-a new file below the current user's home and is written with mode `0600`.
-Browser configuration is inventoried without starting Chromium; add
-`--browser-smoke` when exercising an explicitly installed Playwright fallback
-is relevant to the report.
+log sizes and counts, not log text. It also records the infra-tools project
+version, validated source commit, and dirty-state boolean when available, while
+omitting the source branch. Browser diagnostics retain the safe-coordinate,
+private-evidence, WebGL-settle, and launcher-security states so a stale or
+unsafe managed launcher remains identifiable in a support artifact. Tool paths,
+home paths, Git identity, repository contents and status names, prompts,
+sessions, and credential contents are omitted. Without `--output` it prints
+JSON; an output path must be a new file below the current user's home and is
+written with mode `0600`. Browser configuration is inventoried without starting
+Chromium; add `--browser-smoke` when it is relevant to exercise an explicitly
+installed Playwright fallback for the report.
 
 `agent update` deliberately updates the three user-installed terminal agents;
 it is never run by an automatic host timer. The command uses each vendor's
