@@ -26,6 +26,7 @@ class AgentCapabilityFeedbackTests(unittest.TestCase):
         output = io.StringIO()
         capability_results = {
             "browser": {"capability": "browser", "healthy": True},
+            "development": {"capability": "development", "healthy": True},
             "host": {"capability": "host", "healthy": True},
             "t3code": {"capability": "t3code", "healthy": True},
         }
@@ -43,6 +44,11 @@ class AgentCapabilityFeedbackTests(unittest.TestCase):
                 agent_cli,
                 "inspect_browser_automation",
                 return_value=capability_results["browser"],
+            ),
+            patch.object(
+                agent_cli,
+                "inspect_development_readiness",
+                return_value=capability_results["development"],
             ),
             patch.object(
                 agent_cli,
@@ -85,6 +91,7 @@ class AgentCapabilityFeedbackTests(unittest.TestCase):
         output = io.StringIO()
         capability_results = {
             "browser": {"capability": "browser", "healthy": True},
+            "development": {"capability": "development", "healthy": True},
             "host": {"capability": "host", "healthy": True},
             "t3code": {"capability": "t3code", "healthy": True},
         }
@@ -99,6 +106,11 @@ class AgentCapabilityFeedbackTests(unittest.TestCase):
                 agent_cli,
                 "inspect_browser_automation",
                 return_value=capability_results["browser"],
+            ),
+            patch.object(
+                agent_cli,
+                "inspect_development_readiness",
+                return_value=capability_results["development"],
             ),
             patch.object(
                 agent_cli,

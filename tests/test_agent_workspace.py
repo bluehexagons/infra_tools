@@ -193,11 +193,18 @@ class AgentSupportTests(unittest.TestCase):
                         "launchers_secure": True,
                         "launcher_features": {
                             "private_evidence": True,
+                            "bounded_evidence": True,
                             "coordinate_input": True,
                             "webgl_settle_delay": False,
                             "private_path": "/secret/browser-output",
                         },
                         "managed_defaults": False,
+                        "running_processes": {
+                            "total": 1,
+                            "stale": 1,
+                            "inspected": True,
+                            "private_pid": 123,
+                        },
                         "registrations": {},
                         "configured": False,
                         "smoke_test": False,
@@ -208,6 +215,24 @@ class AgentSupportTests(unittest.TestCase):
                             "/secret/browser",
                         ],
                         "remediation": "rerun_setup_with_browser_automation",
+                    },
+                ),
+                patch(
+                    "lib.agent_cli.inspect_development_readiness",
+                    return_value={
+                        "installed": True,
+                        "healthy": False,
+                        "issues": ["node_pnpm_missing", "/secret/toolchain"],
+                        "toolchains": {
+                            "node": {
+                                "installed": True,
+                                "healthy": False,
+                                "version": "v24.20.0",
+                                "npm": "11.19.0",
+                                "pnpm": None,
+                                "path": "/secret/node",
+                            }
+                        },
                     },
                 ),
             ):
@@ -233,12 +258,17 @@ class AgentSupportTests(unittest.TestCase):
                 bundle["browser"]["launcher_features"],
                 {
                     "private_evidence": True,
+                    "bounded_evidence": True,
                     "coordinate_input": True,
                     "webgl_settle_delay": False,
                 },
             )
             self.assertFalse(bundle["browser"]["managed_defaults"])
             self.assertTrue(bundle["browser"]["launchers_secure"])
+            self.assertEqual(
+                bundle["browser"]["running_processes"],
+                {"total": 1, "stale": 1, "inspected": True},
+            )
             self.assertEqual(
                 bundle["browser"]["issues"],
                 ["launchers_missing", "registration_missing"],
@@ -247,6 +277,8 @@ class AgentSupportTests(unittest.TestCase):
                 bundle["browser"]["remediation"],
                 "rerun_setup_with_browser_automation",
             )
+            self.assertEqual(bundle["development"]["issues"], ["node_pnpm_missing"])
+            self.assertNotIn("path", bundle["development"]["toolchains"]["node"])
 
     def test_support_bundle_writes_new_private_file_below_home(self) -> None:
         with tempfile.TemporaryDirectory() as home:

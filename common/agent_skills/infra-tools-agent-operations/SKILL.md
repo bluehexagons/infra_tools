@@ -16,6 +16,7 @@ Check host health and only the tools the VM is expected to provide:
 
 ```bash
 infra-tools agent doctor --capability host --json
+infra-tools agent doctor --capability development --json
 infra-tools agent doctor --tool codex --json
 infra-tools agent doctor --all-capabilities --json
 ```
@@ -23,6 +24,9 @@ infra-tools agent doctor --all-capabilities --json
 The comprehensive check inventories every default terminal client but requires
 only those currently installed. Use explicit `--tool` flags when an absent
 client should make readiness fail; each selected tool is then required.
+The development capability inventories Godot, Go, and Node independently, so
+an unselected toolchain is informational while a broken installed baseline is
+unhealthy.
 
 Preview terminal-agent updates before applying them as the account that owns
 the installation. Apply an update only when the user requested it:

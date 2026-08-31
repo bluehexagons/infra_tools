@@ -38,7 +38,7 @@ from lib.validators import validate_host, validate_username
 
 
 AGENT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
-AGENT_DOCTOR_CAPABILITIES = ("browser", "host", "t3code")
+AGENT_DOCTOR_CAPABILITIES = ("browser", "development", "host", "t3code")
 DEFAULT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
 AGENT_UPDATE_TOOLS = ("codex", "claude", "opencode")
 DEFAULT_UPDATE_TOOLS = AGENT_UPDATE_TOOLS
@@ -54,6 +54,10 @@ _MAX_INSTALLER_BYTES = 4 * 1024 * 1024
 _UPDATE_TIMEOUT_SECONDS = 600
 _BROWSER_MCP_WRAPPER = "/usr/local/bin/infra-tools-playwright-mcp"
 _BROWSER_DOCTOR_WRAPPER = "/usr/local/bin/infra-tools-playwright-doctor"
+_BROWSER_MCP_CLI = (
+    "/opt/infra-tools-playwright/node_modules/@playwright/mcp/cli.js"
+)
+_BROWSER_OUTPUT_MAX_BYTES = 256 * BYTES_PER_MB
 _BROWSER_MCP_SERVER_NAME = "infra-tools-playwright"
 _BROWSER_DOCTOR_TIMEOUT_SECONDS = 210
 _REMOTE_DOCTOR_TIMEOUT_SECONDS = _BROWSER_DOCTOR_TIMEOUT_SECONDS + 90
@@ -79,6 +83,10 @@ _AGENT_HOST_MAINTENANCE_UNITS = (
     "cleanup-maintenance",
     "user-cache-maintenance",
     "auto-restart-if-needed",
+)
+_AGENT_HOST_OPTIONAL_MAINTENANCE_UNITS = (
+    "auto-update-godot",
+    "auto-update-node",
 )
 _AGENT_HOST_MIN_RECOMMENDED_MEMORY = 4 * BYTES_PER_GB
 _AGENT_HOST_LOW_AVAILABLE_MEMORY = 512 * BYTES_PER_MB
@@ -911,6 +919,9 @@ def _browser_launcher_features(path: Optional[str] = None) -> JSONDict:
             and '--output-dir "$output_dir"' in content
             and "umask 077" in content
         ),
+        "bounded_evidence": (
+            f"--output-max-size {_BROWSER_OUTPUT_MAX_BYTES}" in content
+        ),
         "coordinate_input": "--caps vision" in content,
         "webgl_settle_delay": "--timeout-settle 1000" in content,
     }
@@ -933,6 +944,72 @@ def _browser_launchers_secure(paths: Optional[tuple[str, ...]] = None) -> bool:
     return True
 
 
+def _browser_argument_value(arguments: list[str], option: str) -> Optional[str]:
+    """Return one command-line option value without exposing the full process."""
+    for index, argument in enumerate(arguments):
+        if argument == option and index + 1 < len(arguments):
+            return arguments[index + 1]
+        if argument.startswith(f"{option}="):
+            return argument.split("=", 1)[1]
+    return None
+
+
+def _browser_process_has_managed_defaults(
+    arguments: list[str],
+    home: str,
+) -> bool:
+    """Return whether one active MCP process has the current safe arguments."""
+    capabilities = (_browser_argument_value(arguments, "--caps") or "").split(",")
+    return bool(
+        "--headless" in arguments
+        and "--isolated" in arguments
+        and "vision" in capabilities
+        and _browser_argument_value(arguments, "--output-dir")
+        == os.path.join(home, ".local", "state", "infra_tools", "playwright-mcp")
+        and _browser_argument_value(arguments, "--timeout-settle") == "1000"
+        and _browser_argument_value(arguments, "--output-max-size")
+        == str(_BROWSER_OUTPUT_MAX_BYTES)
+        and "--ignore-https-errors" not in arguments
+        and "--no-sandbox" not in arguments
+    )
+
+
+def _browser_running_processes(
+    home: str,
+    proc_root: str = "/proc",
+) -> JSONDict:
+    """Count active managed MCP servers that predate the current launcher."""
+    try:
+        owner_uid = os.stat(home).st_uid
+        entries = list(os.scandir(proc_root))
+    except OSError:
+        return {"total": 0, "stale": 0, "inspected": False}
+
+    total = 0
+    stale = 0
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            if entry.stat(follow_symlinks=False).st_uid != owner_uid:
+                continue
+            with open(os.path.join(entry.path, "cmdline"), "rb") as file_obj:
+                payload = file_obj.read(16 * 1024)
+        except OSError:
+            continue
+        arguments = [
+            os.fsdecode(value)
+            for value in payload.split(b"\0")
+            if value
+        ]
+        if _BROWSER_MCP_CLI not in arguments or "--isolated" not in arguments:
+            continue
+        total += 1
+        if not _browser_process_has_managed_defaults(arguments, home):
+            stale += 1
+    return {"total": total, "stale": stale, "inspected": True}
+
+
 def inspect_browser_automation(
     home: Optional[str] = None,
     *,
@@ -947,6 +1024,11 @@ def inspect_browser_automation(
     launchers_secure = _browser_launchers_secure()
     launcher_features = _browser_launcher_features()
     managed_defaults = all(bool(value) for value in launcher_features.values())
+    running_processes = _browser_running_processes(user_home)
+    processes_current = bool(
+        running_processes.get("inspected") is not True
+        or int(running_processes.get("stale", 0)) == 0
+    )
 
     registrations: JSONDict = {}
     if _tool_path("codex", user_home):
@@ -981,7 +1063,7 @@ def inspect_browser_automation(
         and managed_defaults
         and registrations_ready
     )
-    healthy = configured and smoke_test if run_smoke else None
+    healthy = configured and processes_current and smoke_test if run_smoke else None
     issues: list[str] = []
     if not launchers_installed:
         issues.append("launchers_missing")
@@ -994,6 +1076,8 @@ def inspect_browser_automation(
         issues.append("registration_missing")
     if run_smoke and launchers_installed and smoke_test is not True:
         issues.append("smoke_test_failed")
+    if not processes_current:
+        issues.append("stale_processes")
 
     remediation: str | None = None
     if "launchers_unsafe" in issues:
@@ -1002,6 +1086,8 @@ def inspect_browser_automation(
         remediation = "rerun_setup_with_browser_automation"
     elif "managed_defaults_stale" in issues:
         remediation = "rerun_saved_setup"
+    elif "stale_processes" in issues:
+        remediation = "restart_agent_sessions"
     elif "smoke_test_failed" in issues:
         remediation = "inspect_browser_runtime"
     return {
@@ -1011,6 +1097,7 @@ def inspect_browser_automation(
         "launchers_secure": launchers_secure,
         "launcher_features": launcher_features,
         "managed_defaults": managed_defaults,
+        "running_processes": running_processes,
         "registrations": registrations,
         "configured": configured,
         "smoke_test": smoke_test,
@@ -1127,7 +1214,11 @@ def _maintenance_status() -> JSONDict:
     units: JSONDict = {}
     warnings: list[str] = []
     errors: list[str] = []
-    for service_name in _AGENT_HOST_MAINTENANCE_UNITS:
+    service_names = (
+        *_AGENT_HOST_MAINTENANCE_UNITS,
+        *_AGENT_HOST_OPTIONAL_MAINTENANCE_UNITS,
+    )
+    for service_name in service_names:
         timer_name = f"{service_name}.timer"
         timer = _systemd_properties(
             timer_name,
@@ -1137,6 +1228,12 @@ def _maintenance_status() -> JSONDict:
             f"{service_name}.service",
             ("LoadState", "ActiveState", "Result", "ExecMainStatus"),
         )
+        if (
+            service_name in _AGENT_HOST_OPTIONAL_MAINTENANCE_UNITS
+            and timer.get("LoadState") != "loaded"
+            and service.get("LoadState") != "loaded"
+        ):
+            continue
         loaded = timer.get("LoadState") == "loaded"
         enabled = timer.get("UnitFileState") in {"enabled", "enabled-runtime"}
         active = timer.get("ActiveState") == "active"
@@ -1360,6 +1457,192 @@ def _run_check(
         )
     except (OSError, subprocess.TimeoutExpired):
         return subprocess.CompletedProcess(command, 1, "", "")
+
+
+def _command_version(path: str, *arguments: str) -> Optional[str]:
+    result = _run_check([path, *(arguments or ("--version",))])
+    output = (result.stdout or result.stderr).strip()
+    return output.splitlines()[0] if result.returncode == 0 and output else None
+
+
+def _system_development_tool(name: str) -> Optional[str]:
+    search_path = os.pathsep.join(("/usr/local/go/bin", _UPDATE_SYSTEM_PATH))
+    return shutil.which(name, path=search_path)
+
+
+def _nvm_node_bin(home: str) -> Optional[str]:
+    """Resolve the active/default nvm Node bin without evaluating shell files."""
+    versions_root = os.path.join(home, ".nvm", "versions", "node")
+    active = shutil.which("node")
+    if active:
+        try:
+            if os.path.commonpath((os.path.realpath(active), versions_root)) == versions_root:
+                return os.path.dirname(active)
+        except ValueError:
+            pass
+
+    alias_path = os.path.join(home, ".nvm", "alias", "default")
+    try:
+        with open(alias_path, encoding="utf-8") as file_obj:
+            alias = file_obj.read(128).strip()
+        if alias == "lts/*":
+            with open(
+                os.path.join(home, ".nvm", "alias", "lts", "*"),
+                encoding="utf-8",
+            ) as file_obj:
+                alias = file_obj.read(128).strip()
+    except OSError:
+        alias = ""
+    if re.fullmatch(r"v\d+\.\d+\.\d+", alias):
+        candidate = os.path.join(versions_root, alias, "bin")
+        if os.path.isfile(os.path.join(candidate, "node")):
+            return candidate
+
+    versions: list[tuple[tuple[int, int, int], str]] = []
+    try:
+        entries = os.scandir(versions_root)
+    except OSError:
+        return None
+    with entries:
+        for entry in entries:
+            match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", entry.name)
+            if match and entry.is_dir(follow_symlinks=False):
+                versions.append(
+                    (tuple(int(part) for part in match.groups()), entry.path)
+                )
+    if not versions:
+        return None
+    _version, version_root = max(versions)
+    candidate = os.path.join(version_root, "bin")
+    return candidate if os.path.isfile(os.path.join(candidate, "node")) else None
+
+
+def _inspect_node_development(home: str) -> JSONDict:
+    nvm_script = os.path.join(home, ".nvm", "nvm.sh")
+    installed = os.path.isfile(nvm_script)
+    if not installed:
+        return {"installed": False, "healthy": True, "issues": []}
+
+    issues: list[str] = []
+    node_bin = _nvm_node_bin(home)
+    node_path = os.path.join(node_bin, "node") if node_bin else ""
+    npm_path = os.path.join(node_bin, "npm") if node_bin else ""
+    pnpm_path = os.path.join(node_bin, "pnpm") if node_bin else ""
+    corepack_path = os.path.join(node_bin, "corepack") if node_bin else ""
+    node_version = _command_version(node_path) if node_path else None
+    npm_version = _command_version(npm_path) if os.path.isfile(npm_path) else None
+    pnpm_version = _command_version(pnpm_path) if os.path.isfile(pnpm_path) else None
+    corepack_version = (
+        _command_version(corepack_path) if os.path.isfile(corepack_path) else None
+    )
+    if node_version is None:
+        issues.append("node_default_missing")
+    if npm_version is None:
+        issues.append("node_npm_missing")
+    if pnpm_version is None:
+        issues.append("node_pnpm_missing")
+    return {
+        "installed": True,
+        "healthy": not issues,
+        "version": node_version,
+        "npm": npm_version,
+        "pnpm": pnpm_version,
+        "corepack": corepack_version,
+        "issues": issues,
+    }
+
+
+def _inspect_go_development() -> JSONDict:
+    go_path = _system_development_tool("go")
+    if go_path is None:
+        return {"installed": False, "healthy": True, "issues": []}
+
+    issues: list[str] = []
+    version = _command_version(go_path, "version")
+    gofmt_path = os.path.join(os.path.dirname(go_path), "gofmt")
+    gofmt = os.path.isfile(gofmt_path) and os.access(gofmt_path, os.X_OK)
+    cgo_result = _run_check([go_path, "env", "CGO_ENABLED"])
+    cgo_enabled = (
+        cgo_result.stdout.strip()
+        if cgo_result.returncode == 0 and cgo_result.stdout.strip() in {"0", "1"}
+        else None
+    )
+    c_compiler = _system_development_tool("gcc") is not None
+    if version is None:
+        issues.append("go_unusable")
+    if not gofmt:
+        issues.append("gofmt_missing")
+    if cgo_enabled == "1" and not c_compiler:
+        issues.append("go_c_compiler_missing")
+    return {
+        "installed": True,
+        "healthy": not issues,
+        "version": version,
+        "gofmt": gofmt,
+        "cgo_enabled": cgo_enabled,
+        "c_compiler": c_compiler,
+        "issues": issues,
+    }
+
+
+def _inspect_godot_development(home: str) -> JSONDict:
+    godot_path = _system_development_tool("godot")
+    if godot_path is None:
+        return {"installed": False, "healthy": True, "issues": []}
+
+    issues: list[str] = []
+    version = _command_version(godot_path)
+    if version is None:
+        issues.append("godot_unusable")
+    template_version = version.split(".official", 1)[0] if version else ""
+    template_dir = os.path.join(
+        home,
+        ".local",
+        "share",
+        "godot",
+        "export_templates",
+        template_version,
+    )
+    export_templates = bool(
+        template_version
+        and os.path.isfile(os.path.join(template_dir, "version.txt"))
+    )
+    web_templates = bool(
+        export_templates
+        and os.path.isfile(os.path.join(template_dir, "web_debug.zip"))
+        and os.path.isfile(os.path.join(template_dir, "web_release.zip"))
+    )
+    return {
+        "installed": True,
+        "healthy": not issues,
+        "version": version,
+        "export_templates": export_templates,
+        "web_templates": web_templates,
+        "issues": issues,
+    }
+
+
+def inspect_development_readiness(home: Optional[str] = None) -> JSONDict:
+    """Inventory managed Godot, Go, and Node development toolchains."""
+    user_home = os.path.abspath(home or os.path.expanduser("~"))
+    toolchains = {
+        "godot": _inspect_godot_development(user_home),
+        "go": _inspect_go_development(),
+        "node": _inspect_node_development(user_home),
+    }
+    installed = any(bool(result["installed"]) for result in toolchains.values())
+    issues = [
+        str(issue)
+        for result in toolchains.values()
+        for issue in result.get("issues", [])
+    ]
+    return {
+        "capability": "development",
+        "installed": installed,
+        "healthy": not issues,
+        "toolchains": toolchains,
+        "issues": issues,
+    }
 
 
 def _t3_port(drop_in: str) -> int | None:
@@ -2117,6 +2400,8 @@ def run_agent_command(args: argparse.Namespace) -> int:
     for capability in requested_capabilities:
         if capability == "browser":
             capability_results.append(inspect_browser_automation())
+        elif capability == "development":
+            capability_results.append(inspect_development_readiness())
         elif capability == "host":
             capability_results.append(inspect_host_readiness())
         elif capability == "t3code":
@@ -2172,6 +2457,20 @@ def run_agent_command(args: argparse.Namespace) -> int:
                             print(f"      {check}: failed")
                 for fix in result.get("fixes", []):
                     print(f"      repaired: {fix}")
+            elif result["capability"] == "development":
+                if result["healthy"] and result["installed"]:
+                    versions = ", ".join(
+                        f"{name} {toolchain.get('version') or 'available'}"
+                        for name, toolchain in result["toolchains"].items()
+                        if toolchain.get("installed")
+                    )
+                    print(f"  ✓ development: {versions}")
+                elif result["healthy"]:
+                    print("  • development: no managed toolchains detected")
+                else:
+                    print("  ✗ development: toolchain baseline checks failed")
+                    for issue in result["issues"]:
+                        print(f"      {issue}")
             elif result["capability"] == "host":
                 status = str(result["status"])
                 marker = (
@@ -2200,6 +2499,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
                 print(
                     "  ✗ browser: managed launcher defaults are stale; "
                     "rerun the saved setup"
+                )
+            elif "stale_processes" in result.get("issues", []):
+                print(
+                    "  ✗ browser: active MCP processes use stale defaults; "
+                    "restart their agent sessions"
                 )
             elif not result["smoke_test"]:
                 print("  ✗ browser: local smoke test failed")

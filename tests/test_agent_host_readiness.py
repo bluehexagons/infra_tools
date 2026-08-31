@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from lib.agent_cli import (
     _directory_size_bytes,
+    _maintenance_status,
     _read_memory_capacity_bytes,
     _read_meminfo,
     inspect_host_readiness,
@@ -24,6 +25,49 @@ class _DiskUsage:
 
 
 class TestAgentHostReadiness(unittest.TestCase):
+    def test_maintenance_includes_installed_development_timers_only(self) -> None:
+        def properties(
+            unit: str,
+            _properties: tuple[str, ...],
+            *,
+            user: bool = False,
+        ) -> dict[str, str]:
+            self.assertFalse(user)
+            if unit.startswith("auto-update-godot"):
+                return {"LoadState": "not-found"}
+            if unit == "auto-update-node.timer":
+                return {
+                    "LoadState": "loaded",
+                    "ActiveState": "active",
+                    "UnitFileState": "enabled",
+                }
+            if unit == "auto-update-node.service":
+                return {
+                    "LoadState": "loaded",
+                    "ActiveState": "failed",
+                    "Result": "failed",
+                    "ExecMainStatus": "1",
+                }
+            if unit.endswith(".timer"):
+                return {
+                    "LoadState": "loaded",
+                    "ActiveState": "active",
+                    "UnitFileState": "enabled",
+                }
+            return {
+                "LoadState": "loaded",
+                "ActiveState": "inactive",
+                "Result": "success",
+                "ExecMainStatus": "0",
+            }
+
+        with patch("lib.agent_cli._systemd_properties", side_effect=properties):
+            result = _maintenance_status()
+
+        self.assertIn("auto-update-node", result["units"])
+        self.assertNotIn("auto-update-godot", result["units"])
+        self.assertIn("auto-update-node maintenance last failed", result["errors"])
+
     def test_read_meminfo_converts_kibibytes_to_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = os.path.join(temp_dir, "meminfo")

@@ -20,6 +20,7 @@ from lib.validation import validate_filesystem_path
 _INSTALLATION_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BROWSER_LAUNCHER_FEATURES = (
     "private_evidence",
+    "bounded_evidence",
     "coordinate_input",
     "webgl_settle_delay",
 )
@@ -30,6 +31,7 @@ _BROWSER_ISSUES = frozenset(
         "managed_defaults_stale",
         "registration_missing",
         "smoke_test_failed",
+        "stale_processes",
     )
 )
 _BROWSER_REMEDIATIONS = frozenset(
@@ -38,8 +40,25 @@ _BROWSER_REMEDIATIONS = frozenset(
         "rerun_setup_with_browser_automation",
         "rerun_saved_setup",
         "inspect_browser_runtime",
+        "restart_agent_sessions",
     )
 )
+_DEVELOPMENT_ISSUES = frozenset(
+    (
+        "godot_unusable",
+        "go_unusable",
+        "gofmt_missing",
+        "go_c_compiler_missing",
+        "node_default_missing",
+        "node_npm_missing",
+        "node_pnpm_missing",
+    )
+)
+_DEVELOPMENT_TOOLCHAIN_FIELDS = {
+    "godot": ("installed", "healthy", "version", "export_templates", "web_templates"),
+    "go": ("installed", "healthy", "version", "gofmt", "cgo_enabled", "c_compiler"),
+    "node": ("installed", "healthy", "version", "npm", "pnpm", "corepack"),
+}
 
 
 def _effective_home() -> str:
@@ -47,6 +66,18 @@ def _effective_home() -> str:
         return pwd.getpwuid(os.geteuid()).pw_dir
     except KeyError as exc:
         raise RuntimeError("Could not resolve the current agent user's home") from exc
+
+
+def _sanitize_browser_processes(value: object) -> JSONDict:
+    processes = value if isinstance(value, dict) else {}
+    sanitized: JSONDict = {}
+    for key in ("total", "stale"):
+        count = processes.get(key)
+        if type(count) is int and count >= 0:
+            sanitized[key] = count
+    if isinstance(processes.get("inspected"), bool):
+        sanitized["inspected"] = processes["inspected"]
+    return sanitized
 
 
 def _expand_home_path(path: str, home: str) -> str:
@@ -108,6 +139,7 @@ def build_agent_support_bundle(
         DEFAULT_DOCTOR_TOOLS,
         inspect_agent_tools,
         inspect_browser_automation,
+        inspect_development_readiness,
         inspect_host_readiness,
         inspect_t3code,
     )
@@ -118,6 +150,7 @@ def build_agent_support_bundle(
     host = inspect_host_readiness(user_home)
     t3code = inspect_t3code(user_home)
     browser = inspect_browser_automation(user_home, run_smoke=browser_smoke)
+    development = inspect_development_readiness(user_home)
     raw_launcher_features = browser.get("launcher_features")
     launcher_features = (
         raw_launcher_features if isinstance(raw_launcher_features, dict) else {}
@@ -133,6 +166,22 @@ def build_agent_support_bundle(
         else []
     )
     browser_remediation = browser.get("remediation")
+    raw_development_toolchains = development.get("toolchains")
+    development_toolchains = (
+        raw_development_toolchains
+        if isinstance(raw_development_toolchains, dict)
+        else {}
+    )
+    raw_development_issues = development.get("issues")
+    development_issues = (
+        [
+            issue
+            for issue in raw_development_issues
+            if isinstance(issue, str) and issue in _DEVELOPMENT_ISSUES
+        ]
+        if isinstance(raw_development_issues, list)
+        else []
+    )
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -195,6 +244,9 @@ def build_agent_support_bundle(
                 if feature in launcher_features
             },
             "managed_defaults": browser.get("managed_defaults") is True,
+            "running_processes": _sanitize_browser_processes(
+                browser.get("running_processes")
+            ),
             "registrations": browser["registrations"],
             "configured": browser["configured"],
             "smoke_test": browser["smoke_test"],
@@ -206,6 +258,23 @@ def build_agent_support_bundle(
                 and browser_remediation in _BROWSER_REMEDIATIONS
                 else None
             ),
+        },
+        "development": {
+            "installed": development.get("installed") is True,
+            "healthy": development.get("healthy") is True,
+            "issues": development_issues,
+            "toolchains": {
+                name: {
+                    field: toolchain.get(field)
+                    for field in fields
+                    if field in toolchain
+                }
+                for name, fields in _DEVELOPMENT_TOOLCHAIN_FIELDS.items()
+                if isinstance(
+                    toolchain := development_toolchains.get(name),
+                    dict,
+                )
+            },
         },
         "t3_logs": _t3_log_summary(user_home),
         "privacy": {

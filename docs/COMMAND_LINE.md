@@ -562,6 +562,7 @@ On the configured VM, check selected tools without exposing credential contents:
 infra-tools agent doctor
 infra-tools agent doctor --tool codex --tool claude --json
 infra-tools agent doctor --all-capabilities --json
+infra-tools agent doctor --capability development --json
 infra-tools agent doctor --tool codex --tool opencode --capability browser
 infra-tools agent doctor --capability browser
 infra-tools agent doctor --capability t3code --capability host
@@ -590,6 +591,12 @@ Codex doctor result unhealthy.
 `--capability browser` additionally verifies managed launchers, MCP registration
 for installed compatible agents, and a local Chromium interaction/rendering
 smoke test.
+`--capability development` inventories managed Godot, Go, and nvm/Node
+toolchains. It verifies that installed engines and compilers run, reports
+whether matching Godot export templates are visible, checks that Go includes
+`gofmt` and a compiler when CGO is enabled, and ensures Node retains the
+npm/PNPM baseline promised by `--node`.
+Absent optional toolchains do not fail the capability.
 `--capability t3code` checks the managed service, native runtime, pairing helper,
 endpoint, provider authentication, Git identity and credential helper, and the
 managed agent skill. Its `--fix` mode can rebuild blocked native dependencies,
@@ -597,15 +604,17 @@ configure the GitHub HTTPS helper after a successful login, and restart an
 inactive managed service.
 `--capability host` reports memory and swap headroom, filesystem and bounded
 agent-storage use, T3 service cgroup pressure, recurring maintenance timer
-state, the agent maintenance hold, and pending reboots. Advisory pressure
-appears as warnings; critical filesystem pressure or a recorded maintenance
+state (including installed Node and Godot update jobs), the agent maintenance
+hold, and pending reboots. Advisory pressure appears as warnings; critical
+filesystem pressure or a recorded maintenance
 failure makes the capability unhealthy.
 When `--capability` is supplied without `--tool`, doctor checks only the
 requested capability instead of requiring the default set of terminal agents.
-`--all-capabilities` checks browser, host, and T3 Code readiness and inventories
-the default terminal tools in the same text or JSON result. Installed terminal
-tools are required; absent tools are reported as optional inventory with
-`"required": false` and do not make the comprehensive check fail. Explicit
+`--all-capabilities` checks browser, development toolchains, host, and T3 Code
+readiness and inventories the default terminal tools in the same text or JSON
+result. Installed terminal tools are required; absent tools are reported as
+optional inventory with `"required": false` and do not make the comprehensive
+check fail. Explicit
 `--tool` flags make every selected tool required, including an absent one. The
 option is mutually exclusive with a narrowed `--capability` selection and works
 with the remote `HOST USER` form.

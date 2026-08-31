@@ -13,16 +13,18 @@ a public plain-HTTP server or edit Nginx and UFW directly.
 
 ## Publish
 
-1. Confirm the repository contains `project.godot` and an appropriate Web
+1. Run `infra-tools agent doctor --capability development --json` and confirm
+   the Godot toolchain is healthy and reports `web_templates: true`.
+2. Confirm the repository contains `project.godot` and an appropriate Web
    export preset in `export_presets.cfg`.
-2. Run `godot --headless --path . --editor --quit-after 1` when imports need to
+3. Run `godot --headless --path . --editor --quit-after 1` when imports need to
    be completed before export.
-3. From the project root, run `infra-web publish godot --json`. It derives a
+4. From the project root, run `infra-web publish godot --json`. It derives a
    stable game slug from the project and suppresses the interactive Godot
    progress stream. Pass an explicit slug, `--preset`, or `--debug` only when
    the task requires them. The result reports the URL, elapsed time, artifact
    sizes, and whether it replaced an earlier publication.
-4. Replace `GAME` below with the lowercase `game` value returned by `publish`:
+5. Replace `GAME` below with the lowercase `game` value returned by `publish`:
 
    ```bash
    infra-web url GAME
@@ -31,7 +33,7 @@ a public plain-HTTP server or edit Nginx and UFW directly.
 
    Treat the returned URL as authoritative. Do not substitute a local port or
    bypass certificate verification with `curl -k` or an equivalent option.
-5. Use a collaborative T3 preview when attached. Otherwise, use VM-local
+6. Use a collaborative T3 preview when attached. Otherwise, use VM-local
    browser automation only after `infra-tools agent doctor --capability
    browser` succeeds. Confirm that the game canvas initializes without browser
    console errors.

@@ -953,11 +953,14 @@ def install_node_for_user(
     
     if os.path.exists(nvm_sh):
         _ensure_nvm_shell_init(username, user_home)
+        nvm_env = (
+            f"export NVM_DIR={safe_nvm_dir} && "
+            '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"'
+        )
         verify_result = _run_as_login_user(
             username,
             user_home,
-            f"export NVM_DIR={safe_nvm_dir} && "
-            '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm --version',
+            f"{nvm_env} && nvm --version",
             check=False,
         )
         _chown_existing_paths(username, _user_tool_paths(user_home))
@@ -968,9 +971,44 @@ def install_node_for_user(
             return
 
         if not refresh:
+            baseline_result = _run_as_login_user(
+                username,
+                user_home,
+                f"{nvm_env} && command -v node >/dev/null && "
+                "command -v npm >/dev/null && command -v pnpm >/dev/null",
+                check=False,
+            )
+            if baseline_result.returncode == 0:
+                return
+
+            print("  Repairing Node.js LTS, npm, and pnpm baseline")
+            _run_as_login_user(
+                username,
+                user_home,
+                f"{nvm_env} && nvm install --lts && nvm alias default 'lts/*'",
+            )
+            npm_freshness = shlex.join(npm_freshness_args())
+            npm_freshness_suffix = f" {npm_freshness}" if npm_freshness else ""
+            _run_as_login_user(
+                username,
+                user_home,
+                f"{nvm_env} && npm install -g pnpm{npm_freshness_suffix}",
+            )
+            repaired_result = _run_as_login_user(
+                username,
+                user_home,
+                f"{nvm_env} && command -v node >/dev/null && "
+                "command -v npm >/dev/null && command -v pnpm >/dev/null",
+                check=False,
+            )
+            _chown_existing_paths(username, _user_tool_paths(user_home))
+            if repaired_result.returncode != 0:
+                raise RuntimeError(
+                    "Node.js setup could not restore the node, npm, and pnpm baseline"
+                )
+            print("  ✓ Node.js LTS + NPM + PNPM baseline repaired for user")
             return
         print("  Refreshing Node.js LTS, npm, and pnpm")
-        nvm_env = f"export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
         _run_as_login_user(
             username,
             user_home,

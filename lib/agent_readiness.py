@@ -28,6 +28,7 @@ _MAX_RECORD_BYTES = 256 * 1024
 _TRIGGERS = frozenset(("agent_update", "manual"))
 _BROWSER_LAUNCHER_FEATURES = (
     "private_evidence",
+    "bounded_evidence",
     "coordinate_input",
     "webgl_settle_delay",
 )
@@ -38,6 +39,7 @@ _BROWSER_ISSUES = frozenset(
         "managed_defaults_stale",
         "registration_missing",
         "smoke_test_failed",
+        "stale_processes",
     )
 )
 _BROWSER_REMEDIATIONS = frozenset(
@@ -46,8 +48,25 @@ _BROWSER_REMEDIATIONS = frozenset(
         "rerun_setup_with_browser_automation",
         "rerun_saved_setup",
         "inspect_browser_runtime",
+        "restart_agent_sessions",
     )
 )
+_DEVELOPMENT_ISSUES = frozenset(
+    (
+        "godot_unusable",
+        "go_unusable",
+        "gofmt_missing",
+        "go_c_compiler_missing",
+        "node_default_missing",
+        "node_npm_missing",
+        "node_pnpm_missing",
+    )
+)
+_DEVELOPMENT_TOOLCHAIN_FIELDS = {
+    "godot": ("installed", "healthy", "version", "export_templates", "web_templates"),
+    "go": ("installed", "healthy", "version", "gofmt", "cgo_enabled", "c_compiler"),
+    "node": ("installed", "healthy", "version", "npm", "pnpm", "corepack"),
+}
 
 
 def _within(path: str, parent: str) -> bool:
@@ -79,6 +98,18 @@ def _boot_id(path: str = _BOOT_ID_PATH) -> Optional[str]:
 
 def _safe_mapping(value: Any) -> JSONDict:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _sanitize_browser_processes(value: Any) -> JSONDict:
+    processes = _safe_mapping(value)
+    sanitized: JSONDict = {}
+    for key in ("total", "stale"):
+        count = processes.get(key)
+        if type(count) is int and count >= 0:
+            sanitized[key] = count
+    if isinstance(processes.get("inspected"), bool):
+        sanitized["inspected"] = processes["inspected"]
+    return sanitized
 
 
 def _sanitize_credential_status(value: Any) -> JSONDict:
@@ -164,6 +195,9 @@ def _sanitize_capability(record: JSONDict) -> Optional[JSONDict]:
         }
     if capability == "browser":
         launcher_features = _safe_mapping(record.get("launcher_features"))
+        running_processes = _sanitize_browser_processes(
+            record.get("running_processes")
+        )
         raw_issues = record.get("issues")
         issues = (
             [
@@ -186,6 +220,7 @@ def _sanitize_capability(record: JSONDict) -> Optional[JSONDict]:
                 if feature in launcher_features
             },
             "managed_defaults": record.get("managed_defaults") is True,
+            "running_processes": running_processes,
             "registrations": _safe_mapping(record.get("registrations")),
             "configured": record.get("configured") is True,
             "smoke_test": record.get("smoke_test"),
@@ -196,6 +231,33 @@ def _sanitize_capability(record: JSONDict) -> Optional[JSONDict]:
                 and remediation in _BROWSER_REMEDIATIONS
                 else None
             ),
+        }
+    if capability == "development":
+        raw_toolchains = _safe_mapping(record.get("toolchains"))
+        raw_issues = record.get("issues")
+        issues = (
+            [
+                issue
+                for issue in raw_issues
+                if isinstance(issue, str) and issue in _DEVELOPMENT_ISSUES
+            ]
+            if isinstance(raw_issues, list)
+            else []
+        )
+        return {
+            "capability": "development",
+            "installed": record.get("installed") is True,
+            "healthy": record.get("healthy") is True,
+            "issues": issues,
+            "toolchains": {
+                name: {
+                    field: toolchain.get(field)
+                    for field in fields
+                    if field in toolchain
+                }
+                for name, fields in _DEVELOPMENT_TOOLCHAIN_FIELDS.items()
+                if isinstance(toolchain := raw_toolchains.get(name), dict)
+            },
         }
     return None
 

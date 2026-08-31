@@ -395,9 +395,15 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             patch.object(agent_cli, "_browser_launchers_secure", return_value=True),
             patch.object(
                 agent_cli,
+                "_browser_running_processes",
+                return_value={"total": 0, "stale": 0, "inspected": True},
+            ),
+            patch.object(
+                agent_cli,
                 "_browser_launcher_features",
                 return_value={
                     "private_evidence": True,
+                    "bounded_evidence": True,
                     "coordinate_input": True,
                     "webgl_settle_delay": True,
                 },
@@ -420,6 +426,41 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             browser_automation_steps.PLAYWRIGHT_SMOKE_PROCESS_TIMEOUT_SECONDS,
         )
 
+    def test_agent_doctor_requires_stale_sessions_to_restart(self) -> None:
+        completed = SimpleNamespace(returncode=0, stdout="browser-ready\n", stderr="")
+        with (
+            patch.object(agent_cli.os.path, "isfile", return_value=True),
+            patch.object(agent_cli.os, "access", return_value=True),
+            patch.object(agent_cli, "_browser_launchers_secure", return_value=True),
+            patch.object(
+                agent_cli,
+                "_browser_launcher_features",
+                return_value={
+                    "private_evidence": True,
+                    "bounded_evidence": True,
+                    "coordinate_input": True,
+                    "webgl_settle_delay": True,
+                },
+            ),
+            patch.object(
+                agent_cli,
+                "_browser_running_processes",
+                return_value={"total": 2, "stale": 1, "inspected": True},
+            ),
+            patch.object(
+                agent_cli,
+                "_tool_path",
+                side_effect=lambda tool, _home: "/tmp/codex" if tool == "codex" else None,
+            ),
+            patch.object(agent_cli, "_codex_browser_registration", return_value=True),
+            patch.object(agent_cli.subprocess, "run", return_value=completed),
+        ):
+            result = agent_cli.inspect_browser_automation("/home/agent")
+
+        self.assertFalse(result["healthy"])
+        self.assertEqual(result["issues"], ["stale_processes"])
+        self.assertEqual(result["remediation"], "restart_agent_sessions")
+
     def test_doctor_checks_registration_and_local_browser_smoke_test(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -432,7 +473,8 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
                 "umask 077\n"
                 'output_dir="$HOME/.local/state/infra_tools/playwright-mcp"\n'
                 "exec playwright-mcp --caps vision "
-                '--output-dir "$output_dir" --timeout-settle 1000\n',
+                '--output-dir "$output_dir" --timeout-settle 1000 '
+                f"--output-max-size {agent_cli._BROWSER_OUTPUT_MAX_BYTES}\n",
                 encoding="utf-8",
             )
             doctor_wrapper.write_text("#!/bin/sh\necho browser-ready\n", encoding="utf-8")
@@ -453,6 +495,11 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
                 patch.object(agent_cli, "_BROWSER_MCP_WRAPPER", str(mcp_wrapper)),
                 patch.object(agent_cli, "_BROWSER_DOCTOR_WRAPPER", str(doctor_wrapper)),
                 patch.object(agent_cli, "_browser_launchers_secure", return_value=True),
+                patch.object(
+                    agent_cli,
+                    "_browser_running_processes",
+                    return_value={"total": 0, "stale": 0, "inspected": True},
+                ),
                 patch.object(agent_cli, "_tool_path", side_effect=tool_path),
             ):
                 result = agent_cli.inspect_browser_automation(str(home))
@@ -472,9 +519,15 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             patch.object(agent_cli, "_browser_launchers_secure", return_value=True),
             patch.object(
                 agent_cli,
+                "_browser_running_processes",
+                return_value={"total": 0, "stale": 0, "inspected": True},
+            ),
+            patch.object(
+                agent_cli,
                 "_browser_launcher_features",
                 return_value={
                     "private_evidence": False,
+                    "bounded_evidence": False,
                     "coordinate_input": False,
                     "webgl_settle_delay": False,
                 },
@@ -493,6 +546,55 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
         self.assertEqual(result["issues"], ["managed_defaults_stale"])
         self.assertEqual(result["remediation"], "rerun_saved_setup")
 
+    def test_doctor_detects_active_processes_with_stale_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            home = root / "home"
+            proc = root / "proc"
+            home.mkdir()
+            proc.mkdir()
+            current = proc / "100"
+            stale = proc / "200"
+            current.mkdir()
+            stale.mkdir()
+            output_dir = home / ".local" / "state" / "infra_tools" / "playwright-mcp"
+            current_arguments = [
+                "/usr/bin/node",
+                agent_cli._BROWSER_MCP_CLI,
+                "--headless",
+                "--isolated",
+                "--caps",
+                "vision",
+                "--output-dir",
+                str(output_dir),
+                "--timeout-settle",
+                "1000",
+                "--output-max-size",
+                str(agent_cli._BROWSER_OUTPUT_MAX_BYTES),
+            ]
+            (current / "cmdline").write_bytes(
+                b"\0".join(argument.encode() for argument in current_arguments) + b"\0"
+            )
+            (stale / "cmdline").write_bytes(
+                b"\0".join(
+                    argument.encode()
+                    for argument in (
+                        "/usr/bin/node",
+                        agent_cli._BROWSER_MCP_CLI,
+                        "--headless",
+                        "--isolated",
+                    )
+                )
+                + b"\0"
+            )
+
+            result = agent_cli._browser_running_processes(str(home), str(proc))
+
+        self.assertEqual(
+            result,
+            {"total": 2, "stale": 1, "inspected": True},
+        )
+
     def test_doctor_rejects_stale_launcher_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             wrapper = Path(temporary_directory) / "playwright-mcp"
@@ -507,6 +609,7 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             features,
             {
                 "private_evidence": False,
+                "bounded_evidence": False,
                 "coordinate_input": False,
                 "webgl_settle_delay": False,
             },

@@ -38,6 +38,9 @@ Required host timers are verified during setup. Failure to reload, enable,
 start, or confirm the security-monitor, APT-update, cleanup, user-cache, or
 restart timer stops setup. When the replacement APT timer cannot be verified,
 Debian's existing APT timers remain enabled.
+`infra-tools agent doctor --capability host` also reports installed Node and
+Godot update timers, while omitting those optional jobs on VMs where their
+toolchains were not selected.
 
 ## Update Policy
 
@@ -52,7 +55,9 @@ Node.js and uv use a conservative default policy:
 
 - Node.js follows the LTS track by default. An already-installed non-LTS track
   is treated as an explicit choice and remains on that track. Global npm
-  package versions are preserved when the runtime changes.
+  package versions are preserved when the runtime changes. A later setup rerun
+  verifies the promised Node/npm/PNPM baseline and repairs it if a prior runtime
+  migration or manual change left one of those commands unavailable.
 - uv updates the uv executable itself, but uv-managed tools are upgraded only
   when ecosystem upgrades are enabled.
 - Gogs validates a downloaded release before activation and rolls back the

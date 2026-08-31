@@ -157,21 +157,25 @@ infra-tools agent doctor \
 
 Add `--json` for automation. The capability is healthy only when both managed
 launchers are executable, root-owned regular files without group or world write
-access; current private-evidence, safe-coordinate, and one-second-settle
+access; current private, bounded evidence, safe-coordinate, and one-second-settle
 defaults are present; every installed compatible agent has the managed MCP
-registration; and the local interaction/rendering smoke test passes. A stale
-or unsafe launcher is unhealthy even when its smoke test passes; inspect an
-unsafe path, then rerun the saved setup to reconcile it. If only one compatible
-agent was provisioned, list only that tool. The default doctor tool set still
-includes all terminal agents, so explicit `--tool` flags are useful on
-deliberately minimal VMs.
+registration; active managed MCP processes use those same safe defaults; and
+the local interaction/rendering smoke test passes. A stale or unsafe launcher
+is unhealthy even when its smoke test passes; inspect an unsafe path, then
+rerun the saved setup to reconcile it. A stale active process instead requires
+restarting the agent session that owns it. If only one compatible agent was
+provisioned, list only that tool. The default doctor tool set still includes
+all terminal agents, so explicit `--tool` flags are useful on deliberately
+minimal VMs.
 
 JSON results include a stable `issues` list and one primary `remediation` code.
 `rerun_saved_setup` refreshes stale managed defaults;
 `rerun_setup_with_browser_automation` restores missing launchers or agent
 registration; `inspect_launcher_security_then_rerun_saved_setup` requires
-reviewing an unsafe managed path before reconciliation; and
-`inspect_browser_runtime` identifies an installation whose local Chromium
+reviewing an unsafe managed path before reconciliation;
+`restart_agent_sessions` identifies MCP processes that were started before a
+launcher or trust-store update and must be restarted rather than reconfigured;
+and `inspect_browser_runtime` identifies an installation whose local Chromium
 smoke test failed. These fields are also retained in redacted readiness records
 and support bundles.
 

@@ -99,11 +99,18 @@ class TestAgentReadinessState(unittest.TestCase):
                         "launchers_secure": True,
                         "launcher_features": {
                             "private_evidence": True,
+                            "bounded_evidence": True,
                             "coordinate_input": True,
                             "webgl_settle_delay": True,
                             "private_path": "/secret/browser-output",
                         },
                         "managed_defaults": True,
+                        "running_processes": {
+                            "total": 1,
+                            "stale": 0,
+                            "inspected": True,
+                            "private_pid": 123,
+                        },
                         "registrations": {"codex": True},
                         "configured": True,
                         "smoke_test": True,
@@ -133,12 +140,17 @@ class TestAgentReadinessState(unittest.TestCase):
             browser["launcher_features"],
             {
                 "private_evidence": True,
+                "bounded_evidence": True,
                 "coordinate_input": True,
                 "webgl_settle_delay": True,
             },
         )
         self.assertTrue(browser["managed_defaults"])
         self.assertTrue(browser["launchers_secure"])
+        self.assertEqual(
+            browser["running_processes"],
+            {"total": 1, "stale": 0, "inspected": True},
+        )
         self.assertEqual(browser["issues"], [])
         self.assertIsNone(browser["remediation"])
 
@@ -185,6 +197,40 @@ class TestAgentReadinessState(unittest.TestCase):
             [(tool["tool"], tool["required"]) for tool in record["tools"]],
             [("codex", True), ("claude", False)],
         )
+
+    def test_development_record_retains_only_stable_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boot_id = _write_boot_id(temp_dir, _BOOT_ONE)
+            record = build_agent_readiness_record(
+                [],
+                [
+                    {
+                        "capability": "development",
+                        "installed": True,
+                        "healthy": False,
+                        "issues": ["node_pnpm_missing", "/secret/node"],
+                        "toolchains": {
+                            "node": {
+                                "installed": True,
+                                "healthy": False,
+                                "version": "v24.20.0",
+                                "npm": "11.19.0",
+                                "pnpm": None,
+                                "path": "/secret/node",
+                            }
+                        },
+                    }
+                ],
+                trigger="manual",
+                now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+                boot_id_path=boot_id,
+            )
+
+        development = record["capabilities"][0]
+        self.assertFalse(record["healthy"])
+        self.assertEqual(development["issues"], ["node_pnpm_missing"])
+        self.assertNotIn("path", development["toolchains"]["node"])
+        self.assertNotIn("/secret", json.dumps(record))
 
     def test_private_record_detects_current_and_previous_boots(self) -> None:
         with tempfile.TemporaryDirectory() as home:

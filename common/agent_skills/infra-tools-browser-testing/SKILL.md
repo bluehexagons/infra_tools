@@ -25,6 +25,9 @@ infra-tools agent doctor --capability browser --json
 Use the stable `issues` list to identify every failed layer and the primary
 `remediation` code to choose the managed recovery path. Do not infer repair
 steps from a generic unhealthy flag when those fields are present.
+`stale_processes` means setup repaired the launcher while an older agent
+session kept its previous MCP process; restart the affected agent session
+before collecting more evidence.
 
 Use the managed browser integration only when that check succeeds. A missing
 capability is expected unless setup requested `--browser-automation
