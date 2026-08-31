@@ -113,9 +113,12 @@ Matplotlib, JupyterLab, and csvkit stack; the flag also enables Python tooling.
 Add `--av-tools` when agents need local media inspection or conversion; it
 installs ImageMagick, FFmpeg with ffprobe, and ExifTool without selecting any
 language runtime.
-The guided `infra-tools shell` workstation-development flow offers the same
-bundle as a separate, default-off choice and uses the saved choice as the
-default when starting from a template.
+Add `--gl-tools` for a minimal OpenGL inspection and debugging bundle containing
+Mesa utilities such as `glxinfo` plus apitrace. It does not install a compiler,
+graphics SDK, Vulkan tools, or GPU drivers.
+The guided `infra-tools shell` workstation-development flow offers the
+data-analysis bundle as a separate, default-off choice and uses the saved
+choice as the default when starting from a template.
 
 T3 Code sessions should prefer the client's collaborative preview tools when
 they are available. Add `--browser-automation playwright` when Codex or

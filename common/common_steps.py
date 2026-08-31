@@ -113,6 +113,10 @@ AV_TOOL_PACKAGES = (
     "imagemagick",
     "libimage-exiftool-perl",
 )
+GL_TOOL_PACKAGES = (
+    "apitrace",
+    "mesa-utils",
+)
 
 
 def _go_release_arch(machine: Optional[str] = None) -> Optional[str]:
@@ -627,6 +631,28 @@ def install_av_tools(config: SetupConfig) -> None:
         raise RuntimeError(f"AV tool installation failed: {failed}")
 
     print(f"  ✓ Installed AV tools: {', '.join(missing)}")
+
+
+def install_gl_tools(config: SetupConfig) -> None:
+    """Install the opt-in OpenGL inspection and debugging bundle."""
+
+    del config
+    missing = [
+        package for package in GL_TOOL_PACKAGES if not is_package_installed(package)
+    ]
+    if not missing:
+        print("  ✓ OpenGL tools already installed")
+        return
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    package_args = " ".join(shlex.quote(package) for package in missing)
+    result = run(f"{_APT_GET} install -y -qq {package_args}", check=False)
+    remaining = [package for package in missing if not is_package_installed(package)]
+    if result.returncode != 0 or remaining:
+        failed = ", ".join(remaining or missing)
+        raise RuntimeError(f"OpenGL tool installation failed: {failed}")
+
+    print(f"  ✓ Installed OpenGL tools: {', '.join(missing)}")
 
 
 CONTROL_PLANE_PACKAGES = (

@@ -319,6 +319,7 @@ the local desktop installer path.
 | `--python` | Install Python aliases + uv |
 | `--data-analysis` | Install the larger Python analysis bundle: NumPy, pandas, SciPy, Matplotlib, JupyterLab, and csvkit; also enables `--python` |
 | `--av-tools` | Install ImageMagick, FFmpeg (including ffprobe), and ExifTool for image, audio, video, and metadata processing |
+| `--gl-tools` | Install the minimal OpenGL inspection and debugging bundle: Mesa utilities and apitrace |
 | `--godot` | Install the newest stable verified Godot Engine release for graphical or headless use |
 | `--godot-bundle BUNDLE` | Add `web` or `publishing`; repeatable and automatically enables `--godot` |
 
@@ -350,7 +351,8 @@ The shared CLI baseline includes small coding and inspection tools such as
 `ripgrep` (`rg`), `jq`, SQLite, `file`, `tree`, `make`, and `patch`. The
 substantially larger Python analysis/notebook stack remains opt-in through
 `--data-analysis`. Image, audio, and video processing tools remain opt-in
-through `--av-tools`.
+through `--av-tools`; OpenGL inspection and API tracing remain opt-in through
+`--gl-tools`.
 Missing account and pairing passwords are requested securely from a terminal.
 `server_lite` omits the standard firewall and generic CLI bundle, so use it
 only when that lighter profile is intentional.

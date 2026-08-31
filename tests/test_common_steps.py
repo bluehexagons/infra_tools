@@ -15,6 +15,7 @@ from common.common_steps import (
     CLI_TOOL_PACKAGES,
     CONTROL_PLANE_PACKAGES,
     DATA_ANALYSIS_PACKAGES,
+    GL_TOOL_PACKAGES,
     _ensure_vm_setup_user_sudoers,
     _run_as_login_user,
     check_debian_package_sources,
@@ -23,6 +24,7 @@ from common.common_steps import (
     install_av_tools,
     install_cli_tools,
     install_data_analysis_tools,
+    install_gl_tools,
     update_and_upgrade_packages,
 )
 from lib.config import SetupConfig
@@ -196,6 +198,10 @@ class TestDevelopmentToolPackages(unittest.TestCase):
         )
         self.assertTrue(set(CLI_TOOL_PACKAGES).isdisjoint(AV_TOOL_PACKAGES))
 
+    def test_gl_packages_are_not_in_cli_baseline(self):
+        self.assertEqual(set(GL_TOOL_PACKAGES), {"apitrace", "mesa-utils"})
+        self.assertTrue(set(CLI_TOOL_PACKAGES).isdisjoint(GL_TOOL_PACKAGES))
+
     @patch("common.common_steps.run")
     @patch("common.common_steps.is_package_installed")
     def test_cli_installer_requests_every_missing_baseline_package(
@@ -265,6 +271,33 @@ class TestDevelopmentToolPackages(unittest.TestCase):
 
         command = mock_run.call_args.args[0]
         for package in AV_TOOL_PACKAGES:
+            with self.subTest(package=package):
+                self.assertIn(f" {package}", command)
+        for package in CLI_TOOL_PACKAGES:
+            with self.subTest(default_package=package):
+                self.assertNotIn(f" {package}", command)
+
+    @patch("common.common_steps.run")
+    @patch("common.common_steps.is_package_installed")
+    def test_gl_installer_requests_only_opt_in_bundle(
+        self, mock_is_installed, mock_run
+    ):
+        mock_is_installed.side_effect = (
+            [False] * len(GL_TOOL_PACKAGES) + [True] * len(GL_TOOL_PACKAGES)
+        )
+        mock_run.return_value = MagicMock(returncode=0)
+
+        install_gl_tools(
+            SetupConfig(
+                host="testhost",
+                username="agent",
+                system_type="agent_vm",
+                install_gl_tools=True,
+            )
+        )
+
+        command = mock_run.call_args.args[0]
+        for package in GL_TOOL_PACKAGES:
             with self.subTest(package=package):
                 self.assertIn(f" {package}", command)
         for package in CLI_TOOL_PACKAGES:

@@ -274,6 +274,7 @@ class SetupConfig:
     install_python: bool = False
     install_data_analysis_tools: bool = False
     install_av_tools: bool = False
+    install_gl_tools: bool = False
     install_godot: bool = False
     godot_bundles: Optional[StrList] = None
     install_gh: bool = False
@@ -833,6 +834,9 @@ class SetupConfig:
         if self.install_av_tools:
             args.append("--av-tools")
 
+        if self.install_gl_tools:
+            args.append("--gl-tools")
+
         if self.install_godot:
             args.append("--godot")
         for bundle in self.godot_bundles or []:
@@ -1270,6 +1274,9 @@ class SetupConfig:
         if self.install_av_tools:
             cmd_parts.append("--av-tools")
 
+        if self.install_gl_tools:
+            cmd_parts.append("--gl-tools")
+
         if self.install_godot:
             cmd_parts.append("--godot")
         for bundle in self.godot_bundles or []:
@@ -1601,6 +1608,7 @@ class SetupConfig:
             self.install_data_analysis_tools
         )
         data['install_av_tools'] = bool(self.install_av_tools)
+        data['install_gl_tools'] = bool(self.install_gl_tools)
         data['enable_syncthing'] = bool(self.enable_syncthing)
         if self.enable_syncthing and not self.syncthing_root:
             data['syncthing_root'] = DEFAULT_SYNCTHING_ROOT
@@ -2060,6 +2068,7 @@ class SetupConfig:
                 args, 'install_data_analysis_tools', False
             ),
             install_av_tools=getattr(args, 'install_av_tools', False),
+            install_gl_tools=getattr(args, 'install_gl_tools', False),
             install_godot=getattr(args, 'install_godot', False),
             godot_bundles=(
                 getattr(args, 'godot_bundles', None)

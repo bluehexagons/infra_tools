@@ -785,6 +785,8 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("Data analysis")
         if args.get("install_av_tools"):
             features.append("AV tools")
+        if args.get("install_gl_tools"):
+            features.append("OpenGL tools")
         if args.get("install_gh"):
             features.append("GitHub CLI")
         if args.get("install_codex"):

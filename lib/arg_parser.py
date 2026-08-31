@@ -726,6 +726,13 @@ def add_setup_arguments(
         ),
     )
     parser.add_argument(
+        "--gl-tools",
+        dest="install_gl_tools",
+        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+        default=None if not for_remote else False,
+        help="Install Mesa OpenGL diagnostics and API tracing tools",
+    )
+    parser.add_argument(
         "--godot",
         dest="install_godot",
         action=argparse.BooleanOptionalAction if not for_remote else "store_true",

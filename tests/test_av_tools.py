@@ -107,10 +107,12 @@ class TestAVToolsReconstruction(unittest.TestCase):
     @patch("lib.reconstruct.detect_node", return_value=False)
     @patch("lib.reconstruct.detect_go", return_value=False)
     @patch("lib.reconstruct.detect_data_analysis_tools", return_value=False)
+    @patch("lib.reconstruct.detect_gl_tools", return_value=False)
     @patch("lib.reconstruct.check_package_installed", return_value=True)
     def test_reconstruct_restores_av_tools_flag(
         self,
         mock_check_package,
+        _mock_gl_tools,
         _mock_data_analysis,
         _mock_go,
         _mock_node,

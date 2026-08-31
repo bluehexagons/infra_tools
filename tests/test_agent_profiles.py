@@ -66,6 +66,7 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertTrue(config.install_node)
         self.assertFalse(config.install_data_analysis_tools)
         self.assertFalse(config.install_av_tools)
+        self.assertFalse(config.install_gl_tools)
         self.assertFalse(config.install_go)
         self.assertEqual(config.git_access, "read-write")
         self.assertIsNone(config.web_interface_sources)
@@ -79,6 +80,7 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertNotIn("Installing agent browser automation", step_names)
         self.assertNotIn("Installing data-analysis tools", step_names)
         self.assertNotIn("Installing image, audio, and video tools", step_names)
+        self.assertNotIn("Installing OpenGL tools", step_names)
 
         command = " ".join(config.to_setup_command())
         self.assertNotIn("--editor", command)
@@ -132,6 +134,18 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertIn("Installing image, audio, and video tools", step_names)
         self.assertIn("--av-tools", config.to_remote_args())
         self.assertIn("--av-tools", config.to_setup_command())
+
+    def test_agent_code_vm_accepts_opt_in_gl_tools(self) -> None:
+        config = SetupConfig.from_args(
+            _setup_args(install_gl_tools=True),
+            "agent_code_vm",
+        )
+
+        self.assertTrue(config.install_gl_tools)
+        step_names = [name for name, _step in get_steps_for_system_type(config)]
+        self.assertIn("Installing OpenGL tools", step_names)
+        self.assertIn("--gl-tools", config.to_remote_args())
+        self.assertIn("--gl-tools", config.to_setup_command())
 
     def test_agent_code_vm_lan_access_is_explicit(self) -> None:
         config = SetupConfig.from_args(
