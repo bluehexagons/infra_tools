@@ -107,6 +107,8 @@ class TestAgentReadinessState(unittest.TestCase):
                         "registrations": {"codex": True},
                         "configured": True,
                         "smoke_test": True,
+                        "issues": [],
+                        "remediation": None,
                         "path": "/secret/browser",
                     },
                 ],
@@ -137,6 +139,52 @@ class TestAgentReadinessState(unittest.TestCase):
         )
         self.assertTrue(browser["managed_defaults"])
         self.assertTrue(browser["launchers_secure"])
+        self.assertEqual(browser["issues"], [])
+        self.assertIsNone(browser["remediation"])
+
+    def test_browser_remediation_is_retained_without_arbitrary_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boot_id = _write_boot_id(temp_dir, _BOOT_ONE)
+            record = build_agent_readiness_record(
+                [],
+                [
+                    {
+                        "capability": "browser",
+                        "healthy": False,
+                        "issues": ["managed_defaults_stale", "/secret/browser"],
+                        "remediation": "rerun_saved_setup",
+                    }
+                ],
+                trigger="manual",
+                now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+                boot_id_path=boot_id,
+            )
+
+        browser = record["capabilities"][0]
+        self.assertFalse(record["healthy"])
+        self.assertEqual(browser["issues"], ["managed_defaults_stale"])
+        self.assertEqual(browser["remediation"], "rerun_saved_setup")
+        self.assertNotIn("/secret", json.dumps(record))
+
+    def test_optional_inventory_tool_does_not_fail_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            boot_id = _write_boot_id(temp_dir, _BOOT_ONE)
+            record = build_agent_readiness_record(
+                [
+                    {"tool": "codex", "installed": True, "required": True},
+                    {"tool": "claude", "installed": False, "required": False},
+                ],
+                [_host_result()],
+                trigger="manual",
+                now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+                boot_id_path=boot_id,
+            )
+
+        self.assertTrue(record["healthy"])
+        self.assertEqual(
+            [(tool["tool"], tool["required"]) for tool in record["tools"]],
+            [("codex", True), ("claude", False)],
+        )
 
     def test_private_record_detects_current_and_previous_boots(self) -> None:
         with tempfile.TemporaryDirectory() as home:

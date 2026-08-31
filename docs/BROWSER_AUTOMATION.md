@@ -166,6 +166,15 @@ agent was provisioned, list only that tool. The default doctor tool set still
 includes all terminal agents, so explicit `--tool` flags are useful on
 deliberately minimal VMs.
 
+JSON results include a stable `issues` list and one primary `remediation` code.
+`rerun_saved_setup` refreshes stale managed defaults;
+`rerun_setup_with_browser_automation` restores missing launchers or agent
+registration; `inspect_launcher_security_then_rerun_saved_setup` requires
+reviewing an unsafe managed path before reconciliation; and
+`inspect_browser_runtime` identifies an installation whose local Chromium
+smoke test failed. These fields are also retained in redacted readiness records
+and support bundles.
+
 For lower-level checks:
 
 ```bash

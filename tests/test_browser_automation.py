@@ -413,6 +413,8 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             result = agent_cli.inspect_browser_automation("/home/agent")
 
         self.assertTrue(result["healthy"])
+        self.assertEqual(result["issues"], [])
+        self.assertIsNone(result["remediation"])
         self.assertGreater(
             run.call_args.kwargs["timeout"],
             browser_automation_steps.PLAYWRIGHT_SMOKE_PROCESS_TIMEOUT_SECONDS,
@@ -461,6 +463,35 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
         self.assertTrue(result["managed_defaults"])
         self.assertEqual(result["registrations"], {"codex": True})
         self.assertTrue(result["healthy"])
+
+    def test_doctor_explains_stale_launcher_remediation(self) -> None:
+        completed = SimpleNamespace(returncode=0, stdout="browser-ready\n", stderr="")
+        with (
+            patch.object(agent_cli.os.path, "isfile", return_value=True),
+            patch.object(agent_cli.os, "access", return_value=True),
+            patch.object(agent_cli, "_browser_launchers_secure", return_value=True),
+            patch.object(
+                agent_cli,
+                "_browser_launcher_features",
+                return_value={
+                    "private_evidence": False,
+                    "coordinate_input": False,
+                    "webgl_settle_delay": False,
+                },
+            ),
+            patch.object(
+                agent_cli,
+                "_tool_path",
+                side_effect=lambda tool, _home: "/tmp/codex" if tool == "codex" else None,
+            ),
+            patch.object(agent_cli, "_codex_browser_registration", return_value=True),
+            patch.object(agent_cli.subprocess, "run", return_value=completed),
+        ):
+            result = agent_cli.inspect_browser_automation("/home/agent")
+
+        self.assertFalse(result["healthy"])
+        self.assertEqual(result["issues"], ["managed_defaults_stale"])
+        self.assertEqual(result["remediation"], "rerun_saved_setup")
 
     def test_doctor_rejects_stale_launcher_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

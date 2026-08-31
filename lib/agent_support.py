@@ -23,6 +23,23 @@ _BROWSER_LAUNCHER_FEATURES = (
     "coordinate_input",
     "webgl_settle_delay",
 )
+_BROWSER_ISSUES = frozenset(
+    (
+        "launchers_missing",
+        "launchers_unsafe",
+        "managed_defaults_stale",
+        "registration_missing",
+        "smoke_test_failed",
+    )
+)
+_BROWSER_REMEDIATIONS = frozenset(
+    (
+        "inspect_launcher_security_then_rerun_saved_setup",
+        "rerun_setup_with_browser_automation",
+        "rerun_saved_setup",
+        "inspect_browser_runtime",
+    )
+)
 
 
 def _effective_home() -> str:
@@ -105,6 +122,17 @@ def build_agent_support_bundle(
     launcher_features = (
         raw_launcher_features if isinstance(raw_launcher_features, dict) else {}
     )
+    raw_browser_issues = browser.get("issues")
+    browser_issues = (
+        [
+            issue
+            for issue in raw_browser_issues
+            if isinstance(issue, str) and issue in _BROWSER_ISSUES
+        ]
+        if isinstance(raw_browser_issues, list)
+        else []
+    )
+    browser_remediation = browser.get("remediation")
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -171,6 +199,13 @@ def build_agent_support_bundle(
             "configured": browser["configured"],
             "smoke_test": browser["smoke_test"],
             "healthy": browser["healthy"],
+            "issues": browser_issues,
+            "remediation": (
+                browser_remediation
+                if isinstance(browser_remediation, str)
+                and browser_remediation in _BROWSER_REMEDIATIONS
+                else None
+            ),
         },
         "t3_logs": _t3_log_summary(user_home),
         "privacy": {

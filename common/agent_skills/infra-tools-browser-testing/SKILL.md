@@ -22,6 +22,10 @@ it:
 infra-tools agent doctor --capability browser --json
 ```
 
+Use the stable `issues` list to identify every failed layer and the primary
+`remediation` code to choose the managed recovery path. Do not infer repair
+steps from a generic unhealthy flag when those fields are present.
+
 Use the managed browser integration only when that check succeeds. A missing
 capability is expected unless setup requested `--browser-automation
 playwright`; report the missing capability instead of installing an unrelated

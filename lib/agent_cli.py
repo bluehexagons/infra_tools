@@ -161,8 +161,8 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         "--all-capabilities",
         action="store_true",
         help=(
-            "Check every provisioned capability; default tools are also "
-            "checked unless --tool narrows them"
+            "Check every provisioned capability and inventory default tools; "
+            "use --tool to require specific tools"
         ),
     )
     doctor.add_argument(
@@ -972,14 +972,38 @@ def inspect_browser_automation(
         except (OSError, subprocess.TimeoutExpired):
             smoke_test = False
 
+    registrations_ready = bool(
+        registrations and all(bool(value) for value in registrations.values())
+    )
     configured = bool(
         launchers_installed
         and launchers_secure
         and managed_defaults
-        and registrations
-        and all(bool(value) for value in registrations.values())
+        and registrations_ready
     )
     healthy = configured and smoke_test if run_smoke else None
+    issues: list[str] = []
+    if not launchers_installed:
+        issues.append("launchers_missing")
+    else:
+        if not launchers_secure:
+            issues.append("launchers_unsafe")
+        if not managed_defaults:
+            issues.append("managed_defaults_stale")
+    if not registrations_ready:
+        issues.append("registration_missing")
+    if run_smoke and launchers_installed and smoke_test is not True:
+        issues.append("smoke_test_failed")
+
+    remediation: str | None = None
+    if "launchers_unsafe" in issues:
+        remediation = "inspect_launcher_security_then_rerun_saved_setup"
+    elif "launchers_missing" in issues or "registration_missing" in issues:
+        remediation = "rerun_setup_with_browser_automation"
+    elif "managed_defaults_stale" in issues:
+        remediation = "rerun_saved_setup"
+    elif "smoke_test_failed" in issues:
+        remediation = "inspect_browser_runtime"
     return {
         "capability": "browser",
         "installed": launchers_installed,
@@ -991,6 +1015,8 @@ def inspect_browser_automation(
         "configured": configured,
         "smoke_test": smoke_test,
         "healthy": healthy,
+        "issues": issues,
+        "remediation": remediation,
     }
 
 
@@ -2083,6 +2109,10 @@ def run_agent_command(args: argparse.Namespace) -> int:
     else:
         selected = list(DEFAULT_DOCTOR_TOOLS)
     results = inspect_agent_tools(selected)
+    if all_capabilities_requested:
+        inventory_mode = not requested_tools
+        for result in results:
+            result["required"] = not inventory_mode or bool(result.get("installed"))
     capability_results: list[JSONDict] = []
     for capability in requested_capabilities:
         if capability == "browser":
@@ -2112,7 +2142,10 @@ def run_agent_command(args: argparse.Namespace) -> int:
         for result in results:
             tool = str(result["tool"])
             if not result["installed"]:
-                print(f"  ✗ {tool}: not installed")
+                if result.get("required") is False:
+                    print(f"  • {tool}: not installed (optional inventory)")
+                else:
+                    print(f"  ✗ {tool}: not installed")
                 continue
             version = result.get("version")
             detail = f" ({version})" if version else ""
@@ -2158,6 +2191,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
                     "  ✗ browser: managed launchers have unsafe ownership, "
                     "type, or permissions; inspect them and rerun the saved setup"
                 )
+            elif "registration_missing" in result.get("issues", []):
+                print(
+                    "  ✗ browser: agent MCP registration is missing; rerun setup "
+                    "with browser automation"
+                )
             elif not result.get("managed_defaults"):
                 print(
                     "  ✗ browser: managed launcher defaults are stale; "
@@ -2166,7 +2204,7 @@ def run_agent_command(args: argparse.Namespace) -> int:
             elif not result["smoke_test"]:
                 print("  ✗ browser: local smoke test failed")
             else:
-                print("  ✗ browser: agent MCP registration is missing")
+                print("  ✗ browser: capability checks failed")
         if record_requested and record_error is None:
             print("  ✓ readiness: private record saved")
 
@@ -2174,8 +2212,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
         print(f"Error: readiness could not be recorded: {record_error}", file=sys.stderr)
 
     tools_healthy = all(
-        bool(result["installed"])
-        and result.get("credential_healthy") is not False
+        result.get("required") is False
+        or (
+            bool(result["installed"])
+            and result.get("credential_healthy") is not False
+        )
         for result in results
     )
     capabilities_healthy = all(bool(result["healthy"]) for result in capability_results)

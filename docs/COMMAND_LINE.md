@@ -602,10 +602,13 @@ appears as warnings; critical filesystem pressure or a recorded maintenance
 failure makes the capability unhealthy.
 When `--capability` is supplied without `--tool`, doctor checks only the
 requested capability instead of requiring the default set of terminal agents.
-`--all-capabilities` checks browser, host, and T3 Code readiness together with
-the default terminal tools in the same text or JSON result; explicit `--tool`
-flags can narrow the terminal-tool portion. It is mutually exclusive with a
-narrowed `--capability` selection and works with the remote `HOST USER` form.
+`--all-capabilities` checks browser, host, and T3 Code readiness and inventories
+the default terminal tools in the same text or JSON result. Installed terminal
+tools are required; absent tools are reported as optional inventory with
+`"required": false` and do not make the comprehensive check fail. Explicit
+`--tool` flags make every selected tool required, including an absent one. The
+option is mutually exclusive with a narrowed `--capability` selection and works
+with the remote `HOST USER` form.
 Supplying `HOST USER` runs the same doctor through managed SSH from the control
 system and preserves its text or JSON output and exit status. The target must
 have been configured by infra-tools so `/opt/infra_tools` is present. Add

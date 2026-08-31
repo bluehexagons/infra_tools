@@ -202,6 +202,12 @@ class AgentSupportTests(unittest.TestCase):
                         "configured": False,
                         "smoke_test": False,
                         "healthy": False,
+                        "issues": [
+                            "launchers_missing",
+                            "registration_missing",
+                            "/secret/browser",
+                        ],
+                        "remediation": "rerun_setup_with_browser_automation",
                     },
                 ),
             ):
@@ -233,6 +239,14 @@ class AgentSupportTests(unittest.TestCase):
             )
             self.assertFalse(bundle["browser"]["managed_defaults"])
             self.assertTrue(bundle["browser"]["launchers_secure"])
+            self.assertEqual(
+                bundle["browser"]["issues"],
+                ["launchers_missing", "registration_missing"],
+            )
+            self.assertEqual(
+                bundle["browser"]["remediation"],
+                "rerun_setup_with_browser_automation",
+            )
 
     def test_support_bundle_writes_new_private_file_below_home(self) -> None:
         with tempfile.TemporaryDirectory() as home:

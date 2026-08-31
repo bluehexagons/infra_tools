@@ -31,6 +31,23 @@ _BROWSER_LAUNCHER_FEATURES = (
     "coordinate_input",
     "webgl_settle_delay",
 )
+_BROWSER_ISSUES = frozenset(
+    (
+        "launchers_missing",
+        "launchers_unsafe",
+        "managed_defaults_stale",
+        "registration_missing",
+        "smoke_test_failed",
+    )
+)
+_BROWSER_REMEDIATIONS = frozenset(
+    (
+        "inspect_launcher_security_then_rerun_saved_setup",
+        "rerun_setup_with_browser_automation",
+        "rerun_saved_setup",
+        "inspect_browser_runtime",
+    )
+)
 
 
 def _within(path: str, parent: str) -> bool:
@@ -100,6 +117,8 @@ def _sanitize_tool(record: JSONDict) -> JSONDict:
         sanitized["credential_status"] = _sanitize_credential_status(
             record.get("credential_status")
         )
+    if isinstance(record.get("required"), bool):
+        sanitized["required"] = record["required"]
     return sanitized
 
 
@@ -145,6 +164,17 @@ def _sanitize_capability(record: JSONDict) -> Optional[JSONDict]:
         }
     if capability == "browser":
         launcher_features = _safe_mapping(record.get("launcher_features"))
+        raw_issues = record.get("issues")
+        issues = (
+            [
+                issue
+                for issue in raw_issues
+                if isinstance(issue, str) and issue in _BROWSER_ISSUES
+            ]
+            if isinstance(raw_issues, list)
+            else []
+        )
+        remediation = record.get("remediation")
         return {
             "capability": "browser",
             "healthy": record.get("healthy") is True,
@@ -159,6 +189,13 @@ def _sanitize_capability(record: JSONDict) -> Optional[JSONDict]:
             "registrations": _safe_mapping(record.get("registrations")),
             "configured": record.get("configured") is True,
             "smoke_test": record.get("smoke_test"),
+            "issues": issues,
+            "remediation": (
+                remediation
+                if isinstance(remediation, str)
+                and remediation in _BROWSER_REMEDIATIONS
+                else None
+            ),
         }
     return None
 
@@ -181,8 +218,11 @@ def build_agent_readiness_record(
         if (sanitized := _sanitize_capability(record)) is not None
     ]
     tools_healthy = all(
-        record.get("installed") is True
-        and record.get("credential_healthy") is not False
+        record.get("required") is False
+        or (
+            record.get("installed") is True
+            and record.get("credential_healthy") is not False
+        )
         for record in sanitized_tools
     )
     capabilities_healthy = all(
