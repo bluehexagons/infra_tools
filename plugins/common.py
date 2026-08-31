@@ -30,6 +30,7 @@ PLUGIN = PluginDefinition(
         "install_agent_cli_launcher",
         "install_agent_workflow_skills",
         "install_t3code_web",
+        "configure_control_panel",
         "reconcile_agent_storage",
         "copy_agent_tooling_payload",
         "install_browser_automation",
@@ -314,6 +315,21 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         steps.append(("Cloning agent repositories on target", clone_agent_repositories))
 
 
+def extend_control_panel_steps(
+    config: SetupConfig,
+    steps: list[tuple[str, StepFunc]],
+) -> None:
+    """Append the optional authenticated browser control panel."""
+
+    if config.control_panel_port is None and not config.disable_control_panel:
+        return
+
+    from common.control_panel_steps import configure_control_panel
+
+    action = "Removing" if config.disable_control_panel else "Configuring"
+    steps.append((f"{action} infra-tools control panel", configure_control_panel))
+
+
 def get_custom_step_functions() -> Mapping[str, StepFunc]:
     """Return plugin-owned custom step functions exported by the common capability."""
 
@@ -358,6 +374,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         reconcile_agent_storage,
     )
     from common.t3code_steps import install_t3code_web
+    from common.control_panel_steps import configure_control_panel
     from common.git_credential_steps import configure_git_https_credentials
     from common.browser_automation_steps import install_browser_automation
     from common.godot_steps import (
@@ -380,6 +397,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_agent_cli_launcher": install_agent_cli_launcher,
         "install_agent_workflow_skills": install_agent_workflow_skills,
         "install_t3code_web": install_t3code_web,
+        "configure_control_panel": configure_control_panel,
         "reconcile_agent_storage": reconcile_agent_storage,
         "copy_agent_tooling_payload": copy_agent_tooling_payload,
         "install_browser_automation": install_browser_automation,

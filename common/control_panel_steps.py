@@ -1,0 +1,547 @@
+"""Install the optional authenticated infra-tools browser control panel."""
+
+from __future__ import annotations
+
+import os
+import pwd
+import shutil
+import tempfile
+import time
+from typing import Any
+
+from lib.atomic_io import write_json_atomic, write_text_atomic
+from lib.auth_failure_bans import (
+    configure_nginx_auth_failure_ban,
+    remove_nginx_auth_failure_ban,
+)
+from lib.config import SetupConfig
+from lib.remote_utils import install_package, is_dry_run, is_service_active, run
+from lib.validation import validate_filesystem_path
+from lib.validators import validate_username
+
+
+CONTROL_PANEL_SERVICE_NAME = "infra-tools-control-panel"
+CONTROL_PANEL_SERVICE_FILE = f"/etc/systemd/system/{CONTROL_PANEL_SERVICE_NAME}.service"
+CONTROL_PANEL_CONFIG_DIR = "/etc/infra-tools/control-panel"
+CONTROL_PANEL_MANIFEST = f"{CONTROL_PANEL_CONFIG_DIR}/config.json"
+CONTROL_PANEL_AUTH_FILE = f"{CONTROL_PANEL_CONFIG_DIR}/htpasswd"
+CONTROL_PANEL_PAYLOAD_FILE = "/opt/infra_tools/control_panel_payload/htpasswd"
+CONTROL_PANEL_SOCKET = "/run/infra-tools-control-panel/http.sock"
+CONTROL_PANEL_SCRIPT = "/opt/infra_tools/common/service_tools/control_panel_service.py"
+CONTROL_PANEL_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-control-panel"
+CONTROL_PANEL_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-control-panel"
+CONTROL_PANEL_AUTH_FAILURE_LOG = "/var/log/nginx/infra-tools-control-panel-auth-failures.log"
+_NGINX_MARKER = "# Managed by infra_tools control panel"
+
+
+def _url_host(host: str) -> str:
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
+def control_panel_url(config: SetupConfig) -> str | None:
+    """Return the externally useful control-panel URL for summaries."""
+
+    if config.control_panel_port is None:
+        return None
+    scheme = "https" if config.enable_ssl else "http"
+    default_port = 443 if scheme == "https" else 80
+    suffix = "" if config.control_panel_port == default_port else f":{config.control_panel_port}"
+    return f"{scheme}://{_url_host(config.host)}{suffix}/"
+
+
+def _split_service_spec(spec: str, default_port: int) -> tuple[str, int]:
+    normalized = spec.strip()
+    if normalized.isdigit():
+        return "", int(normalized)
+    if ":" not in normalized:
+        return normalized, default_port
+    domain, separator, raw_port = normalized.rpartition(":")
+    if separator and raw_port.isdigit():
+        return domain, int(raw_port)
+    return normalized, default_port
+
+
+def _http_url(host: str, port: int | None, scheme: str) -> str:
+    default_port = 443 if scheme == "https" else 80
+    suffix = "" if port is None or port == default_port else f":{port}"
+    return f"{scheme}://{_url_host(host)}{suffix}/"
+
+
+def _preferred_host(config: SetupConfig, identities: list[str]) -> str:
+    if config.system_hostname:
+        return config.system_hostname
+    return next(
+        (
+            identity
+            for identity in identities
+            if identity not in {"localhost", "127.0.0.1", "::1"}
+        ),
+        identities[0],
+    )
+
+
+def build_control_panel_manifest(
+    config: SetupConfig,
+    identities: list[str],
+) -> dict[str, Any]:
+    """Build non-secret configured service and access metadata."""
+
+    host = _preferred_host(config, identities)
+    services: list[dict[str, str]] = []
+    access: list[dict[str, str]] = [
+        {
+            "label": "SSH",
+            "value": f"ssh {config.username}@{host}",
+            "description": "Shell and file transfer",
+        }
+    ]
+
+    if config.system_type == "server_web" and not (
+        config.control_panel_port == 80 and not config.enable_ssl
+    ):
+        services.append(
+            {
+                "label": "Web server",
+                "url": _http_url(host, None, "http"),
+                "description": "Default Nginx site",
+            }
+        )
+
+    if config.gogs:
+        domain, port = _split_service_spec(str(config.gogs[0]), 3000)
+        if domain or config.effective_gogs_sources():
+            scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
+            public_port = None if config.enable_cloudflare and domain else port
+            services.append(
+                {
+                    "label": "Gogs",
+                    "url": _http_url(domain or host, public_port, scheme),
+                    "description": "Git repositories",
+                }
+            )
+
+    for label, spec, default_port, description in (
+        ("Antistatic lobby", config.antistatic_server, 8080, "Game lobby"),
+        ("Antistatic DB", config.antistatic_db, 8081, "Game database"),
+    ):
+        if not spec:
+            continue
+        domain, port = _split_service_spec(spec, default_port)
+        scheme = (
+            "https"
+            if domain and (config.enable_ssl or config.enable_cloudflare)
+            else "http"
+        )
+        services.append(
+            {
+                "label": label,
+                "url": _http_url(domain or host, None if domain else port, scheme),
+                "description": description,
+            }
+        )
+
+    if config.enable_rdp:
+        access.append(
+            {
+                "label": "Remote desktop",
+                "value": f"{_url_host(host)}:3389",
+                "description": "RDP client connection",
+            }
+        )
+    if config.enable_samba:
+        access.append(
+            {
+                "label": "Samba / SMB",
+                "value": f"//{_url_host(host)}",
+                "description": "Authenticated file shares",
+            }
+        )
+        for share in config.samba_shares or []:
+            if len(share) >= 2:
+                access.append(
+                    {
+                        "label": f"SMB share: {share[1]}_{share[0]}",
+                        "value": f"smb://{_url_host(host)}/{share[1]}_{share[0]}",
+                        "description": str(share[2]) if len(share) >= 3 else "",
+                    }
+                )
+
+    title = config.friendly_name or config.system_hostname or "infra-tools control panel"
+    return {
+        "version": 1,
+        "title": title,
+        "host": host,
+        "system_type": config.system_type,
+        "username": config.username,
+        "services": services,
+        "access": access,
+        "features": {"t3_update": "t3code" in (config.web_interfaces or [])},
+    }
+
+
+def render_control_panel_nginx(
+    identities: list[str],
+    port: int,
+    *,
+    cert_path: str | None = None,
+    key_path: str | None = None,
+) -> str:
+    """Render the Basic-Auth reverse proxy for the Unix-socket app."""
+
+    ssl = cert_path is not None and key_path is not None
+    listen_options = " ssl" if ssl else ""
+    tls = ""
+    if ssl:
+        tls = f"""
+    ssl_certificate {cert_path};
+    ssl_certificate_key {key_path};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:infra_tools_control_panel:10m;
+    ssl_session_timeout 1d;
+"""
+    server_names = " ".join(_url_host(identity) for identity in identities)
+    return f"""{_NGINX_MARKER}
+limit_req_zone $binary_remote_addr zone=infra_tools_control_panel_auth:10m rate=5r/m;
+
+map $status $infra_tools_control_panel_auth_failure {{
+    default 0;
+    401 1;
+}}
+
+log_format infra_tools_control_panel_auth '$remote_addr [$time_local] infra-tools-auth-failure';
+
+server {{
+    listen {port}{listen_options};
+    listen [::]:{port}{listen_options};
+    server_name {server_names};
+{tls}
+    access_log {CONTROL_PANEL_AUTH_FAILURE_LOG} infra_tools_control_panel_auth
+        if=$infra_tools_control_panel_auth_failure;
+    auth_basic "infra-tools control panel";
+    auth_basic_user_file {CONTROL_PANEL_AUTH_FILE};
+    client_max_body_size 16k;
+
+    location / {{
+        limit_req zone=infra_tools_control_panel_auth burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass http://unix:{CONTROL_PANEL_SOCKET}:/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 35s;
+        proxy_send_timeout 35s;
+    }}
+}}
+"""
+
+
+def _validate_htpasswd_file(path: str) -> None:
+    if os.path.islink(path) or not os.path.isfile(path):
+        raise RuntimeError(f"Control-panel auth must be a regular file: {path}")
+    if not 0 < os.path.getsize(path) <= 64 * 1024:
+        raise RuntimeError("Control-panel auth file is empty or too large")
+    try:
+        with open(path, encoding="utf-8") as file_obj:
+            records = [line.rstrip("\n") for line in file_obj if line.rstrip("\n")]
+    except UnicodeDecodeError as exc:
+        raise RuntimeError("Control-panel auth file must be UTF-8 text") from exc
+    if not records:
+        raise RuntimeError("Control-panel auth file has no user records")
+    for record in records:
+        username, separator, password_hash = record.partition(":")
+        if (
+            not separator
+            or not validate_username(username)
+            or not password_hash.startswith("$")
+            or any(ord(character) < 32 or ord(character) == 127 for character in record)
+        ):
+            raise RuntimeError("Control-panel auth file contains an invalid record")
+
+
+def _replace_auth_file(payload: bytes) -> None:
+    descriptor, temporary = tempfile.mkstemp(prefix=".htpasswd-", dir=CONTROL_PANEL_CONFIG_DIR)
+    try:
+        with os.fdopen(descriptor, "wb") as file_obj:
+            file_obj.write(payload)
+        os.chmod(temporary, 0o640)
+        os.replace(temporary, CONTROL_PANEL_AUTH_FILE)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _install_auth_file() -> tuple[bool, bytes | None]:
+    validate_filesystem_path(CONTROL_PANEL_CONFIG_DIR, must_exist=False)
+    if os.path.lexists(CONTROL_PANEL_CONFIG_DIR) and (
+        os.path.islink(CONTROL_PANEL_CONFIG_DIR)
+        or not os.path.isdir(CONTROL_PANEL_CONFIG_DIR)
+    ):
+        raise RuntimeError(f"Refusing unsafe control-panel config path: {CONTROL_PANEL_CONFIG_DIR}")
+    os.makedirs(CONTROL_PANEL_CONFIG_DIR, mode=0o750, exist_ok=True)
+    existing = None
+    if os.path.lexists(CONTROL_PANEL_AUTH_FILE):
+        _validate_htpasswd_file(CONTROL_PANEL_AUTH_FILE)
+        with open(CONTROL_PANEL_AUTH_FILE, "rb") as file_obj:
+            existing = file_obj.read()
+    if os.path.lexists(CONTROL_PANEL_PAYLOAD_FILE):
+        _validate_htpasswd_file(CONTROL_PANEL_PAYLOAD_FILE)
+        with open(CONTROL_PANEL_PAYLOAD_FILE, "rb") as file_obj:
+            desired = file_obj.read()
+        if existing != desired:
+            _replace_auth_file(desired)
+            changed = True
+        else:
+            changed = False
+    elif existing is None:
+        raise RuntimeError(
+            "The control panel needs --control-panel-password on first setup"
+        )
+    else:
+        changed = False
+    web_account = pwd.getpwnam("www-data")
+    os.chown(CONTROL_PANEL_CONFIG_DIR, 0, web_account.pw_gid)
+    os.chmod(CONTROL_PANEL_CONFIG_DIR, 0o750)
+    os.chown(CONTROL_PANEL_AUTH_FILE, 0, web_account.pw_gid)
+    os.chmod(CONTROL_PANEL_AUTH_FILE, 0o640)
+    return changed, existing
+
+
+def _restore_auth_file(previous: bytes | None) -> None:
+    """Restore credentials after a later panel configuration failure."""
+
+    if previous is None:
+        try:
+            os.unlink(CONTROL_PANEL_AUTH_FILE)
+        except FileNotFoundError:
+            return
+    else:
+        _replace_auth_file(previous)
+        web_account = pwd.getpwnam("www-data")
+        os.chown(CONTROL_PANEL_AUTH_FILE, 0, web_account.pw_gid)
+        os.chmod(CONTROL_PANEL_AUTH_FILE, 0o640)
+    if shutil.which("nginx"):
+        run("systemctl reload nginx", check=False)
+
+
+def _ensure_nginx() -> None:
+    if not install_package("nginx", "nginx", "apt-get install -y -qq nginx"):
+        raise RuntimeError("Failed to install Nginx for the control panel")
+    if not is_service_active("nginx"):
+        run("systemctl enable --now nginx", check=True)
+
+
+def _write_nginx_site(content: str) -> bool:
+    previous = None
+    if os.path.lexists(CONTROL_PANEL_NGINX_SITE):
+        if os.path.islink(CONTROL_PANEL_NGINX_SITE) or not os.path.isfile(CONTROL_PANEL_NGINX_SITE):
+            raise RuntimeError(f"Refusing unmanaged control-panel Nginx site: {CONTROL_PANEL_NGINX_SITE}")
+        with open(CONTROL_PANEL_NGINX_SITE, encoding="utf-8") as file_obj:
+            previous = file_obj.read()
+        if _NGINX_MARKER not in previous:
+            raise RuntimeError(f"Refusing unmanaged control-panel Nginx site: {CONTROL_PANEL_NGINX_SITE}")
+    changed = previous != content
+    if changed:
+        write_text_atomic(CONTROL_PANEL_NGINX_SITE, content, mode=0o644)
+    link_created = False
+    if os.path.lexists(CONTROL_PANEL_NGINX_LINK):
+        if not (
+            os.path.islink(CONTROL_PANEL_NGINX_LINK)
+            and os.path.realpath(CONTROL_PANEL_NGINX_LINK) == CONTROL_PANEL_NGINX_SITE
+        ):
+            raise RuntimeError(f"Refusing unmanaged control-panel Nginx link: {CONTROL_PANEL_NGINX_LINK}")
+    else:
+        os.symlink(CONTROL_PANEL_NGINX_SITE, CONTROL_PANEL_NGINX_LINK)
+        changed = True
+        link_created = True
+    validation = run("nginx -t", check=False, capture_output=True)
+    if validation.returncode != 0:
+        if previous is None:
+            try:
+                os.unlink(CONTROL_PANEL_NGINX_SITE)
+            except FileNotFoundError:
+                pass
+        else:
+            write_text_atomic(CONTROL_PANEL_NGINX_SITE, previous, mode=0o644)
+        if link_created:
+            try:
+                os.unlink(CONTROL_PANEL_NGINX_LINK)
+            except FileNotFoundError:
+                pass
+        raise RuntimeError("Nginx rejected the control-panel configuration")
+    if changed:
+        run("systemctl reload nginx", check=True)
+    return changed
+
+
+def _configure_service(config: SetupConfig, home: str) -> bool:
+    service_user = config.username if config.username != "root" else "nobody"
+    service_home = home if service_user == config.username else "/nonexistent"
+    content = f"""[Unit]
+Description=infra-tools control panel
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={service_user}
+Group=www-data
+RuntimeDirectory=infra-tools-control-panel
+RuntimeDirectoryMode=0750
+UMask=0007
+Environment=HOME={service_home}
+Environment=XDG_RUNTIME_DIR=/run/user/{pwd.getpwnam(service_user).pw_uid}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{pwd.getpwnam(service_user).pw_uid}/bus
+ExecStart=/usr/bin/python3 {CONTROL_PANEL_SCRIPT} --config {CONTROL_PANEL_MANIFEST} --socket {CONTROL_PANEL_SOCKET}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=full
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+"""
+    previous = None
+    try:
+        with open(CONTROL_PANEL_SERVICE_FILE, encoding="utf-8") as file_obj:
+            previous = file_obj.read()
+    except OSError:
+        pass
+    changed = previous != content
+    if changed:
+        write_text_atomic(CONTROL_PANEL_SERVICE_FILE, content, mode=0o644)
+        run("systemctl daemon-reload", check=True)
+    run(f"systemctl enable {CONTROL_PANEL_SERVICE_NAME}.service", check=True)
+    # The service reads its manifest only at startup, so restart even when the
+    # unit itself is unchanged.
+    run(f"systemctl restart {CONTROL_PANEL_SERVICE_NAME}.service", check=True)
+    for _attempt in range(25):
+        if os.path.exists(CONTROL_PANEL_SOCKET):
+            return changed
+        time.sleep(0.2)
+    raise RuntimeError("The control-panel service did not create its HTTP socket")
+
+
+def remove_control_panel() -> None:
+    """Remove the panel, authentication data, and public Nginx listener."""
+
+    changed = False
+    if os.path.exists(CONTROL_PANEL_SERVICE_FILE):
+        run(f"systemctl disable --now {CONTROL_PANEL_SERVICE_NAME}.service", check=False)
+        os.remove(CONTROL_PANEL_SERVICE_FILE)
+        run("systemctl daemon-reload", check=True)
+        changed = True
+    for path in (CONTROL_PANEL_NGINX_LINK, CONTROL_PANEL_NGINX_SITE):
+        if os.path.lexists(path):
+            if path == CONTROL_PANEL_NGINX_LINK and not os.path.islink(path):
+                raise RuntimeError(f"Refusing unmanaged control-panel Nginx link: {path}")
+            os.unlink(path)
+            changed = True
+    if os.path.lexists(CONTROL_PANEL_CONFIG_DIR):
+        if os.path.islink(CONTROL_PANEL_CONFIG_DIR) or not os.path.isdir(CONTROL_PANEL_CONFIG_DIR):
+            raise RuntimeError(f"Refusing unsafe control-panel config path: {CONTROL_PANEL_CONFIG_DIR}")
+        for name in ("config.json", "htpasswd"):
+            path = os.path.join(CONTROL_PANEL_CONFIG_DIR, name)
+            if os.path.lexists(path):
+                if os.path.islink(path) or not os.path.isfile(path):
+                    raise RuntimeError(f"Refusing unsafe control-panel file: {path}")
+                os.remove(path)
+        try:
+            os.rmdir(CONTROL_PANEL_CONFIG_DIR)
+        except OSError:
+            pass
+    remove_nginx_auth_failure_ban("control-panel")
+    if changed and shutil.which("nginx"):
+        validation = run("nginx -t", check=False, capture_output=True)
+        if validation.returncode != 0:
+            raise RuntimeError("Nginx is invalid after removing the control panel")
+        run("systemctl reload nginx", check=True)
+    print("  ✓ Control panel removed")
+
+
+def configure_control_panel(config: SetupConfig) -> None:
+    """Install, update, or remove the optional browser control panel."""
+
+    if is_dry_run():
+        action = "remove" if config.disable_control_panel else "configure"
+        print(f"  [DRY-RUN] Would {action} the browser control panel")
+        return
+    if config.disable_control_panel:
+        remove_control_panel()
+        return
+    if config.control_panel_port is None:
+        return
+
+    from common.godot_web_steps import (
+        configure_internal_web_host,
+        discover_local_web_identities,
+        identities_for_config,
+        validate_web_identities,
+    )
+
+    _ensure_nginx()
+    discovered = discover_local_web_identities()
+    identities = validate_web_identities(
+        [*identities_for_config(config.host, config.system_hostname), *discovered]
+    )
+    cert_path = None
+    key_path = None
+    if config.enable_ssl:
+        _base_url, _local_ca, cert_path, key_path, _changed = configure_internal_web_host(
+            identities,
+            [config.username],
+            config.effective_access_sources(),
+            configure_static_site=True,
+            install_utility=True,
+        )
+
+    auth_changed, previous_auth = _install_auth_file()
+    try:
+        manifest = build_control_panel_manifest(config, identities)
+        os.makedirs(CONTROL_PANEL_CONFIG_DIR, mode=0o750, exist_ok=True)
+        write_json_atomic(CONTROL_PANEL_MANIFEST, manifest, mode=0o644, sort_keys=True)
+        account = (
+            pwd.getpwnam(config.username)
+            if config.username != "root"
+            else pwd.getpwnam("nobody")
+        )
+        _configure_service(config, account.pw_dir)
+        nginx_changed = _write_nginx_site(
+            render_control_panel_nginx(
+                identities,
+                config.control_panel_port,
+                cert_path=cert_path,
+                key_path=key_path,
+            )
+        )
+    except Exception:
+        if auth_changed:
+            _restore_auth_file(previous_auth)
+        raise
+    if auth_changed and not nginx_changed:
+        run("systemctl reload nginx", check=True)
+    configure_nginx_auth_failure_ban("control-panel", CONTROL_PANEL_AUTH_FAILURE_LOG)
+    scheme = "https" if config.enable_ssl else "http"
+    host = _preferred_host(config, identities)
+    print(
+        "  ✓ Control panel: "
+        + _http_url(host, config.control_panel_port, scheme)
+    )
+    if not config.enable_ssl:
+        print("  ⚠ Control-panel Basic Auth uses plaintext HTTP; add --ssl for encrypted login")
+
+
+__all__ = [
+    "build_control_panel_manifest",
+    "configure_control_panel",
+    "control_panel_url",
+    "remove_control_panel",
+    "render_control_panel_nginx",
+]

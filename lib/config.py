@@ -37,6 +37,7 @@ GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 GODOT_BUNDLES = ("web", "publishing")
 DEFAULT_SYNCTHING_ROOT = "/srv/syncthing"
 GODOT_WEB_HTTPS_PORT = 8443
+CONTROL_PANEL_DEFAULT_PORT_SENTINEL = object()
 DEFAULT_AGENT_WEB_PORTS = (80, 443, 8080, 8081)
 LAN_ACCESS_SOURCES = (
     "10.0.0.0/8",
@@ -299,6 +300,10 @@ class SetupConfig:
     device_pairing_auth_password: MaybeStr = None
     device_pairing_payload: bool = False
     disable_device_pairing: bool = False
+    control_panel_port: Optional[int] = None
+    control_panel_auth_password: MaybeStr = None
+    control_panel_payload: bool = False
+    disable_control_panel: bool = False
     browser_automation: MaybeStr = None
     disable_browser_automation: bool = False
     copy_agent_keys: bool = False
@@ -536,6 +541,9 @@ class SetupConfig:
             if provider not in DEVICE_PAIRING_PROVIDERS:
                 raise ValueError(f"Unsupported device pairing provider: {provider}")
         self.device_pairing_providers = pairing_providers or None
+        if self.disable_control_panel:
+            self.control_panel_port = None
+            self.control_panel_payload = False
         if (
             self.device_pairing_providers
             and self.device_pairing_auth_password is not None
@@ -569,9 +577,13 @@ class SetupConfig:
                     "device_pairing_port must differ from web_interface_port"
                 )
 
-        from lib.validation import validate_web_port_settings
+        from lib.validation import (
+            validate_control_panel_settings,
+            validate_web_port_settings,
+        )
 
         validate_web_port_settings(self)
+        validate_control_panel_settings(self)
         self.web_ports = list(dict.fromkeys(self.web_ports or [])) or None
 
     def selected_agent_tools(self) -> StrList:
@@ -610,6 +622,12 @@ class SetupConfig:
             ports.append(GODOT_WEB_HTTPS_PORT)
         if "web" in (self.godot_bundles or []):
             ports.append(GODOT_WEB_HTTPS_PORT)
+        if self.control_panel_port is not None:
+            ports.append(self.control_panel_port)
+            if self.enable_ssl:
+                # HTTPS panel certificates and client enrollment use the
+                # shared per-machine internal web origin.
+                ports.append(GODOT_WEB_HTTPS_PORT)
         if self.include_web_firewall:
             ports.extend((80, 443))
         if (
@@ -864,6 +882,12 @@ class SetupConfig:
             args.append(f"--device-pairing-port {self.device_pairing_port}")
         if self.device_pairing_payload:
             args.append("--device-pairing-payload")
+        if self.disable_control_panel:
+            args.append("--no-control-panel")
+        elif self.control_panel_port is not None:
+            args.append(f"--control-panel {self.control_panel_port}")
+            if self.control_panel_payload:
+                args.append("--control-panel-payload")
 
         if self.browser_automation:
             args.append(
@@ -1335,6 +1359,14 @@ class SetupConfig:
                 cmd_parts.append(f"--device-pairing {shlex.quote(provider)}")
         if self.device_pairing_providers and self.device_pairing_port != 3774:
             cmd_parts.append(f"--device-pairing-port {self.device_pairing_port}")
+        if self.disable_control_panel:
+            cmd_parts.append("--no-control-panel")
+        elif self.control_panel_port is not None:
+            default_control_panel_port = 443 if self.enable_ssl else 80
+            if self.control_panel_port == default_control_panel_port:
+                cmd_parts.append("--control-panel")
+            else:
+                cmd_parts.append(f"--control-panel {self.control_panel_port}")
 
         if self.disable_browser_automation:
             cmd_parts.append("--no-browser-automation")
@@ -1588,6 +1620,8 @@ class SetupConfig:
             'device_pairing_auth_username',
             'device_pairing_auth_password',
             'device_pairing_payload',
+            'control_panel_auth_password',
+            'control_panel_payload',
             'swap_initialize',
             'disable_syncthing',
         ):
@@ -1932,6 +1966,20 @@ class SetupConfig:
         device_pairing_port = _optional_int_arg(args, 'device_pairing_port')
         if device_pairing_port is None:
             device_pairing_port = 3774
+        enable_ssl = _optional_bool_arg(args, 'enable_ssl')
+        disable_control_panel = bool(
+            getattr(args, 'disable_control_panel', False)
+        )
+        raw_control_panel_port = getattr(args, 'control_panel_port', None)
+        control_panel_port = (
+            None
+            if raw_control_panel_port is CONTROL_PANEL_DEFAULT_PORT_SENTINEL
+            else _optional_int_arg(args, 'control_panel_port')
+        )
+        if disable_control_panel:
+            control_panel_port = None
+        elif raw_control_panel_port is CONTROL_PANEL_DEFAULT_PORT_SENTINEL:
+            control_panel_port = 443 if enable_ssl is True else 80
         default_web_ports = _optional_bool_arg(args, 'default_web_ports')
         if default_web_ports is None:
             default_web_ports = True
@@ -2101,6 +2149,14 @@ class SetupConfig:
                 _optional_bool_arg(args, 'device_pairing_payload') is True
             ),
             disable_device_pairing=disable_device_pairing,
+            control_panel_port=control_panel_port,
+            control_panel_auth_password=_optional_str_arg(
+                args, 'control_panel_auth_password'
+            ),
+            control_panel_payload=(
+                _optional_bool_arg(args, 'control_panel_payload') is True
+            ),
+            disable_control_panel=disable_control_panel,
             browser_automation=browser_automation,
             disable_browser_automation=disable_browser_automation,
             copy_agent_keys=bool(
@@ -2134,7 +2190,7 @@ class SetupConfig:
             deployment_mode=getattr(args, 'deployment_mode', 'default'),
             full_deploy=getattr(args, 'full_deploy', False),
             deploy_latest=getattr(args, 'deploy_latest', False),
-            enable_ssl=getattr(args, 'enable_ssl', False),
+            enable_ssl=enable_ssl,
             ssl_email=getattr(args, 'ssl_email', None),
             enable_cloudflare=getattr(args, 'enable_cloudflare', False),
             enable_cicd=getattr(args, 'enable_cicd', False),

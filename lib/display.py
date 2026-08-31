@@ -99,6 +99,19 @@ def print_service_access_summary(
 
     lines.append(("SSH", f"ssh {config.username}@{config.host}", "shell access"))
 
+    if config.control_panel_port is not None:
+        from common.control_panel_steps import control_panel_url
+
+        panel_url = control_panel_url(config)
+        if panel_url:
+            lines.append(
+                (
+                    "Control panel",
+                    panel_url,
+                    "sign in with the setup username",
+                )
+            )
+
     if config.system_type == "server_web":
         lines.append(
             ("Web server", _http_url(config.host, scheme="http"), "web interface")
@@ -254,6 +267,7 @@ def print_service_access_summary(
 
     web_labels = {
         "Web server",
+        "Control panel",
         "Godot web exports",
         "Gogs web",
         "Antistatic lobby",
@@ -426,6 +440,16 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print("Device pairing protection: Nginx Basic Auth + provider-native sessions")
         if config.device_pairing_auth_file or config.device_pairing_auth_username:
             print("Device pairing auth: supplied for this setup")
+    if config.control_panel_port is not None:
+        scheme = "HTTPS" if config.enable_ssl else "HTTP"
+        print(
+            f"Control panel: {scheme} on TCP {config.control_panel_port} "
+            f"(Basic Auth user: {config.username})"
+        )
+        if config.control_panel_auth_password is not None:
+            print("Control panel auth: supplied for this setup")
+    elif config.disable_control_panel:
+        print("Control panel: remove")
 
     if config.deploy_specs:
         print(f"Deployments: {len(config.deploy_specs)} repository(ies)")

@@ -54,7 +54,7 @@ from lib.channel_manager import (
 from lib.cicd_cli import add_cicd_subparser, run_cicd_command
 from lib.completions import run_completion_setup
 from lib.config_cleanup import run_cleanup
-from lib.config import SetupConfig
+from lib.config import CONTROL_PANEL_DEFAULT_PORT_SENTINEL, SetupConfig
 from lib.credentials import (
     list_workspace_credentials,
     prepare_runtime_config,
@@ -799,6 +799,8 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append(f"Web {interface}")
         for provider in args.get("device_pairing_providers", []) or []:
             features.append(f"Device pairing {provider}")
+        if args.get("control_panel_port") is not None:
+            features.append("Control panel")
         if args.get("install_office"):
             features.append("Office")
         if args.get("use_flatpak"):
@@ -1083,6 +1085,10 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
         args, "disable_device_pairing", False
     ):
         preserve_keys.update({"device_pairing_providers", "disable_device_pairing"})
+    if getattr(args, "control_panel_port", None) is None and not getattr(
+        args, "disable_control_panel", False
+    ):
+        preserve_keys.update({"control_panel_port", "disable_control_panel"})
     return preserve_keys
 
 
@@ -2068,6 +2074,11 @@ def run_patch_command(args: argparse.Namespace) -> int:
         new_config,
         preserve_keys=_patch_preserve_keys(args),
     )
+    if (
+        getattr(args, "control_panel_port", None)
+        is CONTROL_PANEL_DEFAULT_PORT_SENTINEL
+    ):
+        merged_config.control_panel_port = 443 if merged_config.enable_ssl else 80
     return _execute_patch_config(merged_config)
 
 

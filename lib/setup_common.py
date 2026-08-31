@@ -87,6 +87,7 @@ GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 REMOTE_ARGS_FILENAME = ".remote_setup_args.json"
 AGENT_PAYLOAD_DIRNAME = "agent_payload"
 DEVICE_PAIRING_PAYLOAD_DIRNAME = "device_pairing_payload"
+CONTROL_PANEL_PAYLOAD_DIRNAME = "control_panel_payload"
 LEGACY_SETUP_OPERATION_FILENAME = "setup-operation.pre-persistence.json"
 MAX_AGENT_CREDENTIAL_BYTES = 4 * 1024 * 1024
 MAX_DEVICE_PAIRING_AUTH_BYTES = 64 * 1024
@@ -439,6 +440,7 @@ def _activate_local_runtime(build_dir: str) -> None:
         "deployments",
         AGENT_PAYLOAD_DIRNAME,
         DEVICE_PAIRING_PAYLOAD_DIRNAME,
+        CONTROL_PANEL_PAYLOAD_DIRNAME,
         REMOTE_ARGS_FILENAME,
     ):
         destination = os.path.join(REMOTE_INSTALL_DIR, item)
@@ -578,35 +580,33 @@ def _warn_for_codex_auth_source(source: str) -> None:
         print(f"  Warning: staged source: {warning}")
 
 
-def _validate_htpasswd_content(content: bytes) -> None:
-    """Validate the narrow Nginx password-file format accepted by pairing."""
+def _validate_htpasswd_content(content: bytes, label: str) -> None:
+    """Validate the narrow Nginx password-file format accepted by portals."""
 
     if not content or len(content) > MAX_DEVICE_PAIRING_AUTH_BYTES:
-        raise ValueError("Device-pairing htpasswd file is empty or too large")
+        raise ValueError(f"{label} htpasswd file is empty or too large")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise ValueError("Device-pairing htpasswd file must be UTF-8 text") from exc
+        raise ValueError(f"{label} htpasswd file must be UTF-8 text") from exc
     records = [line for line in text.splitlines() if line]
     if not records:
-        raise ValueError("Device-pairing htpasswd file has no user records")
+        raise ValueError(f"{label} htpasswd file has no user records")
     for line in records:
         if any(ord(character) < 32 or ord(character) == 127 for character in line):
-            raise ValueError("Device-pairing htpasswd records contain control characters")
+            raise ValueError(f"{label} htpasswd records contain control characters")
         username, separator, password_hash = line.partition(":")
         if not separator or not validate_username(username):
-            raise ValueError(f"Invalid device-pairing htpasswd username: {username}")
+            raise ValueError(f"Invalid {label.lower()} htpasswd username: {username}")
         if not password_hash.startswith("$"):
             raise ValueError(
-                "Device-pairing htpasswd entries must use crypt-style hashes"
+                f"{label} htpasswd entries must use crypt-style hashes"
             )
 
 
-def _generated_htpasswd(config: SetupConfig) -> bytes:
-    username = config.device_pairing_auth_username
-    password = config.device_pairing_auth_password
+def _generated_htpasswd(username: str | None, password: str | None, label: str) -> bytes:
     if not username or not password:
-        raise ValueError("Device-pairing credentials are incomplete")
+        raise ValueError(f"{label} credentials are incomplete")
     try:
         result = subprocess.run(
             ["openssl", "passwd", "-6", "-stdin"],
@@ -617,13 +617,13 @@ def _generated_htpasswd(config: SetupConfig) -> bytes:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ValueError(
-            "OpenSSL is required to generate the device-pairing password file"
+            f"OpenSSL is required to generate the {label.lower()} password file"
         ) from exc
     password_hash = result.stdout.strip()
     if result.returncode != 0 or not password_hash.startswith("$6$"):
-        raise ValueError("OpenSSL could not generate the device-pairing password hash")
+        raise ValueError(f"OpenSSL could not generate the {label.lower()} password hash")
     payload = f"{username}:{password_hash}\n".encode("utf-8")
-    _validate_htpasswd_content(payload)
+    _validate_htpasswd_content(payload, label)
     return payload
 
 
@@ -652,11 +652,33 @@ def prepare_device_pairing_payload(config: SetupConfig, payload_dir: str) -> Non
         with open(source, "rb") as file_obj:
             payload = file_obj.read()
     else:
-        payload = _generated_htpasswd(config)
-    _validate_htpasswd_content(payload)
+        payload = _generated_htpasswd(
+            config.device_pairing_auth_username,
+            config.device_pairing_auth_password,
+            "Device-pairing",
+        )
+    _validate_htpasswd_content(payload, "Device-pairing")
     destination = os.path.join(payload_dir, "htpasswd")
     _copy_existing_path_value(payload, destination)
     print("  Staged device-pairing Basic Auth credentials")
+
+
+def prepare_control_panel_payload(config: SetupConfig, payload_dir: str) -> None:
+    """Hash and stage the transient control-panel password."""
+
+    if config.control_panel_port is None or config.control_panel_auth_password is None:
+        return
+    if config.dry_run:
+        print("  [DRY RUN] Would stage control-panel Basic Auth credentials")
+        return
+    payload = _generated_htpasswd(
+        config.username,
+        config.control_panel_auth_password,
+        "Control-panel",
+    )
+    destination = os.path.join(payload_dir, "htpasswd")
+    _copy_existing_path_value(payload, destination)
+    print("  Staged control-panel Basic Auth credentials")
 
 
 def _github_host_entry(hosts_path: str, host: str) -> str:
@@ -1312,6 +1334,13 @@ def run_remote_setup(config: SetupConfig) -> int:
             )
             prepare_device_pairing_payload(config, pairing_payload_dir)
             config.device_pairing_payload = True
+
+        if config.control_panel_auth_password is not None:
+            control_panel_payload_dir = os.path.join(
+                build_dir, CONTROL_PANEL_PAYLOAD_DIRNAME
+            )
+            prepare_control_panel_payload(config, control_panel_payload_dir)
+            config.control_panel_payload = True
 
         remote_arg_tokens = _expand_remote_args(config.to_remote_args())
         _write_remote_args_file(build_dir, remote_arg_tokens)
