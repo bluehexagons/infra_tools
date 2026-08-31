@@ -30,7 +30,10 @@ The Basic Auth username is always the setup username. The password flag is
 transient: the controller hashes it with SHA-512 crypt before upload, removes
 the uploaded payload after setup, and omits it from saved state and
 reconstructed commands. A later setup keeps the existing password when the
-password flag is omitted. Repeating the flag rotates it.
+password flag is omitted. Repeating the flag rotates it. If the setup username
+changes, rerun with `--control-panel-password` so the single Basic Auth record
+can be replaced with the new username; infra-tools refuses to preserve a
+record for a different account.
 
 Remove the panel and its htpasswd data with:
 
@@ -50,6 +53,11 @@ certificate per service. See [Client CA trust](CLIENT_CA_TRUST.md).
 Without `--ssl`, Basic Auth is sent over plaintext HTTP. Keep that mode on a
 trusted network only; HTTPS is recommended whenever credentials cross a
 network.
+
+The panel is supported by the server and workstation setup families. It is
+intentionally rejected on `server_proxmox`: that host uses a dedicated
+management-firewall flow and should not gain another administrative web
+surface implicitly.
 
 ## What appears in the panel
 

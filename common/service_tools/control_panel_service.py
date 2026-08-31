@@ -192,13 +192,30 @@ class ControlPanelState:
             self.action_status = "running"
             self.action_message = "Updating T3 Code…"
             self.action_output = ""
-        threading.Thread(target=self._run_t3_update, daemon=True).start()
+        threading.Thread(target=self._run_t3_update_guarded, daemon=True).start()
         return True
+
+    def _run_t3_update_guarded(self) -> None:
+        try:
+            self._run_t3_update()
+        except Exception as exc:
+            self._finish_action(
+                "failed",
+                "T3 Code update stopped unexpectedly.",
+                f"{type(exc).__name__}: {exc}",
+            )
 
     def _run_t3_update(self) -> None:
         home = os.path.expanduser("~")
         environment = os.environ.copy()
-        environment.setdefault("HOME", home)
+        environment["HOME"] = home
+        environment["PATH"] = os.pathsep.join(
+            (
+                os.path.join(home, ".local", "bin"),
+                os.path.join(home, ".local", "share", "infra-tools", "t3-npm", "bin"),
+                environment.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            )
+        )
         environment.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
         environment.setdefault(
             "DBUS_SESSION_BUS_ADDRESS",
@@ -231,41 +248,47 @@ class ControlPanelState:
             )
             return
 
-        doctor = shutil.which("infra-tools")
-        if doctor:
-            try:
-                check = subprocess.run(
-                    [doctor, "agent", "doctor", "--capability", "t3code", "--fix"],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                    cwd=home,
-                    env=environment,
-                )
-            except subprocess.TimeoutExpired as exc:
-                output += _subprocess_text(exc.stdout) + _subprocess_text(exc.stderr)
-                self._finish_action(
-                    "failed",
-                    "T3 Code updated, but its readiness check timed out.",
-                    output,
-                )
-                return
-            except OSError as exc:
-                self._finish_action(
-                    "failed",
-                    "T3 Code updated, but its readiness check could not start.",
-                    output + str(exc),
-                )
-                return
-            output += (check.stdout or "") + (check.stderr or "")
-            if check.returncode != 0:
-                self._finish_action(
-                    "failed",
-                    "T3 Code updated, but its readiness check failed.",
-                    output,
-                )
-                return
+        doctor = shutil.which("infra-tools", path=environment["PATH"])
+        if not doctor:
+            self._finish_action(
+                "failed",
+                "T3 Code updated, but the managed readiness command is unavailable.",
+                output,
+            )
+            return
+        try:
+            check = subprocess.run(
+                [doctor, "agent", "doctor", "--capability", "t3code", "--fix"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=home,
+                env=environment,
+            )
+        except subprocess.TimeoutExpired as exc:
+            output += _subprocess_text(exc.stdout) + _subprocess_text(exc.stderr)
+            self._finish_action(
+                "failed",
+                "T3 Code updated, but its readiness check timed out.",
+                output,
+            )
+            return
+        except OSError as exc:
+            self._finish_action(
+                "failed",
+                "T3 Code updated, but its readiness check could not start.",
+                output + str(exc),
+            )
+            return
+        output += (check.stdout or "") + (check.stderr or "")
+        if check.returncode != 0:
+            self._finish_action(
+                "failed",
+                "T3 Code updated, but its readiness check failed.",
+                output,
+            )
+            return
         self._finish_action("complete", "T3 Code update completed.", output)
 
     def _finish_action(self, status: str, message: str, output: str) -> None:

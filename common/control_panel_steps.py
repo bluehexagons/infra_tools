@@ -32,6 +32,7 @@ CONTROL_PANEL_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-control-panel
 CONTROL_PANEL_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-control-panel"
 CONTROL_PANEL_AUTH_FAILURE_LOG = "/var/log/nginx/infra-tools-control-panel-auth-failures.log"
 _NGINX_MARKER = "# Managed by infra_tools control panel"
+_SERVICE_MARKER = "# Managed by infra_tools control panel"
 
 
 def _url_host(host: str) -> str:
@@ -237,7 +238,10 @@ server {{
 """
 
 
-def _validate_htpasswd_file(path: str) -> None:
+def _validate_htpasswd_file(
+    path: str,
+    expected_username: str | None = None,
+) -> None:
     if os.path.islink(path) or not os.path.isfile(path):
         raise RuntimeError(f"Control-panel auth must be a regular file: {path}")
     if not 0 < os.path.getsize(path) <= 64 * 1024:
@@ -249,6 +253,7 @@ def _validate_htpasswd_file(path: str) -> None:
         raise RuntimeError("Control-panel auth file must be UTF-8 text") from exc
     if not records:
         raise RuntimeError("Control-panel auth file has no user records")
+    usernames: list[str] = []
     for record in records:
         username, separator, password_hash = record.partition(":")
         if (
@@ -258,6 +263,12 @@ def _validate_htpasswd_file(path: str) -> None:
             or any(ord(character) < 32 or ord(character) == 127 for character in record)
         ):
             raise RuntimeError("Control-panel auth file contains an invalid record")
+        usernames.append(username)
+    if expected_username is not None and usernames != [expected_username]:
+        raise RuntimeError(
+            "Control-panel auth must contain exactly the setup username; "
+            "supply --control-panel-password to replace it"
+        )
 
 
 def _replace_auth_file(payload: bytes) -> None:
@@ -272,7 +283,7 @@ def _replace_auth_file(payload: bytes) -> None:
             os.unlink(temporary)
 
 
-def _install_auth_file() -> tuple[bool, bytes | None]:
+def _install_auth_file(expected_username: str) -> tuple[bool, bytes | None]:
     validate_filesystem_path(CONTROL_PANEL_CONFIG_DIR, must_exist=False)
     if os.path.lexists(CONTROL_PANEL_CONFIG_DIR) and (
         os.path.islink(CONTROL_PANEL_CONFIG_DIR)
@@ -286,7 +297,7 @@ def _install_auth_file() -> tuple[bool, bytes | None]:
         with open(CONTROL_PANEL_AUTH_FILE, "rb") as file_obj:
             existing = file_obj.read()
     if os.path.lexists(CONTROL_PANEL_PAYLOAD_FILE):
-        _validate_htpasswd_file(CONTROL_PANEL_PAYLOAD_FILE)
+        _validate_htpasswd_file(CONTROL_PANEL_PAYLOAD_FILE, expected_username)
         with open(CONTROL_PANEL_PAYLOAD_FILE, "rb") as file_obj:
             desired = file_obj.read()
         if existing != desired:
@@ -299,6 +310,7 @@ def _install_auth_file() -> tuple[bool, bytes | None]:
             "The control panel needs --control-panel-password on first setup"
         )
     else:
+        _validate_htpasswd_file(CONTROL_PANEL_AUTH_FILE, expected_username)
         changed = False
     web_account = pwd.getpwnam("www-data")
     os.chown(CONTROL_PANEL_CONFIG_DIR, 0, web_account.pw_gid)
@@ -332,6 +344,21 @@ def _ensure_nginx() -> None:
         run("systemctl enable --now nginx", check=True)
 
 
+def _restore_nginx_site(previous: str | None, link_created: bool) -> None:
+    if previous is None:
+        try:
+            os.unlink(CONTROL_PANEL_NGINX_SITE)
+        except FileNotFoundError:
+            pass
+    else:
+        write_text_atomic(CONTROL_PANEL_NGINX_SITE, previous, mode=0o644)
+    if link_created:
+        try:
+            os.unlink(CONTROL_PANEL_NGINX_LINK)
+        except FileNotFoundError:
+            pass
+
+
 def _write_nginx_site(content: str) -> bool:
     previous = None
     if os.path.lexists(CONTROL_PANEL_NGINX_SITE):
@@ -349,36 +376,76 @@ def _write_nginx_site(content: str) -> bool:
         if not (
             os.path.islink(CONTROL_PANEL_NGINX_LINK)
             and os.path.realpath(CONTROL_PANEL_NGINX_LINK) == CONTROL_PANEL_NGINX_SITE
+            and previous is not None
         ):
             raise RuntimeError(f"Refusing unmanaged control-panel Nginx link: {CONTROL_PANEL_NGINX_LINK}")
     else:
         os.symlink(CONTROL_PANEL_NGINX_SITE, CONTROL_PANEL_NGINX_LINK)
         changed = True
         link_created = True
-    validation = run("nginx -t", check=False, capture_output=True)
+    try:
+        validation = run("nginx -t", check=False, capture_output=True)
+    except Exception:
+        _restore_nginx_site(previous, link_created)
+        raise
     if validation.returncode != 0:
-        if previous is None:
-            try:
-                os.unlink(CONTROL_PANEL_NGINX_SITE)
-            except FileNotFoundError:
-                pass
-        else:
-            write_text_atomic(CONTROL_PANEL_NGINX_SITE, previous, mode=0o644)
-        if link_created:
-            try:
-                os.unlink(CONTROL_PANEL_NGINX_LINK)
-            except FileNotFoundError:
-                pass
+        _restore_nginx_site(previous, link_created)
         raise RuntimeError("Nginx rejected the control-panel configuration")
     if changed:
-        run("systemctl reload nginx", check=True)
+        try:
+            run("systemctl reload nginx", check=True)
+        except Exception:
+            _restore_nginx_site(previous, link_created)
+            try:
+                rollback_validation = run(
+                    "nginx -t", check=False, capture_output=True
+                )
+                if rollback_validation.returncode == 0:
+                    run("systemctl reload nginx", check=False)
+            except Exception:
+                pass
+            raise
     return changed
+
+
+def _systemd_quote(value: str) -> str:
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise ValueError("Systemd value contains control characters")
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _is_managed_service(content: str) -> bool:
+    return _SERVICE_MARKER in content or (
+        "Description=infra-tools control panel" in content
+        and f"ExecStart=/usr/bin/python3 {CONTROL_PANEL_SCRIPT} " in content
+    )
+
+
+def _restore_service(previous: str | None) -> None:
+    if previous is None:
+        run(
+            f"systemctl disable --now {CONTROL_PANEL_SERVICE_NAME}.service",
+            check=False,
+        )
+        try:
+            os.unlink(CONTROL_PANEL_SERVICE_FILE)
+        except FileNotFoundError:
+            pass
+    else:
+        write_text_atomic(CONTROL_PANEL_SERVICE_FILE, previous, mode=0o644)
+    run("systemctl daemon-reload", check=False)
+    if previous is not None:
+        run(
+            f"systemctl restart {CONTROL_PANEL_SERVICE_NAME}.service",
+            check=False,
+        )
 
 
 def _configure_service(config: SetupConfig, home: str) -> bool:
     service_user = config.username if config.username != "root" else "nobody"
     service_home = home if service_user == config.username else "/nonexistent"
-    content = f"""[Unit]
+    content = f"""{_SERVICE_MARKER}
+[Unit]
 Description=infra-tools control panel
 After=network-online.target nginx.service
 Wants=network-online.target
@@ -390,7 +457,7 @@ Group=www-data
 RuntimeDirectory=infra-tools-control-panel
 RuntimeDirectoryMode=0750
 UMask=0007
-Environment=HOME={service_home}
+Environment={_systemd_quote('HOME=' + service_home)}
 Environment=XDG_RUNTIME_DIR=/run/user/{pwd.getpwnam(service_user).pw_uid}
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{pwd.getpwnam(service_user).pw_uid}/bus
 ExecStart=/usr/bin/python3 {CONTROL_PANEL_SCRIPT} --config {CONTROL_PANEL_MANIFEST} --socket {CONTROL_PANEL_SOCKET}
@@ -400,6 +467,10 @@ NoNewPrivileges=true
 PrivateDevices=true
 PrivateTmp=true
 ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictSUIDSGID=true
 StandardOutput=null
@@ -409,60 +480,146 @@ StandardError=journal
 WantedBy=multi-user.target
 """
     previous = None
+    if os.path.lexists(CONTROL_PANEL_SERVICE_FILE) and (
+        os.path.islink(CONTROL_PANEL_SERVICE_FILE)
+        or not os.path.isfile(CONTROL_PANEL_SERVICE_FILE)
+    ):
+        raise RuntimeError(
+            f"Refusing unmanaged control-panel service: {CONTROL_PANEL_SERVICE_FILE}"
+        )
     try:
         with open(CONTROL_PANEL_SERVICE_FILE, encoding="utf-8") as file_obj:
             previous = file_obj.read()
     except OSError:
         pass
+    if previous is not None and not _is_managed_service(previous):
+        raise RuntimeError(
+            f"Refusing unmanaged control-panel service: {CONTROL_PANEL_SERVICE_FILE}"
+        )
     changed = previous != content
-    if changed:
-        write_text_atomic(CONTROL_PANEL_SERVICE_FILE, content, mode=0o644)
-        run("systemctl daemon-reload", check=True)
-    run(f"systemctl enable {CONTROL_PANEL_SERVICE_NAME}.service", check=True)
-    # The service reads its manifest only at startup, so restart even when the
-    # unit itself is unchanged.
-    run(f"systemctl restart {CONTROL_PANEL_SERVICE_NAME}.service", check=True)
-    for _attempt in range(25):
-        if os.path.exists(CONTROL_PANEL_SOCKET):
-            return changed
-        time.sleep(0.2)
-    raise RuntimeError("The control-panel service did not create its HTTP socket")
+    try:
+        if changed:
+            write_text_atomic(CONTROL_PANEL_SERVICE_FILE, content, mode=0o644)
+            run("systemctl daemon-reload", check=True)
+        run(f"systemctl enable {CONTROL_PANEL_SERVICE_NAME}.service", check=True)
+        # The service reads its manifest only at startup, so restart even when
+        # the unit itself is unchanged.
+        run(f"systemctl restart {CONTROL_PANEL_SERVICE_NAME}.service", check=True)
+        for _attempt in range(25):
+            if os.path.exists(CONTROL_PANEL_SOCKET) and is_service_active(
+                CONTROL_PANEL_SERVICE_NAME
+            ):
+                return changed
+            time.sleep(0.2)
+        raise RuntimeError("The control-panel service did not create its HTTP socket")
+    except Exception:
+        if changed:
+            _restore_service(previous)
+        raise
+
+
+def _preflight_control_panel_removal() -> tuple[str | None, bool]:
+    if os.path.lexists(CONTROL_PANEL_SERVICE_FILE):
+        if os.path.islink(CONTROL_PANEL_SERVICE_FILE) or not os.path.isfile(
+            CONTROL_PANEL_SERVICE_FILE
+        ):
+            raise RuntimeError(
+                f"Refusing unmanaged control-panel service: {CONTROL_PANEL_SERVICE_FILE}"
+            )
+        with open(CONTROL_PANEL_SERVICE_FILE, encoding="utf-8") as file_obj:
+            service_content = file_obj.read()
+        if not _is_managed_service(service_content):
+            raise RuntimeError(
+                f"Refusing unmanaged control-panel service: {CONTROL_PANEL_SERVICE_FILE}"
+            )
+
+    nginx_content = None
+    if os.path.lexists(CONTROL_PANEL_NGINX_SITE):
+        if os.path.islink(CONTROL_PANEL_NGINX_SITE) or not os.path.isfile(
+            CONTROL_PANEL_NGINX_SITE
+        ):
+            raise RuntimeError(
+                f"Refusing unmanaged control-panel Nginx site: {CONTROL_PANEL_NGINX_SITE}"
+            )
+        with open(CONTROL_PANEL_NGINX_SITE, encoding="utf-8") as file_obj:
+            nginx_content = file_obj.read()
+        if _NGINX_MARKER not in nginx_content:
+            raise RuntimeError(
+                f"Refusing unmanaged control-panel Nginx site: {CONTROL_PANEL_NGINX_SITE}"
+            )
+
+    link_exists = os.path.lexists(CONTROL_PANEL_NGINX_LINK)
+    if link_exists and not (
+        nginx_content is not None
+        and os.path.islink(CONTROL_PANEL_NGINX_LINK)
+        and os.path.realpath(CONTROL_PANEL_NGINX_LINK) == CONTROL_PANEL_NGINX_SITE
+    ):
+        raise RuntimeError(
+            f"Refusing unmanaged control-panel Nginx link: {CONTROL_PANEL_NGINX_LINK}"
+        )
+
+    if os.path.lexists(CONTROL_PANEL_CONFIG_DIR) and (
+        os.path.islink(CONTROL_PANEL_CONFIG_DIR)
+        or not os.path.isdir(CONTROL_PANEL_CONFIG_DIR)
+    ):
+        raise RuntimeError(
+            f"Refusing unsafe control-panel config path: {CONTROL_PANEL_CONFIG_DIR}"
+        )
+    for path in (CONTROL_PANEL_MANIFEST, CONTROL_PANEL_AUTH_FILE):
+        if os.path.lexists(path) and (
+            os.path.islink(path) or not os.path.isfile(path)
+        ):
+            raise RuntimeError(f"Refusing unsafe control-panel file: {path}")
+    return nginx_content, link_exists
+
+
+def _remove_nginx_site(nginx_content: str | None, link_exists: bool) -> None:
+    if nginx_content is None and not link_exists:
+        return
+    if link_exists:
+        os.unlink(CONTROL_PANEL_NGINX_LINK)
+    if nginx_content is not None:
+        os.unlink(CONTROL_PANEL_NGINX_SITE)
+    if not shutil.which("nginx"):
+        return
+    try:
+        validation = run("nginx -t", check=False, capture_output=True)
+        if validation.returncode != 0:
+            raise RuntimeError("Nginx is invalid after removing the control panel")
+        run("systemctl reload nginx", check=True)
+    except Exception:
+        if nginx_content is not None:
+            write_text_atomic(CONTROL_PANEL_NGINX_SITE, nginx_content, mode=0o644)
+        if link_exists and not os.path.lexists(CONTROL_PANEL_NGINX_LINK):
+            os.symlink(CONTROL_PANEL_NGINX_SITE, CONTROL_PANEL_NGINX_LINK)
+        try:
+            rollback_validation = run("nginx -t", check=False, capture_output=True)
+            if rollback_validation.returncode == 0:
+                run("systemctl reload nginx", check=False)
+        except Exception:
+            pass
+        raise
 
 
 def remove_control_panel() -> None:
     """Remove the panel, authentication data, and public Nginx listener."""
 
-    changed = False
+    nginx_content, link_exists = _preflight_control_panel_removal()
+    _remove_nginx_site(nginx_content, link_exists)
     if os.path.exists(CONTROL_PANEL_SERVICE_FILE):
         run(f"systemctl disable --now {CONTROL_PANEL_SERVICE_NAME}.service", check=False)
         os.remove(CONTROL_PANEL_SERVICE_FILE)
         run("systemctl daemon-reload", check=True)
-        changed = True
-    for path in (CONTROL_PANEL_NGINX_LINK, CONTROL_PANEL_NGINX_SITE):
-        if os.path.lexists(path):
-            if path == CONTROL_PANEL_NGINX_LINK and not os.path.islink(path):
-                raise RuntimeError(f"Refusing unmanaged control-panel Nginx link: {path}")
-            os.unlink(path)
-            changed = True
     if os.path.lexists(CONTROL_PANEL_CONFIG_DIR):
-        if os.path.islink(CONTROL_PANEL_CONFIG_DIR) or not os.path.isdir(CONTROL_PANEL_CONFIG_DIR):
-            raise RuntimeError(f"Refusing unsafe control-panel config path: {CONTROL_PANEL_CONFIG_DIR}")
         for name in ("config.json", "htpasswd"):
             path = os.path.join(CONTROL_PANEL_CONFIG_DIR, name)
             if os.path.lexists(path):
-                if os.path.islink(path) or not os.path.isfile(path):
-                    raise RuntimeError(f"Refusing unsafe control-panel file: {path}")
                 os.remove(path)
         try:
             os.rmdir(CONTROL_PANEL_CONFIG_DIR)
         except OSError:
             pass
     remove_nginx_auth_failure_ban("control-panel")
-    if changed and shutil.which("nginx"):
-        validation = run("nginx -t", check=False, capture_output=True)
-        if validation.returncode != 0:
-            raise RuntimeError("Nginx is invalid after removing the control panel")
-        run("systemctl reload nginx", check=True)
     print("  ✓ Control panel removed")
 
 
@@ -502,7 +659,7 @@ def configure_control_panel(config: SetupConfig) -> None:
             install_utility=True,
         )
 
-    auth_changed, previous_auth = _install_auth_file()
+    auth_changed, previous_auth = _install_auth_file(config.username)
     try:
         manifest = build_control_panel_manifest(config, identities)
         os.makedirs(CONTROL_PANEL_CONFIG_DIR, mode=0o750, exist_ok=True)

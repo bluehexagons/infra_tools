@@ -112,6 +112,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         steps.extend(get_web_firewall_steps())
     elif config.system_type == "server_lite" and (
         config.effective_web_ports()
+        or config.disable_control_panel
         or config.effective_access_sources()
         or config.clear_access_sources
         or config.clear_lan_access
