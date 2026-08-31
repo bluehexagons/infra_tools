@@ -1,4 +1,4 @@
-"""Tests for the optional authenticated infra-tools control panel."""
+"""Tests for the optional authenticated infra-tools web panel."""
 
 from __future__ import annotations
 
@@ -10,24 +10,24 @@ from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from common.control_panel_steps import (
+from common.web_panel_steps import (
     _configure_service,
     _install_auth_file,
     _write_nginx_site,
-    build_control_panel_manifest,
-    control_panel_url,
-    remove_control_panel,
-    render_control_panel_nginx,
+    build_web_panel_manifest,
+    web_panel_url,
+    remove_web_panel,
+    render_web_panel_nginx,
 )
-from common.service_tools.control_panel_service import (
-    ControlPanelState,
+from common.service_tools.web_panel_service import (
+    WebPanelState,
     _safe_url,
     render_page,
 )
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.display import print_service_access_summary
-from lib.setup_common import prepare_control_panel_payload
+from lib.setup_common import prepare_web_panel_payload
 from plugins.server import build_server_steps
 
 
@@ -36,31 +36,31 @@ def _config(**overrides: object) -> SetupConfig:
         "host": "agent-vm",
         "username": "agent",
         "system_type": "server_dev",
-        "control_panel_port": 80,
+        "web_panel_port": 80,
     }
     values.update(overrides)
     return SetupConfig(**values)
 
 
-class ControlPanelConfigTest(unittest.TestCase):
+class WebPanelConfigTest(unittest.TestCase):
     def test_cli_defaults_to_http_or_https_standard_port(self) -> None:
         parser = create_setup_argument_parser("test")
 
         http = SetupConfig.from_args(
-            parser.parse_args(["agent-vm", "agent", "--control-panel"]),
+            parser.parse_args(["agent-vm", "agent", "--web-panel"]),
             "server_dev",
         )
         https = SetupConfig.from_args(
             parser.parse_args(
-                ["agent-vm", "agent", "--control-panel", "--ssl"]
+                ["agent-vm", "agent", "--web-panel", "--ssl"]
             ),
             "server_dev",
         )
 
-        self.assertEqual(http.control_panel_port, 80)
-        self.assertEqual(https.control_panel_port, 443)
-        self.assertEqual(control_panel_url(http), "http://agent-vm/")
-        self.assertEqual(control_panel_url(https), "https://agent-vm/")
+        self.assertEqual(http.web_panel_port, 80)
+        self.assertEqual(https.web_panel_port, 443)
+        self.assertEqual(web_panel_url(http), "http://agent-vm/")
+        self.assertEqual(web_panel_url(https), "https://agent-vm/")
 
     def test_cli_accepts_custom_port_and_keeps_password_transient(self) -> None:
         parser = create_setup_argument_parser("test")
@@ -69,17 +69,17 @@ class ControlPanelConfigTest(unittest.TestCase):
                 [
                     "agent-vm",
                     "agent",
-                    "--control-panel",
+                    "--web-panel",
                     "9443",
-                    "--control-panel-password",
+                    "--web-panel-password",
                     "panel-secret",
                 ]
             ),
             "server_dev",
         )
 
-        self.assertEqual(config.control_panel_port, 9443)
-        self.assertEqual(config.control_panel_auth_password, "panel-secret")
+        self.assertEqual(config.web_panel_port, 9443)
+        self.assertEqual(config.web_panel_auth_password, "panel-secret")
         self.assertNotIn("panel-secret", " ".join(config.to_remote_args()))
         self.assertNotIn("panel-secret", " ".join(config.to_setup_command()))
         self.assertNotIn("panel-secret", str(config.to_dict()))
@@ -87,38 +87,38 @@ class ControlPanelConfigTest(unittest.TestCase):
     def test_explicit_zero_port_is_rejected(self) -> None:
         parser = create_setup_argument_parser("test")
         args = parser.parse_args(
-            ["agent-vm", "agent", "--control-panel", "0"]
+            ["agent-vm", "agent", "--web-panel", "0"]
         )
 
         with self.assertRaisesRegex(ValueError, "between 1 and 65535"):
             SetupConfig.from_args(args, "server_dev")
 
     def test_remote_payload_flag_is_serialized_without_secret(self) -> None:
-        config = _config(control_panel_payload=True)
+        config = _config(web_panel_payload=True)
         remote = " ".join(config.to_remote_args())
 
-        self.assertIn("--control-panel 80", remote)
-        self.assertIn("--control-panel-payload", remote)
-        self.assertNotIn("control_panel_payload", config.to_dict())
+        self.assertIn("--web-panel 80", remote)
+        self.assertIn("--web-panel-payload", remote)
+        self.assertNotIn("web_panel_payload", config.to_dict())
 
     def test_rejects_reserved_and_conflicting_ports(self) -> None:
         with self.assertRaisesRegex(ValueError, "8443 is reserved"):
-            _config(control_panel_port=8443)
+            _config(web_panel_port=8443)
         with self.assertRaisesRegex(ValueError, "web-interface-port"):
             _config(
-                control_panel_port=3773,
+                web_panel_port=3773,
                 agent_tools=["codex"],
                 web_interfaces=["t3code"],
                 web_interface_port=3773,
             )
 
     def test_password_requires_enabled_panel(self) -> None:
-        with self.assertRaisesRegex(ValueError, "requires --control-panel"):
+        with self.assertRaisesRegex(ValueError, "requires --web-panel"):
             SetupConfig(
                 host="agent-vm",
                 username="agent",
                 system_type="server_dev",
-                control_panel_auth_password="secret",
+                web_panel_auth_password="secret",
             )
 
     def test_panel_step_is_capability_gated(self) -> None:
@@ -134,8 +134,8 @@ class ControlPanelConfigTest(unittest.TestCase):
             )
         ]
 
-        self.assertTrue(any("control panel" in name for name in enabled_names))
-        self.assertFalse(any("control panel" in name for name in disabled_names))
+        self.assertTrue(any("web panel" in name for name in enabled_names))
+        self.assertFalse(any("web panel" in name for name in disabled_names))
 
     def test_server_lite_removal_reconciles_the_firewall(self) -> None:
         names = [
@@ -145,36 +145,36 @@ class ControlPanelConfigTest(unittest.TestCase):
                     host="agent-vm",
                     username="agent",
                     system_type="server_lite",
-                    disable_control_panel=True,
+                    disable_web_panel=True,
                 )
             )
         ]
 
         self.assertIn("Configuring firewall for requested web ports", names)
-        self.assertIn("Removing infra-tools control panel", names)
+        self.assertIn("Removing infra-tools web panel", names)
 
     def test_access_summary_includes_complete_panel_link(self) -> None:
         output = StringIO()
         with redirect_stdout(output):
             print_service_access_summary(
-                _config(host="2001:db8::20", control_panel_port=9443, enable_ssl=True)
+                _config(host="2001:db8::20", web_panel_port=9443, enable_ssl=True)
             )
 
         self.assertIn(
-            "Control panel: https://[2001:db8::20]:9443/",
+            "Web panel: https://[2001:db8::20]:9443/",
             output.getvalue(),
         )
 
 
-class ControlPanelPayloadTest(unittest.TestCase):
+class WebPanelPayloadTest(unittest.TestCase):
     def test_hashes_password_without_putting_it_in_argv(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             completed = SimpleNamespace(returncode=0, stdout="$6$salt$hash\n")
-            config = _config(control_panel_auth_password="very-secret")
+            config = _config(web_panel_auth_password="very-secret")
             with patch(
                 "lib.setup_common.subprocess.run", return_value=completed
             ) as mock_run:
-                prepare_control_panel_payload(config, temporary)
+                prepare_web_panel_payload(config, temporary)
 
             with open(
                 os.path.join(temporary, "htpasswd"), encoding="utf-8"
@@ -184,7 +184,7 @@ class ControlPanelPayloadTest(unittest.TestCase):
             self.assertEqual(mock_run.call_args.kwargs["input"], "very-secret\n")
 
 
-class ControlPanelLifecycleTest(unittest.TestCase):
+class WebPanelLifecycleTest(unittest.TestCase):
     def test_preserved_auth_must_match_the_setup_username(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config_dir = os.path.join(temporary, "config")
@@ -194,10 +194,10 @@ class ControlPanelLifecycleTest(unittest.TestCase):
                 file_obj.write("old-user:$6$salt$hash\n")
 
             with patch.multiple(
-                "common.control_panel_steps",
-                CONTROL_PANEL_CONFIG_DIR=config_dir,
-                CONTROL_PANEL_AUTH_FILE=auth_file,
-                CONTROL_PANEL_PAYLOAD_FILE=os.path.join(temporary, "missing"),
+                "common.web_panel_steps",
+                WEB_PANEL_CONFIG_DIR=config_dir,
+                WEB_PANEL_AUTH_FILE=auth_file,
+                WEB_PANEL_PAYLOAD_FILE=os.path.join(temporary, "missing"),
             ):
                 with self.assertRaisesRegex(RuntimeError, "setup username"):
                     _install_auth_file("agent")
@@ -218,16 +218,16 @@ class ControlPanelLifecycleTest(unittest.TestCase):
 
             with (
                 patch.multiple(
-                    "common.control_panel_steps",
-                    CONTROL_PANEL_CONFIG_DIR=config_dir,
-                    CONTROL_PANEL_AUTH_FILE=auth_file,
-                    CONTROL_PANEL_PAYLOAD_FILE=payload_file,
+                    "common.web_panel_steps",
+                    WEB_PANEL_CONFIG_DIR=config_dir,
+                    WEB_PANEL_AUTH_FILE=auth_file,
+                    WEB_PANEL_PAYLOAD_FILE=payload_file,
                 ),
                 patch(
-                    "common.control_panel_steps.pwd.getpwnam",
+                    "common.web_panel_steps.pwd.getpwnam",
                     return_value=account,
                 ),
-                patch("common.control_panel_steps.os.chown"),
+                patch("common.web_panel_steps.os.chown"),
             ):
                 changed, previous = _install_auth_file("agent")
 
@@ -240,7 +240,7 @@ class ControlPanelLifecycleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             site = os.path.join(temporary, "site")
             link = os.path.join(temporary, "enabled")
-            old_content = "# Managed by infra_tools control panel\nold\n"
+            old_content = "# Managed by infra_tools web panel\nold\n"
             with open(site, "w", encoding="utf-8") as file_obj:
                 file_obj.write(old_content)
             os.symlink(site, link)
@@ -252,18 +252,18 @@ class ControlPanelLifecycleTest(unittest.TestCase):
 
             with (
                 patch.multiple(
-                    "common.control_panel_steps",
-                    CONTROL_PANEL_NGINX_SITE=site,
-                    CONTROL_PANEL_NGINX_LINK=link,
+                    "common.web_panel_steps",
+                    WEB_PANEL_NGINX_SITE=site,
+                    WEB_PANEL_NGINX_LINK=link,
                 ),
                 patch(
-                    "common.control_panel_steps.run",
+                    "common.web_panel_steps.run",
                     side_effect=run_command,
                 ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "reload failed"):
                     _write_nginx_site(
-                        "# Managed by infra_tools control panel\nnew\n"
+                        "# Managed by infra_tools web panel\nnew\n"
                     )
 
             with open(site, encoding="utf-8") as file_obj:
@@ -272,25 +272,25 @@ class ControlPanelLifecycleTest(unittest.TestCase):
 
     def test_service_activation_failure_removes_new_unit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            service_file = os.path.join(temporary, "control-panel.service")
+            service_file = os.path.join(temporary, "web-panel.service")
             account = SimpleNamespace(pw_uid=os.getuid())
 
             def run_command(command: str, **_kwargs: object) -> SimpleNamespace:
-                if command == "systemctl restart infra-tools-control-panel.service":
+                if command == "systemctl restart infra-tools-web-panel.service":
                     raise RuntimeError("service failed")
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
             with (
                 patch.multiple(
-                    "common.control_panel_steps",
-                    CONTROL_PANEL_SERVICE_FILE=service_file,
+                    "common.web_panel_steps",
+                    WEB_PANEL_SERVICE_FILE=service_file,
                 ),
                 patch(
-                    "common.control_panel_steps.pwd.getpwnam",
+                    "common.web_panel_steps.pwd.getpwnam",
                     return_value=account,
                 ),
                 patch(
-                    "common.control_panel_steps.run",
+                    "common.web_panel_steps.run",
                     side_effect=run_command,
                 ),
             ):
@@ -301,7 +301,7 @@ class ControlPanelLifecycleTest(unittest.TestCase):
 
     def test_service_unit_quotes_home_and_includes_hardening(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            service_file = os.path.join(temporary, "control-panel.service")
+            service_file = os.path.join(temporary, "web-panel.service")
             socket_path = os.path.join(temporary, "http.sock")
             with open(socket_path, "w", encoding="utf-8"):
                 pass
@@ -309,20 +309,20 @@ class ControlPanelLifecycleTest(unittest.TestCase):
 
             with (
                 patch.multiple(
-                    "common.control_panel_steps",
-                    CONTROL_PANEL_SERVICE_FILE=service_file,
-                    CONTROL_PANEL_SOCKET=socket_path,
+                    "common.web_panel_steps",
+                    WEB_PANEL_SERVICE_FILE=service_file,
+                    WEB_PANEL_SOCKET=socket_path,
                 ),
                 patch(
-                    "common.control_panel_steps.pwd.getpwnam",
+                    "common.web_panel_steps.pwd.getpwnam",
                     return_value=account,
                 ),
                 patch(
-                    "common.control_panel_steps.run",
+                    "common.web_panel_steps.run",
                     return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
                 ),
                 patch(
-                    "common.control_panel_steps.is_service_active",
+                    "common.web_panel_steps.is_service_active",
                     return_value=True,
                 ),
             ):
@@ -342,18 +342,18 @@ class ControlPanelLifecycleTest(unittest.TestCase):
 
             with (
                 patch.multiple(
-                    "common.control_panel_steps",
-                    CONTROL_PANEL_SERVICE_FILE=os.path.join(temporary, "service"),
-                    CONTROL_PANEL_CONFIG_DIR=os.path.join(temporary, "config"),
-                    CONTROL_PANEL_MANIFEST=os.path.join(temporary, "manifest"),
-                    CONTROL_PANEL_AUTH_FILE=os.path.join(temporary, "auth"),
-                    CONTROL_PANEL_NGINX_SITE=site,
-                    CONTROL_PANEL_NGINX_LINK=os.path.join(temporary, "link"),
+                    "common.web_panel_steps",
+                    WEB_PANEL_SERVICE_FILE=os.path.join(temporary, "service"),
+                    WEB_PANEL_CONFIG_DIR=os.path.join(temporary, "config"),
+                    WEB_PANEL_MANIFEST=os.path.join(temporary, "manifest"),
+                    WEB_PANEL_AUTH_FILE=os.path.join(temporary, "auth"),
+                    WEB_PANEL_NGINX_SITE=site,
+                    WEB_PANEL_NGINX_LINK=os.path.join(temporary, "link"),
                 ),
-                patch("common.control_panel_steps.run") as mock_run,
+                patch("common.web_panel_steps.run") as mock_run,
             ):
                 with self.assertRaisesRegex(RuntimeError, "unmanaged.*Nginx site"):
-                    remove_control_panel()
+                    remove_web_panel()
 
             self.assertTrue(os.path.exists(site))
             mock_run.assert_not_called()
@@ -363,34 +363,34 @@ class ControlPanelLifecycleTest(unittest.TestCase):
             site = os.path.join(temporary, "site")
             link = os.path.join(temporary, "link")
             with open(site, "w", encoding="utf-8") as file_obj:
-                file_obj.write("# Managed by infra_tools control panel\n")
+                file_obj.write("# Managed by infra_tools web panel\n")
             os.symlink(site, link)
 
             with (
                 patch.multiple(
-                    "common.control_panel_steps",
-                    CONTROL_PANEL_SERVICE_FILE=os.path.join(temporary, "service"),
-                    CONTROL_PANEL_CONFIG_DIR=os.path.join(temporary, "config"),
-                    CONTROL_PANEL_MANIFEST=os.path.join(temporary, "manifest"),
-                    CONTROL_PANEL_AUTH_FILE=os.path.join(temporary, "auth"),
-                    CONTROL_PANEL_NGINX_SITE=site,
-                    CONTROL_PANEL_NGINX_LINK=link,
+                    "common.web_panel_steps",
+                    WEB_PANEL_SERVICE_FILE=os.path.join(temporary, "service"),
+                    WEB_PANEL_CONFIG_DIR=os.path.join(temporary, "config"),
+                    WEB_PANEL_MANIFEST=os.path.join(temporary, "manifest"),
+                    WEB_PANEL_AUTH_FILE=os.path.join(temporary, "auth"),
+                    WEB_PANEL_NGINX_SITE=site,
+                    WEB_PANEL_NGINX_LINK=link,
                 ),
                 patch(
-                    "common.control_panel_steps.shutil.which",
+                    "common.web_panel_steps.shutil.which",
                     return_value=None,
                 ),
-                patch("common.control_panel_steps.run") as mock_run,
-                patch("common.control_panel_steps.remove_nginx_auth_failure_ban"),
+                patch("common.web_panel_steps.run") as mock_run,
+                patch("common.web_panel_steps.remove_nginx_auth_failure_ban"),
             ):
-                remove_control_panel()
+                remove_web_panel()
 
             self.assertFalse(os.path.lexists(site))
             self.assertFalse(os.path.lexists(link))
             mock_run.assert_not_called()
 
 
-class ControlPanelRenderingTest(unittest.TestCase):
+class WebPanelRenderingTest(unittest.TestCase):
     @staticmethod
     def _t3_manifest() -> dict[str, object]:
         return {
@@ -414,7 +414,7 @@ class ControlPanelRenderingTest(unittest.TestCase):
             friendly_name="Coding VM",
         )
 
-        manifest = build_control_panel_manifest(
+        manifest = build_web_panel_manifest(
             config, ["localhost", "agent-vm.local", "192.0.2.30"]
         )
 
@@ -426,7 +426,7 @@ class ControlPanelRenderingTest(unittest.TestCase):
         self.assertIn("smb://agent-vm.local/work_write", values)
 
     def test_nginx_requires_basic_auth_and_can_share_tls_certificate(self) -> None:
-        rendered = render_control_panel_nginx(
+        rendered = render_web_panel_nginx(
             ["agent-vm.local", "192.0.2.30"],
             443,
             cert_path="/etc/infra-web/tls/internal.crt",
@@ -435,8 +435,8 @@ class ControlPanelRenderingTest(unittest.TestCase):
 
         self.assertIn("listen 443 ssl", rendered)
         self.assertIn("auth_basic_user_file", rendered)
-        self.assertIn("limit_req zone=infra_tools_control_panel_auth", rendered)
-        self.assertIn("proxy_pass http://unix:/run/infra-tools-control-panel/http.sock:/", rendered)
+        self.assertIn("limit_req zone=infra_tools_web_panel_auth", rendered)
+        self.assertIn("proxy_pass http://unix:/run/infra-tools-web-panel/http.sock:/", rendered)
         self.assertIn("ssl_certificate /etc/infra-web/tls/internal.crt", rendered)
 
     def test_page_escapes_content_and_only_shows_available_action(self) -> None:
@@ -458,20 +458,63 @@ class ControlPanelRenderingTest(unittest.TestCase):
         }
         with (
             patch(
-                "common.service_tools.control_panel_service.discover_infra_web_services",
+                "common.service_tools.web_panel_service.discover_infra_web_services",
                 return_value=[],
             ),
             patch(
-                "common.service_tools.control_panel_service.os.path.isdir",
+                "common.service_tools.web_panel_service.os.path.isdir",
                 return_value=True,
             ),
         ):
-            rendered = render_page(ControlPanelState(manifest))
+            rendered = render_page(WebPanelState(manifest))
 
         self.assertIn("Agent &lt;VM&gt;", rendered)
-        self.assertIn("Update T3 Code", rendered)
+        self.assertIn("infra-tools web panel", rendered)
+        self.assertIn("Agent Code VM", rendered)
+        self.assertIn("Update to latest", rendered)
         self.assertIn("ssh agent@agent-vm.local", rendered)
+        self.assertIn("https://agent-vm.local:3773/", rendered)
         self.assertNotIn("Agent <VM>", rendered)
+
+    def test_running_action_refreshes_until_status_changes(self) -> None:
+        state = WebPanelState(self._t3_manifest())
+        state.action_status = "running"
+        state.action_message = "Updating T3 Code…"
+        with (
+            patch(
+                "common.service_tools.web_panel_service.discover_infra_web_services",
+                return_value=[],
+            ),
+            patch(
+                "common.service_tools.web_panel_service.os.path.isdir",
+                return_value=True,
+            ),
+        ):
+            rendered = render_page(state)
+
+        self.assertIn('<meta http-equiv="refresh" content="3">', rendered)
+        self.assertIn("Update in progress…", rendered)
+        self.assertIn('button type="submit" disabled', rendered)
+        self.assertIn('role="status"', rendered)
+
+    def test_empty_sections_explain_why_they_have_no_entries(self) -> None:
+        state = WebPanelState(
+            {
+                **self._t3_manifest(),
+                "services": [],
+                "access": [],
+                "features": {"t3_update": False},
+            }
+        )
+        with patch(
+            "common.service_tools.web_panel_service.discover_infra_web_services",
+            return_value=[],
+        ):
+            rendered = render_page(state)
+
+        self.assertIn("No hosted web services are available", rendered)
+        self.assertIn("No additional access methods are configured", rendered)
+        self.assertNotIn("Maintenance</h2>", rendered)
 
     def test_rejects_credential_bearing_service_urls(self) -> None:
         self.assertIsNone(_safe_url("https://user:password@example.test/"))
@@ -481,19 +524,19 @@ class ControlPanelRenderingTest(unittest.TestCase):
         )
 
     def test_t3_update_uses_the_user_launcher_for_readiness(self) -> None:
-        state = ControlPanelState(self._t3_manifest())
+        state = WebPanelState(self._t3_manifest())
         completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
         with (
             patch(
-                "common.service_tools.control_panel_service.os.path.expanduser",
+                "common.service_tools.web_panel_service.os.path.expanduser",
                 return_value="/home/agent",
             ),
             patch(
-                "common.service_tools.control_panel_service.shutil.which",
+                "common.service_tools.web_panel_service.shutil.which",
                 return_value="/home/agent/.local/bin/infra-tools",
             ) as mock_which,
             patch(
-                "common.service_tools.control_panel_service.subprocess.run",
+                "common.service_tools.web_panel_service.subprocess.run",
                 side_effect=[completed, completed],
             ) as mock_run,
         ):
@@ -505,15 +548,15 @@ class ControlPanelRenderingTest(unittest.TestCase):
         self.assertEqual(state.action_status, "complete")
 
     def test_t3_update_fails_closed_without_readiness_command(self) -> None:
-        state = ControlPanelState(self._t3_manifest())
+        state = WebPanelState(self._t3_manifest())
         completed = SimpleNamespace(returncode=0, stdout="updated\n", stderr="")
         with (
             patch(
-                "common.service_tools.control_panel_service.subprocess.run",
+                "common.service_tools.web_panel_service.subprocess.run",
                 return_value=completed,
             ),
             patch(
-                "common.service_tools.control_panel_service.shutil.which",
+                "common.service_tools.web_panel_service.shutil.which",
                 return_value=None,
             ),
         ):
@@ -523,7 +566,7 @@ class ControlPanelRenderingTest(unittest.TestCase):
         self.assertIn("readiness command is unavailable", state.action_message)
 
     def test_t3_update_guard_records_unexpected_failures(self) -> None:
-        state = ControlPanelState(self._t3_manifest())
+        state = WebPanelState(self._t3_manifest())
         with patch.object(
             state,
             "_run_t3_update",

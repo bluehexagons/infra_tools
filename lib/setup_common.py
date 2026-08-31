@@ -87,7 +87,7 @@ GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 REMOTE_ARGS_FILENAME = ".remote_setup_args.json"
 AGENT_PAYLOAD_DIRNAME = "agent_payload"
 DEVICE_PAIRING_PAYLOAD_DIRNAME = "device_pairing_payload"
-CONTROL_PANEL_PAYLOAD_DIRNAME = "control_panel_payload"
+WEB_PANEL_PAYLOAD_DIRNAME = "web_panel_payload"
 LEGACY_SETUP_OPERATION_FILENAME = "setup-operation.pre-persistence.json"
 MAX_AGENT_CREDENTIAL_BYTES = 4 * 1024 * 1024
 MAX_DEVICE_PAIRING_AUTH_BYTES = 64 * 1024
@@ -440,7 +440,7 @@ def _activate_local_runtime(build_dir: str) -> None:
         "deployments",
         AGENT_PAYLOAD_DIRNAME,
         DEVICE_PAIRING_PAYLOAD_DIRNAME,
-        CONTROL_PANEL_PAYLOAD_DIRNAME,
+        WEB_PANEL_PAYLOAD_DIRNAME,
         REMOTE_ARGS_FILENAME,
     ):
         destination = os.path.join(REMOTE_INSTALL_DIR, item)
@@ -663,22 +663,22 @@ def prepare_device_pairing_payload(config: SetupConfig, payload_dir: str) -> Non
     print("  Staged device-pairing Basic Auth credentials")
 
 
-def prepare_control_panel_payload(config: SetupConfig, payload_dir: str) -> None:
-    """Hash and stage the transient control-panel password."""
+def prepare_web_panel_payload(config: SetupConfig, payload_dir: str) -> None:
+    """Hash and stage the transient web panel password."""
 
-    if config.control_panel_port is None or config.control_panel_auth_password is None:
+    if config.web_panel_port is None or config.web_panel_auth_password is None:
         return
     if config.dry_run:
-        print("  [DRY RUN] Would stage control-panel Basic Auth credentials")
+        print("  [DRY RUN] Would stage web panel Basic Auth credentials")
         return
     payload = _generated_htpasswd(
         config.username,
-        config.control_panel_auth_password,
-        "Control-panel",
+        config.web_panel_auth_password,
+        "Web panel",
     )
     destination = os.path.join(payload_dir, "htpasswd")
     _copy_existing_path_value(payload, destination)
-    print("  Staged control-panel Basic Auth credentials")
+    print("  Staged web panel Basic Auth credentials")
 
 
 def _github_host_entry(hosts_path: str, host: str) -> str:
@@ -1335,12 +1335,12 @@ def run_remote_setup(config: SetupConfig) -> int:
             prepare_device_pairing_payload(config, pairing_payload_dir)
             config.device_pairing_payload = True
 
-        if config.control_panel_auth_password is not None:
-            control_panel_payload_dir = os.path.join(
-                build_dir, CONTROL_PANEL_PAYLOAD_DIRNAME
+        if config.web_panel_auth_password is not None:
+            web_panel_payload_dir = os.path.join(
+                build_dir, WEB_PANEL_PAYLOAD_DIRNAME
             )
-            prepare_control_panel_payload(config, control_panel_payload_dir)
-            config.control_panel_payload = True
+            prepare_web_panel_payload(config, web_panel_payload_dir)
+            config.web_panel_payload = True
 
         remote_arg_tokens = _expand_remote_args(config.to_remote_args())
         _write_remote_args_file(build_dir, remote_arg_tokens)

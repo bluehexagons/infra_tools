@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve the authenticated infra-tools control panel behind Nginx."""
+"""Serve the authenticated infra-tools web panel behind Nginx."""
 
 from __future__ import annotations
 
@@ -52,21 +52,21 @@ def _subprocess_text(value: str | bytes | None) -> str:
 
 def _load_manifest(path: str) -> dict[str, Any]:
     if os.path.islink(path) or not os.path.isfile(path):
-        raise RuntimeError(f"Control-panel manifest must be a regular file: {path}")
+        raise RuntimeError(f"Web panel manifest must be a regular file: {path}")
     if os.path.getsize(path) > _MAX_CONFIG_BYTES:
-        raise RuntimeError("Control-panel manifest exceeds the size limit")
+        raise RuntimeError("Web panel manifest exceeds the size limit")
     with open(path, encoding="utf-8") as file_obj:
         value = json.load(file_obj)
     if not isinstance(value, dict) or value.get("version") != 1:
-        raise RuntimeError("Invalid control-panel manifest")
+        raise RuntimeError("Invalid web panel manifest")
     for name in ("host", "system_type", "username"):
         if not isinstance(value.get(name), str) or not value[name]:
-            raise RuntimeError(f"Control-panel manifest has no valid {name}")
+            raise RuntimeError(f"Web panel manifest has no valid {name}")
     for name in ("services", "access"):
         if not isinstance(value.get(name), list):
-            raise RuntimeError(f"Control-panel manifest has no valid {name}")
+            raise RuntimeError(f"Web panel manifest has no valid {name}")
     if not isinstance(value.get("features"), dict):
-        raise RuntimeError("Control-panel manifest has no valid features")
+        raise RuntimeError("Web panel manifest has no valid features")
     return value
 
 
@@ -110,7 +110,7 @@ def _run_json(command: list[str]) -> dict[str, Any]:
 
 
 def discover_infra_web_services() -> list[dict[str, str]]:
-    """Return live routes owned by the control-panel service user."""
+    """Return live routes owned by the web panel service user."""
 
     utility = shutil.which("infra-web")
     if not utility:
@@ -164,7 +164,7 @@ def _deduplicate_services(
     return services
 
 
-class ControlPanelState:
+class WebPanelState:
     """In-memory state for bounded maintenance actions."""
 
     def __init__(self, manifest: dict[str, Any]) -> None:
@@ -304,7 +304,213 @@ class ControlPanelState:
             self.action_output = output.strip()
 
 
-def render_page(state: ControlPanelState) -> str:
+_PAGE_STYLE = """
+:root {
+  --bg: #f4f6f8;
+  --panel: #fff;
+  --text: #17202a;
+  --muted: #667085;
+  --line: #dce2e8;
+  --accent: #2457c5;
+  --accent-soft: #eaf0ff;
+  --ok: #167044;
+  --bad: #b32929;
+  --shadow: 0 12px 36px rgb(18 32 52 / 7%);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101419;
+    --panel: #181e25;
+    --text: #eef2f6;
+    --muted: #a5afbd;
+    --line: #303945;
+    --accent: #91adff;
+    --accent-soft: #202c49;
+    --ok: #76d69d;
+    --bad: #ff9b9b;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, sans-serif;
+}
+main { max-width: 920px; margin: auto; padding: 44px 20px 64px; }
+header { margin-bottom: 36px; }
+.eyebrow, .section-kicker {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: .75rem;
+  font-weight: 750;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 6vw, 3.25rem);
+  letter-spacing: -.045em;
+  line-height: 1.06;
+}
+.lede { max-width: 620px; margin: 12px 0 0; color: var(--muted); }
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 22px 0 0;
+}
+.meta div {
+  display: flex;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+}
+.meta dt { color: var(--muted); }
+.meta dd { margin: 0; font-weight: 650; }
+section { margin-top: 36px; }
+.section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 13px;
+}
+h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.015em; }
+.count { color: var(--muted); font-size: .85rem; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 11px;
+}
+.card {
+  display: flex;
+  min-height: 132px;
+  flex-direction: column;
+  gap: 5px;
+  padding: 17px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  text-decoration: none;
+}
+.card:hover { border-color: var(--accent); }
+.card:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.card-description { color: var(--muted); font-size: .9rem; }
+.card-url {
+  margin-top: auto;
+  color: var(--accent);
+  font-size: .8rem;
+  overflow-wrap: anywhere;
+}
+.access-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.access-list li {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 4px 18px;
+  padding: 14px 17px;
+  border-bottom: 1px solid var(--line);
+}
+.access-list li:last-child { border: 0; }
+.access-list span { grid-column: 2; color: var(--muted); font-size: .88rem; }
+code { overflow-wrap: anywhere; }
+.empty {
+  margin: 0;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+}
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.action p { max-width: 590px; margin: 4px 0 0; color: var(--muted); }
+button {
+  border: 0;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--panel);
+  font: inherit;
+  font-weight: 750;
+  padding: 10px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:disabled { opacity: .58; cursor: wait; }
+.status {
+  margin: 0 0 30px;
+  padding: 15px 17px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.status.complete { border-left-color: var(--ok); }
+.status.failed { border-left-color: var(--bad); }
+.status p { margin: 2px 0 0; }
+details { margin-top: 10px; }
+summary { width: max-content; cursor: pointer; color: var(--accent); }
+pre {
+  max-height: 22rem;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  white-space: pre-wrap;
+  font-size: .8rem;
+}
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 48px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: .85rem;
+}
+@media (max-width: 560px) {
+  main { padding-top: 30px; }
+  .access-list li { grid-template-columns: 1fr; }
+  .access-list span { grid-column: 1; }
+  .action { align-items: stretch; flex-direction: column; }
+  button { width: 100%; }
+  footer { flex-direction: column; }
+}
+""".strip()
+
+
+def _system_type_label(value: str) -> str:
+    words = value.replace("_", " ").replace("-", " ").split()
+    return " ".join("VM" if word.lower() == "vm" else word.capitalize() for word in words)
+
+
+def render_page(state: WebPanelState) -> str:
     """Render a small no-JavaScript dashboard from current capability state."""
 
     manifest = state.manifest
@@ -312,13 +518,18 @@ def render_page(state: ControlPanelState) -> str:
         manifest["services"], discover_infra_web_services()
     )
     service_cards = "".join(
-        '<a class="card" href="{}"><strong>{}</strong><span>{}</span></a>'.format(
+        (
+            '<a class="card" href="{}"><strong>{}</strong>'
+            '<span class="card-description">{}</span>'
+            '<span class="card-url">{} &#8599;</span></a>'
+        ).format(
             html.escape(record["url"], quote=True),
             html.escape(record["label"]),
-            html.escape(record["description"] or record["url"]),
+            html.escape(record["description"] or "Open this service"),
+            html.escape(record["url"]),
         )
         for record in services
-    ) or '<p class="empty">No hosted web services were detected.</p>'
+    ) or '<p class="empty">No hosted web services are available on this machine.</p>'
 
     access_rows = "".join(
         "<li><strong>{}</strong><code>{}</code><span>{}</span></li>".format(
@@ -329,47 +540,80 @@ def render_page(state: ControlPanelState) -> str:
         for record in manifest["access"]
         if isinstance(record, dict) and record.get("value")
     )
+    access_content = (
+        f'<ul class="access-list">{access_rows}</ul>'
+        if access_rows
+        else '<p class="empty">No additional access methods are configured.</p>'
+    )
 
     action = ""
     if state.t3_update_available():
-        disabled = " disabled" if state.action_status == "running" else ""
-        action = f'''<section><h2>Maintenance</h2>
-<div class="action"><div><strong>T3 Code</strong><p>Install the latest upstream release and verify the managed service.</p></div>
+        running = state.action_status == "running"
+        disabled = " disabled" if running else ""
+        button_label = "Update in progress…" if running else "Update to latest"
+        action = f'''<section aria-labelledby="maintenance-heading">
+<div class="section-heading"><div><p class="section-kicker">Available action</p>
+<h2 id="maintenance-heading">Maintenance</h2></div></div>
+<div class="action"><div><strong>T3 Code</strong><p>Install the latest upstream release, then verify that the managed service is ready. This runs in the background.</p></div>
 <form method="post" action="/actions/t3-update">
 <input type="hidden" name="csrf" value="{html.escape(state.csrf_token, quote=True)}">
-<button type="submit"{disabled}>Update T3 Code</button></form></div></section>'''
+<button type="submit"{disabled}>{button_label}</button></form></div></section>'''
 
     status = ""
     if state.action_message:
         output = (
-            f"<details><summary>Command output</summary><pre>{html.escape(state.action_output)}</pre></details>"
+            f"<details><summary>View command output</summary><pre>{html.escape(state.action_output)}</pre></details>"
             if state.action_output
             else ""
         )
+        role = "alert" if state.action_status == "failed" else "status"
         status = (
-            f'<aside class="status {html.escape(state.action_status)}">'
-            f"{html.escape(state.action_message)}{output}</aside>"
+            f'<aside class="status {html.escape(state.action_status)}" role="{role}" '
+            f'aria-live="polite"><strong>Maintenance status</strong>'
+            f"<p>{html.escape(state.action_message)}</p>{output}</aside>"
         )
+
+    title = html.escape(str(manifest.get("title") or "Managed machine"))
+    host = html.escape(manifest["host"])
+    username = html.escape(manifest["username"])
+    system_type = html.escape(_system_type_label(manifest["system_type"]))
+    refresh = (
+        '<meta http-equiv="refresh" content="3">'
+        if state.action_status == "running"
+        else ""
+    )
+    service_count = f"{len(services)} service" + ("" if len(services) == 1 else "s")
+    access_count = sum(
+        1
+        for record in manifest["access"]
+        if isinstance(record, dict) and record.get("value")
+    )
+    access_label = f"{access_count} method" + ("" if access_count == 1 else "s")
 
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>{html.escape(manifest.get("title") or "infra-tools control panel")}</title>
-<style>
-:root{{--bg:#f6f7f9;--panel:#fff;--text:#18202a;--muted:#667085;--line:#dde2e8;--accent:#2859c5;--ok:#176b3a;--bad:#a12a2a}}@media(prefers-color-scheme:dark){{:root{{--bg:#11151a;--panel:#181e25;--text:#edf2f7;--muted:#a5afbd;--line:#303944;--accent:#87aaff;--ok:#72d69a;--bad:#ff9999}}}}*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,sans-serif}}main{{max-width:880px;margin:auto;padding:48px 20px 72px}}header{{margin-bottom:36px}}h1{{font-size:clamp(1.8rem,5vw,2.7rem);margin:0 0 5px;letter-spacing:-.04em}}h2{{font-size:1rem;margin:34px 0 14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}}p{{margin:.25rem 0;color:var(--muted)}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}}.card{{display:flex;flex-direction:column;gap:3px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);text-decoration:none}}.card:hover{{border-color:var(--accent)}}.card span,.empty,li span{{color:var(--muted);font-size:.9rem}}ul{{list-style:none;padding:0;margin:0;border:1px solid var(--line);border-radius:10px;background:var(--panel)}}li{{display:grid;grid-template-columns:130px 1fr;gap:4px 16px;padding:13px 16px;border-bottom:1px solid var(--line)}}li:last-child{{border:0}}li span{{grid-column:2}}code{{overflow-wrap:anywhere}}.action{{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}}button{{border:0;border-radius:8px;background:var(--accent);color:white;font-weight:700;padding:10px 14px;cursor:pointer;white-space:nowrap}}button:disabled{{opacity:.55;cursor:wait}}.status{{margin:20px 0;padding:14px 16px;border-left:4px solid var(--accent);background:var(--panel)}}.status.complete{{border-color:var(--ok)}}.status.failed{{border-color:var(--bad)}}details{{margin-top:8px}}pre{{max-height:22rem;overflow:auto;white-space:pre-wrap;font-size:.8rem}}footer{{margin-top:42px;color:var(--muted)}}@media(max-width:560px){{li{{grid-template-columns:1fr}}li span{{grid-column:1}}.action{{align-items:flex-start;flex-direction:column}}}}
-</style></head><body><main>
-<header><h1>{html.escape(manifest.get("title") or "Control panel")}</h1>
-<p>{html.escape(manifest["system_type"])} · {html.escape(manifest["host"])} · signed in as {html.escape(manifest["username"])}</p></header>
-{status}<section><h2>Web services</h2><div class="grid">{service_cards}</div></section>
-<section><h2>Access</h2><ul>{access_rows}</ul></section>{action}
-<footer>Managed by infra-tools</footer></main></body></html>'''
+<meta name="color-scheme" content="light dark">{refresh}
+<title>Web panel · {title}</title>
+<style>{_PAGE_STYLE}</style></head><body><main>
+<header><p class="eyebrow">infra-tools web panel</p><h1>{title}</h1>
+<p class="lede">Services, connection details, and available maintenance for <code>{host}</code>.</p>
+<dl class="meta"><div><dt>System</dt><dd>{system_type}</dd></div>
+<div><dt>User</dt><dd>{username}</dd></div></dl></header>
+{status}<section aria-labelledby="services-heading"><div class="section-heading"><div>
+<p class="section-kicker">Open in browser</p><h2 id="services-heading">Web services</h2></div>
+<span class="count">{service_count}</span></div><div class="grid">{service_cards}</div></section>
+<section aria-labelledby="access-heading"><div class="section-heading"><div>
+<p class="section-kicker">Connect directly</p><h2 id="access-heading">Access</h2></div>
+<span class="count">{access_label}</span></div>{access_content}</section>{action}
+<footer><span>Managed by infra-tools</span><span>Authenticated as {username}</span></footer>
+</main></body></html>'''
 
 
-class ControlPanelHandler(BaseHTTPRequestHandler):
-    server_version = "infra-tools-control-panel/1"
+class WebPanelHandler(BaseHTTPRequestHandler):
+    server_version = "infra-tools-web-panel/1"
     sys_version = ""
-    state: ControlPanelState
+    state: WebPanelState
 
     def _send(self, status: HTTPStatus, body: str, content_type: str) -> None:
         payload = body.encode("utf-8")
@@ -438,7 +682,7 @@ class _ThreadingTCPHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Serve the infra-tools control panel")
+    parser = argparse.ArgumentParser(description="Serve the infra-tools web panel")
     parser.add_argument("--config", required=True)
     listener = parser.add_mutually_exclusive_group(required=True)
     listener.add_argument("--socket")
@@ -449,21 +693,21 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    state = ControlPanelState(_load_manifest(args.config))
-    ControlPanelHandler.state = state
+    state = WebPanelState(_load_manifest(args.config))
+    WebPanelHandler.state = state
     if args.socket:
         if os.path.lexists(args.socket):
             if os.path.islink(args.socket) or not os.path.exists(args.socket):
-                raise RuntimeError(f"Refusing unsafe control-panel socket: {args.socket}")
+                raise RuntimeError(f"Refusing unsafe web panel socket: {args.socket}")
             os.unlink(args.socket)
         server: socketserver.BaseServer = _ThreadingUnixHTTPServer(
-            args.socket, ControlPanelHandler
+            args.socket, WebPanelHandler
         )
         os.chmod(args.socket, 0o660)
     else:
         if not 1 <= args.port <= 65535:
             raise ValueError("--port must be between 1 and 65535")
-        server = _ThreadingTCPHTTPServer((args.listen, args.port), ControlPanelHandler)
+        server = _ThreadingTCPHTTPServer((args.listen, args.port), WebPanelHandler)
     try:
         server.serve_forever(poll_interval=0.5)
     finally:

@@ -8,7 +8,7 @@ import argparse
 from lib.config import (
     AGENT_TOOLS,
     BROWSER_AUTOMATION_PROVIDERS,
-    CONTROL_PANEL_DEFAULT_PORT_SENTINEL,
+    WEB_PANEL_DEFAULT_PORT_SENTINEL,
     DEVICE_PAIRING_PROVIDERS,
     EDITORS,
     GIT_ACCESS_POLICIES,
@@ -907,37 +907,37 @@ def add_setup_arguments(
                 "staging (the portal username defaults to the setup username)"
             ),
         )
-    control_panel_group = parser.add_mutually_exclusive_group()
-    control_panel_group.add_argument(
-        "--control-panel",
-        dest="control_panel_port",
+    web_panel_group = parser.add_mutually_exclusive_group()
+    web_panel_group.add_argument(
+        "--web-panel",
+        dest="web_panel_port",
         nargs="?",
-        const=CONTROL_PANEL_DEFAULT_PORT_SENTINEL,
+        const=WEB_PANEL_DEFAULT_PORT_SENTINEL,
         type=int,
         metavar="PORT",
         help=(
-            "Install the Basic-Auth infra-tools control panel; the optional "
+            "Install the authenticated infra-tools web panel; the optional "
             "port defaults to 80, or 443 with --ssl"
         ),
     )
-    control_panel_group.add_argument(
-        "--no-control-panel",
-        dest="disable_control_panel",
+    web_panel_group.add_argument(
+        "--no-web-panel",
+        dest="disable_web_panel",
         action="store_true",
-        help="Remove the managed control panel and its Basic Auth credentials",
+        help="Remove the managed web panel and its Basic Auth credentials",
     )
     parser.add_argument(
-        "--control-panel-payload",
+        "--web-panel-payload",
         action="store_true",
         help=argparse.SUPPRESS,
     )
     if not for_remote:
         parser.add_argument(
-            "--control-panel-password",
-            dest="control_panel_auth_password",
+            "--web-panel-password",
+            dest="web_panel_auth_password",
             metavar="PASSWORD",
             help=(
-                "Controller-local control-panel password; transient and hashed "
+                "Controller-local web panel password; transient and hashed "
                 "before staging (the username is the setup username)"
             ),
         )

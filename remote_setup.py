@@ -50,7 +50,7 @@ from lib.types import Deployments, StepFunc
 
 REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
 REMOTE_DEVICE_PAIRING_PAYLOAD_DIR = "/opt/infra_tools/device_pairing_payload"
-REMOTE_CONTROL_PANEL_PAYLOAD_DIR = "/opt/infra_tools/control_panel_payload"
+REMOTE_WEB_PANEL_PAYLOAD_DIR = "/opt/infra_tools/web_panel_payload"
 SETUP_OPERATION_FILE = os.path.join(STATE_DIR, "setup-operation.json")
 _active_setup_operation: Optional[tuple[OperationStateStore, OperationRecord]] = None
 
@@ -148,7 +148,7 @@ def _remove_secret_payloads() -> None:
     for payload_dir in (
         REMOTE_AGENT_PAYLOAD_DIR,
         REMOTE_DEVICE_PAIRING_PAYLOAD_DIR,
-        REMOTE_CONTROL_PANEL_PAYLOAD_DIR,
+        REMOTE_WEB_PANEL_PAYLOAD_DIR,
     ):
         if not os.path.isdir(payload_dir):
             continue

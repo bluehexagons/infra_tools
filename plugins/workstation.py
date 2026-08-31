@@ -87,7 +87,7 @@ def build_workstation_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
 
     from plugins.common import (
         extend_agent_steps,
-        extend_control_panel_steps,
+        extend_web_panel_steps,
         extend_control_plane_steps,
         extend_package_steps,
         extend_runtime_steps,
@@ -133,6 +133,6 @@ def build_workstation_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_app_server_steps(config, steps)
     extend_build_server_steps(config, steps)
     extend_syncthing_steps(config, steps)
-    extend_control_panel_steps(config, steps)
+    extend_web_panel_steps(config, steps)
     steps.extend(get_final_steps(config))
     return steps

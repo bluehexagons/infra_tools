@@ -90,7 +90,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     from plugins.common import (
         extend_package_steps,
         extend_agent_steps,
-        extend_control_panel_steps,
+        extend_web_panel_steps,
         extend_control_plane_steps,
         extend_runtime_steps,
         get_cli_steps,
@@ -112,7 +112,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         steps.extend(get_web_firewall_steps())
     elif config.system_type == "server_lite" and (
         config.effective_web_ports()
-        or config.disable_control_panel
+        or config.disable_web_panel
         or config.effective_access_sources()
         or config.clear_access_sources
         or config.clear_lan_access
@@ -143,6 +143,6 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_antistatic_steps(config, steps)
     extend_gogs_steps(config, steps)
     extend_syncthing_steps(config, steps)
-    extend_control_panel_steps(config, steps)
+    extend_web_panel_steps(config, steps)
     steps.extend(get_final_steps(config))
     return steps

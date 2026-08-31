@@ -770,44 +770,44 @@ def validate_web_port_settings(config: Any) -> None:
             raise ValueError("--web-port must be between 1 and 65535")
 
 
-def validate_control_panel_settings(config: Any) -> None:
-    """Validate the optional authenticated control-panel listener and secret."""
+def validate_web_panel_settings(config: Any) -> None:
+    """Validate the optional authenticated web panel listener and secret."""
 
-    port = getattr(config, "control_panel_port", None)
-    password = getattr(config, "control_panel_auth_password", None)
-    payload = bool(getattr(config, "control_panel_payload", False))
-    disabled = bool(getattr(config, "disable_control_panel", False))
+    port = getattr(config, "web_panel_port", None)
+    password = getattr(config, "web_panel_auth_password", None)
+    payload = bool(getattr(config, "web_panel_payload", False))
+    disabled = bool(getattr(config, "disable_web_panel", False))
     if port is None:
         if password is not None or payload:
             raise ValueError(
-                "--control-panel-password requires --control-panel"
+                "--web-panel-password requires --web-panel"
             )
         return
     if disabled:
-        raise ValueError("--control-panel cannot be combined with --no-control-panel")
+        raise ValueError("--web-panel cannot be combined with --no-web-panel")
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
-        raise ValueError("--control-panel PORT must be between 1 and 65535")
+        raise ValueError("--web-panel PORT must be between 1 and 65535")
     if port == 8443:
         raise ValueError(
-            "--control-panel PORT 8443 is reserved for the shared internal HTTPS host"
+            "--web-panel PORT 8443 is reserved for the shared internal HTTPS host"
         )
     if getattr(config, "system_type", None) == "server_proxmox":
-        raise ValueError("--control-panel is not supported on a Proxmox host")
+        raise ValueError("--web-panel is not supported on a Proxmox host")
     if password is not None:
         if not isinstance(password, str) or not password:
-            raise ValueError("--control-panel-password must not be empty")
-        validate_no_control_characters(password, "Control-panel password")
+            raise ValueError("--web-panel-password must not be empty")
+        validate_no_control_characters(password, "Web panel password")
     if getattr(config, "web_interfaces", None) and port == getattr(
         config, "web_interface_port", 3773
     ):
         raise ValueError(
-            "--control-panel PORT must differ from --web-interface-port"
+            "--web-panel PORT must differ from --web-interface-port"
         )
     if getattr(config, "device_pairing_providers", None) and port == getattr(
         config, "device_pairing_port", 3774
     ):
         raise ValueError(
-            "--control-panel PORT must differ from --device-pairing-port"
+            "--web-panel PORT must differ from --device-pairing-port"
         )
 
 

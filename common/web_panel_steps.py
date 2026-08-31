@@ -1,4 +1,4 @@
-"""Install the optional authenticated infra-tools browser control panel."""
+"""Install the optional authenticated infra-tools web panel."""
 
 from __future__ import annotations
 
@@ -20,33 +20,33 @@ from lib.validation import validate_filesystem_path
 from lib.validators import validate_username
 
 
-CONTROL_PANEL_SERVICE_NAME = "infra-tools-control-panel"
-CONTROL_PANEL_SERVICE_FILE = f"/etc/systemd/system/{CONTROL_PANEL_SERVICE_NAME}.service"
-CONTROL_PANEL_CONFIG_DIR = "/etc/infra-tools/control-panel"
-CONTROL_PANEL_MANIFEST = f"{CONTROL_PANEL_CONFIG_DIR}/config.json"
-CONTROL_PANEL_AUTH_FILE = f"{CONTROL_PANEL_CONFIG_DIR}/htpasswd"
-CONTROL_PANEL_PAYLOAD_FILE = "/opt/infra_tools/control_panel_payload/htpasswd"
-CONTROL_PANEL_SOCKET = "/run/infra-tools-control-panel/http.sock"
-CONTROL_PANEL_SCRIPT = "/opt/infra_tools/common/service_tools/control_panel_service.py"
-CONTROL_PANEL_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-control-panel"
-CONTROL_PANEL_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-control-panel"
-CONTROL_PANEL_AUTH_FAILURE_LOG = "/var/log/nginx/infra-tools-control-panel-auth-failures.log"
-_NGINX_MARKER = "# Managed by infra_tools control panel"
-_SERVICE_MARKER = "# Managed by infra_tools control panel"
+WEB_PANEL_SERVICE_NAME = "infra-tools-web-panel"
+WEB_PANEL_SERVICE_FILE = f"/etc/systemd/system/{WEB_PANEL_SERVICE_NAME}.service"
+WEB_PANEL_CONFIG_DIR = "/etc/infra-tools/web-panel"
+WEB_PANEL_MANIFEST = f"{WEB_PANEL_CONFIG_DIR}/config.json"
+WEB_PANEL_AUTH_FILE = f"{WEB_PANEL_CONFIG_DIR}/htpasswd"
+WEB_PANEL_PAYLOAD_FILE = "/opt/infra_tools/web_panel_payload/htpasswd"
+WEB_PANEL_SOCKET = "/run/infra-tools-web-panel/http.sock"
+WEB_PANEL_SCRIPT = "/opt/infra_tools/common/service_tools/web_panel_service.py"
+WEB_PANEL_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-web-panel"
+WEB_PANEL_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-web-panel"
+WEB_PANEL_AUTH_FAILURE_LOG = "/var/log/nginx/infra-tools-web-panel-auth-failures.log"
+_NGINX_MARKER = "# Managed by infra_tools web panel"
+_SERVICE_MARKER = "# Managed by infra_tools web panel"
 
 
 def _url_host(host: str) -> str:
     return f"[{host}]" if ":" in host and not host.startswith("[") else host
 
 
-def control_panel_url(config: SetupConfig) -> str | None:
-    """Return the externally useful control-panel URL for summaries."""
+def web_panel_url(config: SetupConfig) -> str | None:
+    """Return the externally useful web panel URL for summaries."""
 
-    if config.control_panel_port is None:
+    if config.web_panel_port is None:
         return None
     scheme = "https" if config.enable_ssl else "http"
     default_port = 443 if scheme == "https" else 80
-    suffix = "" if config.control_panel_port == default_port else f":{config.control_panel_port}"
+    suffix = "" if config.web_panel_port == default_port else f":{config.web_panel_port}"
     return f"{scheme}://{_url_host(config.host)}{suffix}/"
 
 
@@ -81,7 +81,7 @@ def _preferred_host(config: SetupConfig, identities: list[str]) -> str:
     )
 
 
-def build_control_panel_manifest(
+def build_web_panel_manifest(
     config: SetupConfig,
     identities: list[str],
 ) -> dict[str, Any]:
@@ -98,7 +98,7 @@ def build_control_panel_manifest(
     ]
 
     if config.system_type == "server_web" and not (
-        config.control_panel_port == 80 and not config.enable_ssl
+        config.web_panel_port == 80 and not config.enable_ssl
     ):
         services.append(
             {
@@ -167,7 +167,9 @@ def build_control_panel_manifest(
                     }
                 )
 
-    title = config.friendly_name or config.system_hostname or "infra-tools control panel"
+    title = config.friendly_name or config.system_hostname or _preferred_host(
+        config, identities
+    )
     return {
         "version": 1,
         "title": title,
@@ -180,7 +182,7 @@ def build_control_panel_manifest(
     }
 
 
-def render_control_panel_nginx(
+def render_web_panel_nginx(
     identities: list[str],
     port: int,
     *,
@@ -197,35 +199,35 @@ def render_control_panel_nginx(
     ssl_certificate {cert_path};
     ssl_certificate_key {key_path};
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:infra_tools_control_panel:10m;
+    ssl_session_cache shared:infra_tools_web_panel:10m;
     ssl_session_timeout 1d;
 """
     server_names = " ".join(_url_host(identity) for identity in identities)
     return f"""{_NGINX_MARKER}
-limit_req_zone $binary_remote_addr zone=infra_tools_control_panel_auth:10m rate=5r/m;
+limit_req_zone $binary_remote_addr zone=infra_tools_web_panel_auth:10m rate=5r/m;
 
-map $status $infra_tools_control_panel_auth_failure {{
+map $status $infra_tools_web_panel_auth_failure {{
     default 0;
     401 1;
 }}
 
-log_format infra_tools_control_panel_auth '$remote_addr [$time_local] infra-tools-auth-failure';
+log_format infra_tools_web_panel_auth '$remote_addr [$time_local] infra-tools-auth-failure';
 
 server {{
     listen {port}{listen_options};
     listen [::]:{port}{listen_options};
     server_name {server_names};
 {tls}
-    access_log {CONTROL_PANEL_AUTH_FAILURE_LOG} infra_tools_control_panel_auth
-        if=$infra_tools_control_panel_auth_failure;
-    auth_basic "infra-tools control panel";
-    auth_basic_user_file {CONTROL_PANEL_AUTH_FILE};
+    access_log {WEB_PANEL_AUTH_FAILURE_LOG} infra_tools_web_panel_auth
+        if=$infra_tools_web_panel_auth_failure;
+    auth_basic "infra-tools web panel";
+    auth_basic_user_file {WEB_PANEL_AUTH_FILE};
     client_max_body_size 16k;
 
     location / {{
-        limit_req zone=infra_tools_control_panel_auth burst=5 nodelay;
+        limit_req zone=infra_tools_web_panel_auth burst=5 nodelay;
         limit_req_status 429;
-        proxy_pass http://unix:{CONTROL_PANEL_SOCKET}:/;
+        proxy_pass http://unix:{WEB_PANEL_SOCKET}:/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -243,16 +245,16 @@ def _validate_htpasswd_file(
     expected_username: str | None = None,
 ) -> None:
     if os.path.islink(path) or not os.path.isfile(path):
-        raise RuntimeError(f"Control-panel auth must be a regular file: {path}")
+        raise RuntimeError(f"Web panel auth must be a regular file: {path}")
     if not 0 < os.path.getsize(path) <= 64 * 1024:
-        raise RuntimeError("Control-panel auth file is empty or too large")
+        raise RuntimeError("Web panel auth file is empty or too large")
     try:
         with open(path, encoding="utf-8") as file_obj:
             records = [line.rstrip("\n") for line in file_obj if line.rstrip("\n")]
     except UnicodeDecodeError as exc:
-        raise RuntimeError("Control-panel auth file must be UTF-8 text") from exc
+        raise RuntimeError("Web panel auth file must be UTF-8 text") from exc
     if not records:
-        raise RuntimeError("Control-panel auth file has no user records")
+        raise RuntimeError("Web panel auth file has no user records")
     usernames: list[str] = []
     for record in records:
         username, separator, password_hash = record.partition(":")
@@ -262,43 +264,43 @@ def _validate_htpasswd_file(
             or not password_hash.startswith("$")
             or any(ord(character) < 32 or ord(character) == 127 for character in record)
         ):
-            raise RuntimeError("Control-panel auth file contains an invalid record")
+            raise RuntimeError("Web panel auth file contains an invalid record")
         usernames.append(username)
     if expected_username is not None and usernames != [expected_username]:
         raise RuntimeError(
-            "Control-panel auth must contain exactly the setup username; "
-            "supply --control-panel-password to replace it"
+            "Web panel auth must contain exactly the setup username; "
+            "supply --web-panel-password to replace it"
         )
 
 
 def _replace_auth_file(payload: bytes) -> None:
-    descriptor, temporary = tempfile.mkstemp(prefix=".htpasswd-", dir=CONTROL_PANEL_CONFIG_DIR)
+    descriptor, temporary = tempfile.mkstemp(prefix=".htpasswd-", dir=WEB_PANEL_CONFIG_DIR)
     try:
         with os.fdopen(descriptor, "wb") as file_obj:
             file_obj.write(payload)
         os.chmod(temporary, 0o640)
-        os.replace(temporary, CONTROL_PANEL_AUTH_FILE)
+        os.replace(temporary, WEB_PANEL_AUTH_FILE)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
 
 
 def _install_auth_file(expected_username: str) -> tuple[bool, bytes | None]:
-    validate_filesystem_path(CONTROL_PANEL_CONFIG_DIR, must_exist=False)
-    if os.path.lexists(CONTROL_PANEL_CONFIG_DIR) and (
-        os.path.islink(CONTROL_PANEL_CONFIG_DIR)
-        or not os.path.isdir(CONTROL_PANEL_CONFIG_DIR)
+    validate_filesystem_path(WEB_PANEL_CONFIG_DIR, must_exist=False)
+    if os.path.lexists(WEB_PANEL_CONFIG_DIR) and (
+        os.path.islink(WEB_PANEL_CONFIG_DIR)
+        or not os.path.isdir(WEB_PANEL_CONFIG_DIR)
     ):
-        raise RuntimeError(f"Refusing unsafe control-panel config path: {CONTROL_PANEL_CONFIG_DIR}")
-    os.makedirs(CONTROL_PANEL_CONFIG_DIR, mode=0o750, exist_ok=True)
+        raise RuntimeError(f"Refusing unsafe web panel config path: {WEB_PANEL_CONFIG_DIR}")
+    os.makedirs(WEB_PANEL_CONFIG_DIR, mode=0o750, exist_ok=True)
     existing = None
-    if os.path.lexists(CONTROL_PANEL_AUTH_FILE):
-        _validate_htpasswd_file(CONTROL_PANEL_AUTH_FILE)
-        with open(CONTROL_PANEL_AUTH_FILE, "rb") as file_obj:
+    if os.path.lexists(WEB_PANEL_AUTH_FILE):
+        _validate_htpasswd_file(WEB_PANEL_AUTH_FILE)
+        with open(WEB_PANEL_AUTH_FILE, "rb") as file_obj:
             existing = file_obj.read()
-    if os.path.lexists(CONTROL_PANEL_PAYLOAD_FILE):
-        _validate_htpasswd_file(CONTROL_PANEL_PAYLOAD_FILE, expected_username)
-        with open(CONTROL_PANEL_PAYLOAD_FILE, "rb") as file_obj:
+    if os.path.lexists(WEB_PANEL_PAYLOAD_FILE):
+        _validate_htpasswd_file(WEB_PANEL_PAYLOAD_FILE, expected_username)
+        with open(WEB_PANEL_PAYLOAD_FILE, "rb") as file_obj:
             desired = file_obj.read()
         if existing != desired:
             _replace_auth_file(desired)
@@ -307,16 +309,16 @@ def _install_auth_file(expected_username: str) -> tuple[bool, bytes | None]:
             changed = False
     elif existing is None:
         raise RuntimeError(
-            "The control panel needs --control-panel-password on first setup"
+            "The web panel needs --web-panel-password on first setup"
         )
     else:
-        _validate_htpasswd_file(CONTROL_PANEL_AUTH_FILE, expected_username)
+        _validate_htpasswd_file(WEB_PANEL_AUTH_FILE, expected_username)
         changed = False
     web_account = pwd.getpwnam("www-data")
-    os.chown(CONTROL_PANEL_CONFIG_DIR, 0, web_account.pw_gid)
-    os.chmod(CONTROL_PANEL_CONFIG_DIR, 0o750)
-    os.chown(CONTROL_PANEL_AUTH_FILE, 0, web_account.pw_gid)
-    os.chmod(CONTROL_PANEL_AUTH_FILE, 0o640)
+    os.chown(WEB_PANEL_CONFIG_DIR, 0, web_account.pw_gid)
+    os.chmod(WEB_PANEL_CONFIG_DIR, 0o750)
+    os.chown(WEB_PANEL_AUTH_FILE, 0, web_account.pw_gid)
+    os.chmod(WEB_PANEL_AUTH_FILE, 0o640)
     return changed, existing
 
 
@@ -325,21 +327,21 @@ def _restore_auth_file(previous: bytes | None) -> None:
 
     if previous is None:
         try:
-            os.unlink(CONTROL_PANEL_AUTH_FILE)
+            os.unlink(WEB_PANEL_AUTH_FILE)
         except FileNotFoundError:
             return
     else:
         _replace_auth_file(previous)
         web_account = pwd.getpwnam("www-data")
-        os.chown(CONTROL_PANEL_AUTH_FILE, 0, web_account.pw_gid)
-        os.chmod(CONTROL_PANEL_AUTH_FILE, 0o640)
+        os.chown(WEB_PANEL_AUTH_FILE, 0, web_account.pw_gid)
+        os.chmod(WEB_PANEL_AUTH_FILE, 0o640)
     if shutil.which("nginx"):
         run("systemctl reload nginx", check=False)
 
 
 def _ensure_nginx() -> None:
     if not install_package("nginx", "nginx", "apt-get install -y -qq nginx"):
-        raise RuntimeError("Failed to install Nginx for the control panel")
+        raise RuntimeError("Failed to install Nginx for the web panel")
     if not is_service_active("nginx"):
         run("systemctl enable --now nginx", check=True)
 
@@ -347,40 +349,40 @@ def _ensure_nginx() -> None:
 def _restore_nginx_site(previous: str | None, link_created: bool) -> None:
     if previous is None:
         try:
-            os.unlink(CONTROL_PANEL_NGINX_SITE)
+            os.unlink(WEB_PANEL_NGINX_SITE)
         except FileNotFoundError:
             pass
     else:
-        write_text_atomic(CONTROL_PANEL_NGINX_SITE, previous, mode=0o644)
+        write_text_atomic(WEB_PANEL_NGINX_SITE, previous, mode=0o644)
     if link_created:
         try:
-            os.unlink(CONTROL_PANEL_NGINX_LINK)
+            os.unlink(WEB_PANEL_NGINX_LINK)
         except FileNotFoundError:
             pass
 
 
 def _write_nginx_site(content: str) -> bool:
     previous = None
-    if os.path.lexists(CONTROL_PANEL_NGINX_SITE):
-        if os.path.islink(CONTROL_PANEL_NGINX_SITE) or not os.path.isfile(CONTROL_PANEL_NGINX_SITE):
-            raise RuntimeError(f"Refusing unmanaged control-panel Nginx site: {CONTROL_PANEL_NGINX_SITE}")
-        with open(CONTROL_PANEL_NGINX_SITE, encoding="utf-8") as file_obj:
+    if os.path.lexists(WEB_PANEL_NGINX_SITE):
+        if os.path.islink(WEB_PANEL_NGINX_SITE) or not os.path.isfile(WEB_PANEL_NGINX_SITE):
+            raise RuntimeError(f"Refusing unmanaged web panel Nginx site: {WEB_PANEL_NGINX_SITE}")
+        with open(WEB_PANEL_NGINX_SITE, encoding="utf-8") as file_obj:
             previous = file_obj.read()
         if _NGINX_MARKER not in previous:
-            raise RuntimeError(f"Refusing unmanaged control-panel Nginx site: {CONTROL_PANEL_NGINX_SITE}")
+            raise RuntimeError(f"Refusing unmanaged web panel Nginx site: {WEB_PANEL_NGINX_SITE}")
     changed = previous != content
     if changed:
-        write_text_atomic(CONTROL_PANEL_NGINX_SITE, content, mode=0o644)
+        write_text_atomic(WEB_PANEL_NGINX_SITE, content, mode=0o644)
     link_created = False
-    if os.path.lexists(CONTROL_PANEL_NGINX_LINK):
+    if os.path.lexists(WEB_PANEL_NGINX_LINK):
         if not (
-            os.path.islink(CONTROL_PANEL_NGINX_LINK)
-            and os.path.realpath(CONTROL_PANEL_NGINX_LINK) == CONTROL_PANEL_NGINX_SITE
+            os.path.islink(WEB_PANEL_NGINX_LINK)
+            and os.path.realpath(WEB_PANEL_NGINX_LINK) == WEB_PANEL_NGINX_SITE
             and previous is not None
         ):
-            raise RuntimeError(f"Refusing unmanaged control-panel Nginx link: {CONTROL_PANEL_NGINX_LINK}")
+            raise RuntimeError(f"Refusing unmanaged web panel Nginx link: {WEB_PANEL_NGINX_LINK}")
     else:
-        os.symlink(CONTROL_PANEL_NGINX_SITE, CONTROL_PANEL_NGINX_LINK)
+        os.symlink(WEB_PANEL_NGINX_SITE, WEB_PANEL_NGINX_LINK)
         changed = True
         link_created = True
     try:
@@ -390,7 +392,7 @@ def _write_nginx_site(content: str) -> bool:
         raise
     if validation.returncode != 0:
         _restore_nginx_site(previous, link_created)
-        raise RuntimeError("Nginx rejected the control-panel configuration")
+        raise RuntimeError("Nginx rejected the web panel configuration")
     if changed:
         try:
             run("systemctl reload nginx", check=True)
@@ -416,27 +418,27 @@ def _systemd_quote(value: str) -> str:
 
 def _is_managed_service(content: str) -> bool:
     return _SERVICE_MARKER in content or (
-        "Description=infra-tools control panel" in content
-        and f"ExecStart=/usr/bin/python3 {CONTROL_PANEL_SCRIPT} " in content
+        "Description=infra-tools web panel" in content
+        and f"ExecStart=/usr/bin/python3 {WEB_PANEL_SCRIPT} " in content
     )
 
 
 def _restore_service(previous: str | None) -> None:
     if previous is None:
         run(
-            f"systemctl disable --now {CONTROL_PANEL_SERVICE_NAME}.service",
+            f"systemctl disable --now {WEB_PANEL_SERVICE_NAME}.service",
             check=False,
         )
         try:
-            os.unlink(CONTROL_PANEL_SERVICE_FILE)
+            os.unlink(WEB_PANEL_SERVICE_FILE)
         except FileNotFoundError:
             pass
     else:
-        write_text_atomic(CONTROL_PANEL_SERVICE_FILE, previous, mode=0o644)
+        write_text_atomic(WEB_PANEL_SERVICE_FILE, previous, mode=0o644)
     run("systemctl daemon-reload", check=False)
     if previous is not None:
         run(
-            f"systemctl restart {CONTROL_PANEL_SERVICE_NAME}.service",
+            f"systemctl restart {WEB_PANEL_SERVICE_NAME}.service",
             check=False,
         )
 
@@ -446,7 +448,7 @@ def _configure_service(config: SetupConfig, home: str) -> bool:
     service_home = home if service_user == config.username else "/nonexistent"
     content = f"""{_SERVICE_MARKER}
 [Unit]
-Description=infra-tools control panel
+Description=infra-tools web panel
 After=network-online.target nginx.service
 Wants=network-online.target
 
@@ -454,13 +456,13 @@ Wants=network-online.target
 Type=simple
 User={service_user}
 Group=www-data
-RuntimeDirectory=infra-tools-control-panel
+RuntimeDirectory=infra-tools-web-panel
 RuntimeDirectoryMode=0750
 UMask=0007
 Environment={_systemd_quote('HOME=' + service_home)}
 Environment=XDG_RUNTIME_DIR=/run/user/{pwd.getpwnam(service_user).pw_uid}
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{pwd.getpwnam(service_user).pw_uid}/bus
-ExecStart=/usr/bin/python3 {CONTROL_PANEL_SCRIPT} --config {CONTROL_PANEL_MANIFEST} --socket {CONTROL_PANEL_SOCKET}
+ExecStart=/usr/bin/python3 {WEB_PANEL_SCRIPT} --config {WEB_PANEL_MANIFEST} --socket {WEB_PANEL_SOCKET}
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
@@ -480,96 +482,96 @@ StandardError=journal
 WantedBy=multi-user.target
 """
     previous = None
-    if os.path.lexists(CONTROL_PANEL_SERVICE_FILE) and (
-        os.path.islink(CONTROL_PANEL_SERVICE_FILE)
-        or not os.path.isfile(CONTROL_PANEL_SERVICE_FILE)
+    if os.path.lexists(WEB_PANEL_SERVICE_FILE) and (
+        os.path.islink(WEB_PANEL_SERVICE_FILE)
+        or not os.path.isfile(WEB_PANEL_SERVICE_FILE)
     ):
         raise RuntimeError(
-            f"Refusing unmanaged control-panel service: {CONTROL_PANEL_SERVICE_FILE}"
+            f"Refusing unmanaged web panel service: {WEB_PANEL_SERVICE_FILE}"
         )
     try:
-        with open(CONTROL_PANEL_SERVICE_FILE, encoding="utf-8") as file_obj:
+        with open(WEB_PANEL_SERVICE_FILE, encoding="utf-8") as file_obj:
             previous = file_obj.read()
     except OSError:
         pass
     if previous is not None and not _is_managed_service(previous):
         raise RuntimeError(
-            f"Refusing unmanaged control-panel service: {CONTROL_PANEL_SERVICE_FILE}"
+            f"Refusing unmanaged web panel service: {WEB_PANEL_SERVICE_FILE}"
         )
     changed = previous != content
     try:
         if changed:
-            write_text_atomic(CONTROL_PANEL_SERVICE_FILE, content, mode=0o644)
+            write_text_atomic(WEB_PANEL_SERVICE_FILE, content, mode=0o644)
             run("systemctl daemon-reload", check=True)
-        run(f"systemctl enable {CONTROL_PANEL_SERVICE_NAME}.service", check=True)
+        run(f"systemctl enable {WEB_PANEL_SERVICE_NAME}.service", check=True)
         # The service reads its manifest only at startup, so restart even when
         # the unit itself is unchanged.
-        run(f"systemctl restart {CONTROL_PANEL_SERVICE_NAME}.service", check=True)
+        run(f"systemctl restart {WEB_PANEL_SERVICE_NAME}.service", check=True)
         for _attempt in range(25):
-            if os.path.exists(CONTROL_PANEL_SOCKET) and is_service_active(
-                CONTROL_PANEL_SERVICE_NAME
+            if os.path.exists(WEB_PANEL_SOCKET) and is_service_active(
+                WEB_PANEL_SERVICE_NAME
             ):
                 return changed
             time.sleep(0.2)
-        raise RuntimeError("The control-panel service did not create its HTTP socket")
+        raise RuntimeError("The web panel service did not create its HTTP socket")
     except Exception:
         if changed:
             _restore_service(previous)
         raise
 
 
-def _preflight_control_panel_removal() -> tuple[str | None, bool]:
-    if os.path.lexists(CONTROL_PANEL_SERVICE_FILE):
-        if os.path.islink(CONTROL_PANEL_SERVICE_FILE) or not os.path.isfile(
-            CONTROL_PANEL_SERVICE_FILE
+def _preflight_web_panel_removal() -> tuple[str | None, bool]:
+    if os.path.lexists(WEB_PANEL_SERVICE_FILE):
+        if os.path.islink(WEB_PANEL_SERVICE_FILE) or not os.path.isfile(
+            WEB_PANEL_SERVICE_FILE
         ):
             raise RuntimeError(
-                f"Refusing unmanaged control-panel service: {CONTROL_PANEL_SERVICE_FILE}"
+                f"Refusing unmanaged web panel service: {WEB_PANEL_SERVICE_FILE}"
             )
-        with open(CONTROL_PANEL_SERVICE_FILE, encoding="utf-8") as file_obj:
+        with open(WEB_PANEL_SERVICE_FILE, encoding="utf-8") as file_obj:
             service_content = file_obj.read()
         if not _is_managed_service(service_content):
             raise RuntimeError(
-                f"Refusing unmanaged control-panel service: {CONTROL_PANEL_SERVICE_FILE}"
+                f"Refusing unmanaged web panel service: {WEB_PANEL_SERVICE_FILE}"
             )
 
     nginx_content = None
-    if os.path.lexists(CONTROL_PANEL_NGINX_SITE):
-        if os.path.islink(CONTROL_PANEL_NGINX_SITE) or not os.path.isfile(
-            CONTROL_PANEL_NGINX_SITE
+    if os.path.lexists(WEB_PANEL_NGINX_SITE):
+        if os.path.islink(WEB_PANEL_NGINX_SITE) or not os.path.isfile(
+            WEB_PANEL_NGINX_SITE
         ):
             raise RuntimeError(
-                f"Refusing unmanaged control-panel Nginx site: {CONTROL_PANEL_NGINX_SITE}"
+                f"Refusing unmanaged web panel Nginx site: {WEB_PANEL_NGINX_SITE}"
             )
-        with open(CONTROL_PANEL_NGINX_SITE, encoding="utf-8") as file_obj:
+        with open(WEB_PANEL_NGINX_SITE, encoding="utf-8") as file_obj:
             nginx_content = file_obj.read()
         if _NGINX_MARKER not in nginx_content:
             raise RuntimeError(
-                f"Refusing unmanaged control-panel Nginx site: {CONTROL_PANEL_NGINX_SITE}"
+                f"Refusing unmanaged web panel Nginx site: {WEB_PANEL_NGINX_SITE}"
             )
 
-    link_exists = os.path.lexists(CONTROL_PANEL_NGINX_LINK)
+    link_exists = os.path.lexists(WEB_PANEL_NGINX_LINK)
     if link_exists and not (
         nginx_content is not None
-        and os.path.islink(CONTROL_PANEL_NGINX_LINK)
-        and os.path.realpath(CONTROL_PANEL_NGINX_LINK) == CONTROL_PANEL_NGINX_SITE
+        and os.path.islink(WEB_PANEL_NGINX_LINK)
+        and os.path.realpath(WEB_PANEL_NGINX_LINK) == WEB_PANEL_NGINX_SITE
     ):
         raise RuntimeError(
-            f"Refusing unmanaged control-panel Nginx link: {CONTROL_PANEL_NGINX_LINK}"
+            f"Refusing unmanaged web panel Nginx link: {WEB_PANEL_NGINX_LINK}"
         )
 
-    if os.path.lexists(CONTROL_PANEL_CONFIG_DIR) and (
-        os.path.islink(CONTROL_PANEL_CONFIG_DIR)
-        or not os.path.isdir(CONTROL_PANEL_CONFIG_DIR)
+    if os.path.lexists(WEB_PANEL_CONFIG_DIR) and (
+        os.path.islink(WEB_PANEL_CONFIG_DIR)
+        or not os.path.isdir(WEB_PANEL_CONFIG_DIR)
     ):
         raise RuntimeError(
-            f"Refusing unsafe control-panel config path: {CONTROL_PANEL_CONFIG_DIR}"
+            f"Refusing unsafe web panel config path: {WEB_PANEL_CONFIG_DIR}"
         )
-    for path in (CONTROL_PANEL_MANIFEST, CONTROL_PANEL_AUTH_FILE):
+    for path in (WEB_PANEL_MANIFEST, WEB_PANEL_AUTH_FILE):
         if os.path.lexists(path) and (
             os.path.islink(path) or not os.path.isfile(path)
         ):
-            raise RuntimeError(f"Refusing unsafe control-panel file: {path}")
+            raise RuntimeError(f"Refusing unsafe web panel file: {path}")
     return nginx_content, link_exists
 
 
@@ -577,21 +579,21 @@ def _remove_nginx_site(nginx_content: str | None, link_exists: bool) -> None:
     if nginx_content is None and not link_exists:
         return
     if link_exists:
-        os.unlink(CONTROL_PANEL_NGINX_LINK)
+        os.unlink(WEB_PANEL_NGINX_LINK)
     if nginx_content is not None:
-        os.unlink(CONTROL_PANEL_NGINX_SITE)
+        os.unlink(WEB_PANEL_NGINX_SITE)
     if not shutil.which("nginx"):
         return
     try:
         validation = run("nginx -t", check=False, capture_output=True)
         if validation.returncode != 0:
-            raise RuntimeError("Nginx is invalid after removing the control panel")
+            raise RuntimeError("Nginx is invalid after removing the web panel")
         run("systemctl reload nginx", check=True)
     except Exception:
         if nginx_content is not None:
-            write_text_atomic(CONTROL_PANEL_NGINX_SITE, nginx_content, mode=0o644)
-        if link_exists and not os.path.lexists(CONTROL_PANEL_NGINX_LINK):
-            os.symlink(CONTROL_PANEL_NGINX_SITE, CONTROL_PANEL_NGINX_LINK)
+            write_text_atomic(WEB_PANEL_NGINX_SITE, nginx_content, mode=0o644)
+        if link_exists and not os.path.lexists(WEB_PANEL_NGINX_LINK):
+            os.symlink(WEB_PANEL_NGINX_SITE, WEB_PANEL_NGINX_LINK)
         try:
             rollback_validation = run("nginx -t", check=False, capture_output=True)
             if rollback_validation.returncode == 0:
@@ -601,39 +603,39 @@ def _remove_nginx_site(nginx_content: str | None, link_exists: bool) -> None:
         raise
 
 
-def remove_control_panel() -> None:
+def remove_web_panel() -> None:
     """Remove the panel, authentication data, and public Nginx listener."""
 
-    nginx_content, link_exists = _preflight_control_panel_removal()
+    nginx_content, link_exists = _preflight_web_panel_removal()
     _remove_nginx_site(nginx_content, link_exists)
-    if os.path.exists(CONTROL_PANEL_SERVICE_FILE):
-        run(f"systemctl disable --now {CONTROL_PANEL_SERVICE_NAME}.service", check=False)
-        os.remove(CONTROL_PANEL_SERVICE_FILE)
+    if os.path.exists(WEB_PANEL_SERVICE_FILE):
+        run(f"systemctl disable --now {WEB_PANEL_SERVICE_NAME}.service", check=False)
+        os.remove(WEB_PANEL_SERVICE_FILE)
         run("systemctl daemon-reload", check=True)
-    if os.path.lexists(CONTROL_PANEL_CONFIG_DIR):
+    if os.path.lexists(WEB_PANEL_CONFIG_DIR):
         for name in ("config.json", "htpasswd"):
-            path = os.path.join(CONTROL_PANEL_CONFIG_DIR, name)
+            path = os.path.join(WEB_PANEL_CONFIG_DIR, name)
             if os.path.lexists(path):
                 os.remove(path)
         try:
-            os.rmdir(CONTROL_PANEL_CONFIG_DIR)
+            os.rmdir(WEB_PANEL_CONFIG_DIR)
         except OSError:
             pass
-    remove_nginx_auth_failure_ban("control-panel")
-    print("  ✓ Control panel removed")
+    remove_nginx_auth_failure_ban("web-panel")
+    print("  ✓ Web panel removed")
 
 
-def configure_control_panel(config: SetupConfig) -> None:
-    """Install, update, or remove the optional browser control panel."""
+def configure_web_panel(config: SetupConfig) -> None:
+    """Install, update, or remove the optional web panel."""
 
     if is_dry_run():
-        action = "remove" if config.disable_control_panel else "configure"
-        print(f"  [DRY-RUN] Would {action} the browser control panel")
+        action = "remove" if config.disable_web_panel else "configure"
+        print(f"  [DRY-RUN] Would {action} the web panel")
         return
-    if config.disable_control_panel:
-        remove_control_panel()
+    if config.disable_web_panel:
+        remove_web_panel()
         return
-    if config.control_panel_port is None:
+    if config.web_panel_port is None:
         return
 
     from common.godot_web_steps import (
@@ -661,9 +663,9 @@ def configure_control_panel(config: SetupConfig) -> None:
 
     auth_changed, previous_auth = _install_auth_file(config.username)
     try:
-        manifest = build_control_panel_manifest(config, identities)
-        os.makedirs(CONTROL_PANEL_CONFIG_DIR, mode=0o750, exist_ok=True)
-        write_json_atomic(CONTROL_PANEL_MANIFEST, manifest, mode=0o644, sort_keys=True)
+        manifest = build_web_panel_manifest(config, identities)
+        os.makedirs(WEB_PANEL_CONFIG_DIR, mode=0o750, exist_ok=True)
+        write_json_atomic(WEB_PANEL_MANIFEST, manifest, mode=0o644, sort_keys=True)
         account = (
             pwd.getpwnam(config.username)
             if config.username != "root"
@@ -671,9 +673,9 @@ def configure_control_panel(config: SetupConfig) -> None:
         )
         _configure_service(config, account.pw_dir)
         nginx_changed = _write_nginx_site(
-            render_control_panel_nginx(
+            render_web_panel_nginx(
                 identities,
-                config.control_panel_port,
+                config.web_panel_port,
                 cert_path=cert_path,
                 key_path=key_path,
             )
@@ -684,21 +686,21 @@ def configure_control_panel(config: SetupConfig) -> None:
         raise
     if auth_changed and not nginx_changed:
         run("systemctl reload nginx", check=True)
-    configure_nginx_auth_failure_ban("control-panel", CONTROL_PANEL_AUTH_FAILURE_LOG)
+    configure_nginx_auth_failure_ban("web-panel", WEB_PANEL_AUTH_FAILURE_LOG)
     scheme = "https" if config.enable_ssl else "http"
     host = _preferred_host(config, identities)
     print(
-        "  ✓ Control panel: "
-        + _http_url(host, config.control_panel_port, scheme)
+        "  ✓ Web panel: "
+        + _http_url(host, config.web_panel_port, scheme)
     )
     if not config.enable_ssl:
-        print("  ⚠ Control-panel Basic Auth uses plaintext HTTP; add --ssl for encrypted login")
+        print("  ⚠ Web panel Basic Auth uses plaintext HTTP; add --ssl for encrypted login")
 
 
 __all__ = [
-    "build_control_panel_manifest",
-    "configure_control_panel",
-    "control_panel_url",
-    "remove_control_panel",
-    "render_control_panel_nginx",
+    "build_web_panel_manifest",
+    "configure_web_panel",
+    "web_panel_url",
+    "remove_web_panel",
+    "render_web_panel_nginx",
 ]
