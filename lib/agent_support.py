@@ -25,6 +25,13 @@ _BROWSER_LAUNCHER_FEATURES = (
     "coordinate_input",
     "webgl_settle_delay",
 )
+_BROWSER_WORKFLOW_SKILLS = frozenset(
+    (
+        "infra-tools-browser-testing",
+        "infra-tools-playwright-testing",
+        "infra-tools-t3-preview-testing",
+    )
+)
 _BROWSER_ISSUES = frozenset(
     (
         "launchers_missing",
@@ -34,6 +41,7 @@ _BROWSER_ISSUES = frozenset(
         "registration_missing",
         "smoke_test_failed",
         "stale_processes",
+        "workflow_skill_missing_or_stale",
     )
 )
 _BROWSER_REMEDIATIONS = frozenset(
@@ -168,6 +176,17 @@ def build_agent_support_bundle(
         else []
     )
     browser_remediation = browser.get("remediation")
+    raw_browser_workflow_skills = browser.get("workflow_skills")
+    browser_workflow_skills = (
+        [
+            skill_name
+            for skill_name in raw_browser_workflow_skills
+            if isinstance(skill_name, str)
+            and skill_name in _BROWSER_WORKFLOW_SKILLS
+        ]
+        if isinstance(raw_browser_workflow_skills, list)
+        else []
+    )
     raw_development_toolchains = development.get("toolchains")
     development_toolchains = (
         raw_development_toolchains
@@ -250,6 +269,8 @@ def build_agent_support_bundle(
                 browser.get("running_processes")
             ),
             "registrations": browser["registrations"],
+            "workflow_skills": browser_workflow_skills,
+            "workflow_skill_ready": browser.get("workflow_skill_ready") is True,
             "configured": browser["configured"],
             "smoke_test": browser["smoke_test"],
             "healthy": browser["healthy"],

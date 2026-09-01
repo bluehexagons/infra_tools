@@ -54,25 +54,47 @@ continue server and HTTPS checks from the VM without bypassing verification,
 and report the browser coverage gap. Never use `curl -k`, ignore HTTPS errors,
 or disable TLS.
 
-If the user wants to restore collaborative preview access, run:
+For a managed `infra-web` URL, if the user wants to restore collaborative
+preview access, run:
 
 ```bash
 infra-web ca
 ```
 
-Give them the reported enrollment URL and SHA-256 fingerprint. They must verify
-the downloaded public certificate against that fingerprint before installing
-it:
+Give them the reported enrollment URL and SHA-256 fingerprint. If the
+untrusted URL cannot download its own CA, transfer only the public certificate
+over an existing trusted path:
+
+```bash
+scp USER@VM:/srv/infra-tools/web/infra-tools-ca.crt .
+```
+
+Never transfer the CA private key. Have the user verify the file with
+`sha256sum infra-tools-ca.crt` on Linux or
+`(Get-FileHash .\infra-tools-ca.crt -Algorithm SHA256).Hash` on Windows, then
+give only the matching platform step:
 
 - Debian-based Linux: place the verified `.crt` in
   `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates`.
+- Arch-based Linux: run `sudo trust anchor infra-tools-ca.crt` and
+  `sudo update-ca-trust`.
+- Fedora/RHEL-based Linux: place it in
+  `/etc/pki/ca-trust/source/anchors/` and run `sudo update-ca-trust extract`.
+- macOS: import it into the System keychain with Keychain Access, open the
+  certificate, and set **Trust** to **Always Trust**.
 - Windows current user: run
   `certutil -user -addstore -f Root .\infra-tools-ca.crt`.
 - ChromeOS: import it under certificate-manager **Authorities**; managed
   devices require an authorized administrator.
 - Android: use the CA certificate installation settings; an embedded app may
   still reject a user-added root.
+- iPhone/iPad: install the transferred profile, then enable it under **Settings
+  > General > About > Certificate Trust Settings**.
 
 The user performs this client security change. After enrollment, restart T3
 Code, recheck status, and retry the existing tab. If the user declines, leave
 the preview test skipped and finish with the remaining evidence.
+
+For a certificate error on any other HTTPS origin, use that origin's documented
+trust process or leave the client-origin check skipped; `infra-web ca` does not
+repair unrelated certificates.

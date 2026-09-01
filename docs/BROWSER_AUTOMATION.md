@@ -232,11 +232,13 @@ Add `--json` for automation. The capability is healthy only when both managed
 launchers are executable, root-owned regular files without group or world write
 access; explicit managed-Chromium selection and current private, bounded
 evidence, safe-coordinate, and one-second-settle defaults are present; every
-installed compatible agent has the managed MCP
-registration; active managed MCP processes use those same safe defaults; and
-the local interaction/rendering smoke test passes. A stale or unsafe launcher
-is unhealthy even when its smoke test passes; inspect an unsafe path, then
-rerun the saved setup to reconcile it. A stale active process instead requires
+installed compatible agent has the managed MCP registration; exactly one
+infra-tools-managed Playwright-capable browser workflow skill is installed as
+a bounded, user-owned file without group or world write access;
+active managed MCP processes use those same safe defaults; and the local
+interaction/rendering smoke test passes. A stale or unsafe launcher is
+unhealthy even when its smoke test passes; inspect an unsafe path, then rerun
+the saved setup to reconcile it. A stale active process instead requires
 restarting the agent session that owns it. If only one compatible agent was
 provisioned, list only that tool. The default doctor tool set still includes
 all terminal agents, so explicit `--tool` flags are useful on deliberately
@@ -249,6 +251,8 @@ Chromium smoke test while MCP still defaults to an unavailable Chrome channel;
 `rerun_setup_with_browser_automation` restores missing launchers or agent
 registration; `inspect_launcher_security_then_rerun_saved_setup` requires
 reviewing an unsafe managed path before reconciliation;
+`workflow_skill_missing_or_stale` identifies absent, incompatible, or multiple
+managed browser workflow variants and is repaired by the saved setup;
 `restart_agent_sessions` identifies MCP processes that were started before a
 launcher or trust-store update and must be restarted rather than reconfigured;
 and `inspect_browser_runtime` identifies an installation whose local Chromium

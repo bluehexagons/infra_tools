@@ -115,6 +115,7 @@ class ManagedT3AgentSkillTests(unittest.TestCase):
                 os.makedirs(directory)
                 with open(os.path.join(directory, "SKILL.md"), "w", encoding="utf-8") as file_obj:
                     file_obj.write("metadata:\n  managed-by: infra_tools\n")
+                os.chmod(os.path.join(directory, "SKILL.md"), 0o644)
 
             self.assertFalse(_t3_agent_skills_ready(home))
             browser_directory = os.path.join(
@@ -130,6 +131,26 @@ class ManagedT3AgentSkillTests(unittest.TestCase):
                 encoding="utf-8",
             ) as file_obj:
                 file_obj.write("metadata:\n  managed-by: infra_tools\n")
+            os.chmod(os.path.join(browser_directory, "SKILL.md"), 0o644)
+            self.assertTrue(_t3_agent_skills_ready(home))
+            stale_directory = os.path.join(
+                home,
+                ".agents",
+                "skills",
+                "infra-tools-playwright-testing",
+            )
+            os.makedirs(stale_directory)
+            stale_skill = os.path.join(stale_directory, "SKILL.md")
+            with open(stale_skill, "w", encoding="utf-8") as file_obj:
+                file_obj.write("metadata:\n  managed-by: infra_tools\n")
+            os.chmod(stale_skill, 0o644)
+            self.assertFalse(_t3_agent_skills_ready(home))
+            os.unlink(stale_skill)
+            self.assertTrue(_t3_agent_skills_ready(home))
+            browser_skill = os.path.join(browser_directory, "SKILL.md")
+            os.chmod(browser_skill, 0o666)
+            self.assertFalse(_t3_agent_skills_ready(home))
+            os.chmod(browser_skill, 0o644)
             self.assertTrue(_t3_agent_skills_ready(home))
             os.unlink(
                 os.path.join(

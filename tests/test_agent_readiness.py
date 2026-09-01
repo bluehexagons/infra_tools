@@ -113,6 +113,11 @@ class TestAgentReadinessState(unittest.TestCase):
                             "private_pid": 123,
                         },
                         "registrations": {"codex": True},
+                        "workflow_skills": [
+                            "infra-tools-playwright-testing",
+                            "/secret/browser-skill",
+                        ],
+                        "workflow_skill_ready": True,
                         "configured": True,
                         "smoke_test": True,
                         "issues": [],
@@ -153,6 +158,11 @@ class TestAgentReadinessState(unittest.TestCase):
             browser["running_processes"],
             {"total": 1, "stale": 0, "inspected": True},
         )
+        self.assertEqual(
+            browser["workflow_skills"],
+            ["infra-tools-playwright-testing"],
+        )
+        self.assertTrue(browser["workflow_skill_ready"])
         self.assertEqual(browser["issues"], [])
         self.assertIsNone(browser["remediation"])
 
@@ -167,6 +177,7 @@ class TestAgentReadinessState(unittest.TestCase):
                         "healthy": False,
                         "issues": [
                             "mcp_browser_selection_missing",
+                            "workflow_skill_missing_or_stale",
                             "/secret/browser",
                         ],
                         "remediation": "rerun_saved_setup",
@@ -179,7 +190,13 @@ class TestAgentReadinessState(unittest.TestCase):
 
         browser = record["capabilities"][0]
         self.assertFalse(record["healthy"])
-        self.assertEqual(browser["issues"], ["mcp_browser_selection_missing"])
+        self.assertEqual(
+            browser["issues"],
+            [
+                "mcp_browser_selection_missing",
+                "workflow_skill_missing_or_stale",
+            ],
+        )
         self.assertEqual(browser["remediation"], "rerun_saved_setup")
         self.assertNotIn("/secret", json.dumps(record))
 

@@ -458,6 +458,11 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             ),
             patch.object(
                 agent_cli,
+                "_browser_workflow_skills",
+                return_value=("infra-tools-playwright-testing",),
+            ),
+            patch.object(
+                agent_cli,
                 "_browser_launcher_features",
                 return_value={
                     "browser_selection": True,
@@ -509,6 +514,11 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             ),
             patch.object(
                 agent_cli,
+                "_browser_workflow_skills",
+                return_value=("infra-tools-playwright-testing",),
+            ),
+            patch.object(
+                agent_cli,
                 "_tool_path",
                 side_effect=lambda tool, _home: "/tmp/codex" if tool == "codex" else None,
             ),
@@ -551,6 +561,18 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
                 f'command = "{mcp_wrapper}"\n',
                 encoding="utf-8",
             )
+            skill_dir = (
+                home
+                / ".agents"
+                / "skills"
+                / "infra-tools-playwright-testing"
+            )
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "metadata:\n  managed-by: infra_tools\n",
+                encoding="utf-8",
+            )
+            os.chmod(skill_dir / "SKILL.md", 0o644)
 
             def tool_path(tool: str, _home: str) -> str | None:
                 return "/tmp/codex" if tool == "codex" else None
@@ -573,6 +595,11 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
         self.assertTrue(result["smoke_test"])
         self.assertTrue(result["managed_defaults"])
         self.assertEqual(result["registrations"], {"codex": True})
+        self.assertEqual(
+            result["workflow_skills"],
+            ["infra-tools-playwright-testing"],
+        )
+        self.assertTrue(result["workflow_skill_ready"])
         self.assertTrue(result["healthy"])
 
     def test_doctor_explains_missing_mcp_browser_selection(self) -> None:
@@ -585,6 +612,11 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
                 agent_cli,
                 "_browser_running_processes",
                 return_value={"total": 0, "stale": 0, "inspected": True},
+            ),
+            patch.object(
+                agent_cli,
+                "_browser_workflow_skills",
+                return_value=("infra-tools-playwright-testing",),
             ),
             patch.object(
                 agent_cli,
@@ -610,6 +642,73 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
         self.assertFalse(result["healthy"])
         self.assertEqual(result["issues"], ["mcp_browser_selection_missing"])
         self.assertEqual(result["remediation"], "rerun_saved_setup")
+
+    def test_doctor_rejects_missing_or_incompatible_workflow_skill(self) -> None:
+        with (
+            patch.object(agent_cli.os.path, "isfile", return_value=True),
+            patch.object(agent_cli.os, "access", return_value=True),
+            patch.object(agent_cli, "_browser_launchers_secure", return_value=True),
+            patch.object(
+                agent_cli,
+                "_browser_running_processes",
+                return_value={"total": 0, "stale": 0, "inspected": True},
+            ),
+            patch.object(
+                agent_cli,
+                "_browser_workflow_skills",
+                side_effect=(
+                    (),
+                    ("infra-tools-t3-preview-testing",),
+                    (
+                        "infra-tools-browser-testing",
+                        "infra-tools-playwright-testing",
+                    ),
+                ),
+            ),
+            patch.object(
+                agent_cli,
+                "_browser_launcher_features",
+                return_value={
+                    "browser_selection": True,
+                    "private_evidence": True,
+                    "bounded_evidence": True,
+                    "coordinate_input": True,
+                    "webgl_settle_delay": True,
+                },
+            ),
+            patch.object(
+                agent_cli,
+                "_tool_path",
+                side_effect=lambda tool, _home: (
+                    "/tmp/codex" if tool == "codex" else None
+                ),
+            ),
+            patch.object(agent_cli, "_codex_browser_registration", return_value=True),
+        ):
+            for expected_skills in (
+                [],
+                ["infra-tools-t3-preview-testing"],
+                [
+                    "infra-tools-browser-testing",
+                    "infra-tools-playwright-testing",
+                ],
+            ):
+                with self.subTest(workflow_skills=expected_skills):
+                    result = agent_cli.inspect_browser_automation(
+                        "/home/agent",
+                        run_smoke=False,
+                    )
+                    self.assertFalse(result["configured"])
+                    self.assertFalse(result["workflow_skill_ready"])
+                    self.assertEqual(result["workflow_skills"], expected_skills)
+                    self.assertEqual(
+                        result["issues"],
+                        ["workflow_skill_missing_or_stale"],
+                    )
+                    self.assertEqual(
+                        result["remediation"],
+                        "rerun_saved_setup",
+                    )
 
     def test_doctor_detects_active_processes_with_stale_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

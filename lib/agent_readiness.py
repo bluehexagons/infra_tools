@@ -33,6 +33,13 @@ _BROWSER_LAUNCHER_FEATURES = (
     "coordinate_input",
     "webgl_settle_delay",
 )
+_BROWSER_WORKFLOW_SKILLS = frozenset(
+    (
+        "infra-tools-browser-testing",
+        "infra-tools-playwright-testing",
+        "infra-tools-t3-preview-testing",
+    )
+)
 _BROWSER_ISSUES = frozenset(
     (
         "launchers_missing",
@@ -42,6 +49,7 @@ _BROWSER_ISSUES = frozenset(
         "registration_missing",
         "smoke_test_failed",
         "stale_processes",
+        "workflow_skill_missing_or_stale",
     )
 )
 _BROWSER_REMEDIATIONS = frozenset(
@@ -211,6 +219,17 @@ def _sanitize_capability(record: JSONDict) -> Optional[JSONDict]:
             else []
         )
         remediation = record.get("remediation")
+        raw_workflow_skills = record.get("workflow_skills")
+        workflow_skills = (
+            [
+                skill_name
+                for skill_name in raw_workflow_skills
+                if isinstance(skill_name, str)
+                and skill_name in _BROWSER_WORKFLOW_SKILLS
+            ]
+            if isinstance(raw_workflow_skills, list)
+            else []
+        )
         return {
             "capability": "browser",
             "healthy": record.get("healthy") is True,
@@ -224,6 +243,8 @@ def _sanitize_capability(record: JSONDict) -> Optional[JSONDict]:
             "managed_defaults": record.get("managed_defaults") is True,
             "running_processes": running_processes,
             "registrations": _safe_mapping(record.get("registrations")),
+            "workflow_skills": workflow_skills,
+            "workflow_skill_ready": record.get("workflow_skill_ready") is True,
             "configured": record.get("configured") is True,
             "smoke_test": record.get("smoke_test"),
             "issues": issues,

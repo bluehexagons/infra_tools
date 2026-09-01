@@ -61,6 +61,13 @@ _BROWSER_OUTPUT_MAX_BYTES = 256 * BYTES_PER_MB
 _BROWSER_MCP_SERVER_NAME = "infra-tools-playwright"
 _BROWSER_DOCTOR_TIMEOUT_SECONDS = 210
 _REMOTE_DOCTOR_TIMEOUT_SECONDS = _BROWSER_DOCTOR_TIMEOUT_SECONDS + 90
+_MAX_AGENT_SKILL_BYTES = 256 * 1024
+_PLAYWRIGHT_BROWSER_AGENT_SKILL_NAMES = frozenset(
+    (
+        "infra-tools-browser-testing",
+        "infra-tools-playwright-testing",
+    )
+)
 _T3_SERVICE_NAME = "t3code.service"
 _T3_RUNTIME_RELATIVE = os.path.join(
     ".t3", "runtime"
@@ -1031,6 +1038,63 @@ def _browser_running_processes(
     return {"total": total, "stale": stale, "inspected": True}
 
 
+def _managed_agent_skill_ready(path: str, owner_uid: int) -> bool:
+    """Return whether one safe skill entrypoint has the infra-tools marker."""
+
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError:
+        return False
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != owner_uid
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+            or metadata.st_size > _MAX_AGENT_SKILL_BYTES
+        ):
+            return False
+        with os.fdopen(descriptor, "rb") as file_obj:
+            descriptor = -1
+            content = file_obj.read(_MAX_AGENT_SKILL_BYTES + 1)
+        return (
+            len(content) <= _MAX_AGENT_SKILL_BYTES
+            and b"managed-by: infra_tools" in content
+        )
+    except OSError:
+        return False
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _browser_workflow_skills(
+    home: str,
+    owner_uid: int | None = None,
+) -> tuple[str, ...]:
+    """Return installed infra-tools-managed browser workflow variants."""
+
+    from common.agent_steps import BROWSER_AGENT_SKILL_NAMES
+
+    if owner_uid is None:
+        try:
+            owner_uid = os.stat(home).st_uid
+        except OSError:
+            return ()
+    return tuple(
+        skill_name
+        for skill_name in BROWSER_AGENT_SKILL_NAMES
+        if _managed_agent_skill_ready(
+            os.path.join(home, ".agents", "skills", skill_name, "SKILL.md"),
+            owner_uid,
+        )
+    )
+
+
 def inspect_browser_automation(
     home: Optional[str] = None,
     *,
@@ -1049,6 +1113,11 @@ def inspect_browser_automation(
     processes_current = bool(
         running_processes.get("inspected") is not True
         or int(running_processes.get("stale", 0)) == 0
+    )
+    workflow_skills = _browser_workflow_skills(user_home)
+    workflow_skill_ready = bool(
+        len(workflow_skills) == 1
+        and workflow_skills[0] in _PLAYWRIGHT_BROWSER_AGENT_SKILL_NAMES
     )
 
     registrations: JSONDict = {}
@@ -1083,6 +1152,7 @@ def inspect_browser_automation(
         and launchers_secure
         and managed_defaults
         and registrations_ready
+        and workflow_skill_ready
     )
     healthy = configured and processes_current and smoke_test if run_smoke else None
     issues: list[str] = []
@@ -1101,6 +1171,8 @@ def inspect_browser_automation(
             issues.append("managed_defaults_stale")
     if not registrations_ready:
         issues.append("registration_missing")
+    if not workflow_skill_ready:
+        issues.append("workflow_skill_missing_or_stale")
     if run_smoke and launchers_installed and smoke_test is not True:
         issues.append("smoke_test_failed")
     if not processes_current:
@@ -1114,6 +1186,7 @@ def inspect_browser_automation(
     elif (
         "mcp_browser_selection_missing" in issues
         or "managed_defaults_stale" in issues
+        or "workflow_skill_missing_or_stale" in issues
     ):
         remediation = "rerun_saved_setup"
     elif "stale_processes" in issues:
@@ -1129,6 +1202,8 @@ def inspect_browser_automation(
         "managed_defaults": managed_defaults,
         "running_processes": running_processes,
         "registrations": registrations,
+        "workflow_skills": list(workflow_skills),
+        "workflow_skill_ready": workflow_skill_ready,
         "configured": configured,
         "smoke_test": smoke_test,
         "healthy": healthy,
@@ -1859,16 +1934,6 @@ def _t3_service_enabled(environment: dict[str, str]) -> bool:
     return result.returncode == 0 and (result.stdout or "").strip() == "enabled"
 
 
-def _t3_skill_ready(path: str) -> bool:
-    if os.path.islink(path) or not os.path.isfile(path):
-        return False
-    try:
-        with open(path, encoding="utf-8") as file_obj:
-            return "managed-by: infra_tools" in file_obj.read()
-    except OSError:
-        return False
-
-
 def _t3_agent_skills_ready(home: str) -> bool:
     """Verify every workflow skill selected by the managed T3 setup."""
     from common.t3code_steps import (
@@ -1876,20 +1941,23 @@ def _t3_agent_skills_ready(home: str) -> bool:
         T3_BROWSER_AGENT_SKILL_NAMES,
     )
 
+    try:
+        owner_uid = os.stat(home).st_uid
+    except OSError:
+        return False
     core_ready = all(
-        _t3_skill_ready(
-            os.path.join(home, ".agents", "skills", skill_name, "SKILL.md")
+        _managed_agent_skill_ready(
+            os.path.join(home, ".agents", "skills", skill_name, "SKILL.md"),
+            owner_uid,
         )
         for skill_name in T3_AGENT_SKILL_NAMES
     )
-    browser_skills = [
-        skill_name
-        for skill_name in T3_BROWSER_AGENT_SKILL_NAMES
-        if _t3_skill_ready(
-            os.path.join(home, ".agents", "skills", skill_name, "SKILL.md")
-        )
-    ]
-    return core_ready and len(browser_skills) == 1
+    browser_skills = _browser_workflow_skills(home, owner_uid)
+    return bool(
+        core_ready
+        and len(browser_skills) == 1
+        and browser_skills[0] in T3_BROWSER_AGENT_SKILL_NAMES
+    )
 
 
 def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict:
@@ -2539,6 +2607,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
             elif "mcp_browser_selection_missing" in result.get("issues", []):
                 print(
                     "  ✗ browser: MCP does not select managed Chromium; "
+                    "rerun the saved setup"
+                )
+            elif "workflow_skill_missing_or_stale" in result.get("issues", []):
+                print(
+                    "  ✗ browser: managed workflow guidance is missing or stale; "
                     "rerun the saved setup"
                 )
             elif not result.get("managed_defaults"):

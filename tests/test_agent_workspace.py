@@ -207,6 +207,11 @@ class AgentSupportTests(unittest.TestCase):
                             "private_pid": 123,
                         },
                         "registrations": {},
+                        "workflow_skills": [
+                            "infra-tools-t3-preview-testing",
+                            "/secret/browser-skill",
+                        ],
+                        "workflow_skill_ready": False,
                         "configured": False,
                         "smoke_test": False,
                         "healthy": False,
@@ -214,6 +219,7 @@ class AgentSupportTests(unittest.TestCase):
                             "launchers_missing",
                             "mcp_browser_selection_missing",
                             "registration_missing",
+                            "workflow_skill_missing_or_stale",
                             "/secret/browser",
                         ],
                         "remediation": "rerun_setup_with_browser_automation",
@@ -273,11 +279,17 @@ class AgentSupportTests(unittest.TestCase):
                 {"total": 1, "stale": 1, "inspected": True},
             )
             self.assertEqual(
+                bundle["browser"]["workflow_skills"],
+                ["infra-tools-t3-preview-testing"],
+            )
+            self.assertFalse(bundle["browser"]["workflow_skill_ready"])
+            self.assertEqual(
                 bundle["browser"]["issues"],
                 [
                     "launchers_missing",
                     "mcp_browser_selection_missing",
                     "registration_missing",
+                    "workflow_skill_missing_or_stale",
                 ],
             )
             self.assertEqual(

@@ -57,6 +57,11 @@ selected capability combination changes, while preserving unrelated skills and
 user configuration. It refuses symlinked paths, directories owned by another
 user, and a same-name skill without the managed marker.
 
+The Playwright doctor includes the selected browser workflow skill in
+capability health, and the T3 doctor requires exactly one T3-capable browser
+variant. Running both checks on a combined VM therefore verifies the combined
+skill rather than accepting independent Playwright-only and T3-only guidance.
+
 An older VM receives the current base set when its saved setup is rerun from an
 updated infra-tools control plane. `infra-tools agent update` updates Codex,
 Claude Code, or OpenCode executables; it does not refresh infra-tools or these

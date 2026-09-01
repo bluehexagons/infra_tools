@@ -83,28 +83,51 @@ an otherwise testable task. Route browser work to healthy VM-local Playwright,
 continue server and HTTP checks, and report that collaborative client-origin
 coverage was skipped. Never use `curl -k`, ignore HTTPS errors, or weaken TLS.
 
-If the user wants collaborative preview access restored, run:
+For a managed `infra-web` URL, if the user wants collaborative preview access
+restored, run:
 
 ```bash
 infra-web ca
 ```
 
-Give the user the reported enrollment URL and SHA-256 fingerprint. Have them
-compare that fingerprint with the downloaded public certificate before trust:
+Give the user the reported enrollment URL and SHA-256 fingerprint. If the
+untrusted URL cannot download its own CA, transfer only the public certificate
+over an existing trusted path:
+
+```bash
+scp USER@VM:/srv/infra-tools/web/infra-tools-ca.crt .
+```
+
+Never transfer the CA private key. Have the user verify the file with
+`sha256sum infra-tools-ca.crt` on Linux or
+`(Get-FileHash .\infra-tools-ca.crt -Algorithm SHA256).Hash` on Windows, then
+give only the matching platform step:
 
 - Debian-based Linux: place the verified `.crt` in
   `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates`.
+- Arch-based Linux: run `sudo trust anchor infra-tools-ca.crt` and
+  `sudo update-ca-trust`.
+- Fedora/RHEL-based Linux: place it in
+  `/etc/pki/ca-trust/source/anchors/` and run `sudo update-ca-trust extract`.
+- macOS: import it into the System keychain with Keychain Access, open the
+  certificate, and set **Trust** to **Always Trust**.
 - Windows current user: run
   `certutil -user -addstore -f Root .\infra-tools-ca.crt`.
 - ChromeOS: import the verified certificate under certificate-manager
   **Authorities**; managed devices require an authorized administrator.
 - Android: use the device's CA certificate installation settings; embedded apps
   may still reject user-added roots.
+- iPhone/iPad: install the transferred profile, then enable it under **Settings
+  > General > About > Certificate Trust Settings**.
 
 Installing a CA changes client security state, so the user performs that step.
 Restart T3 Code after enrollment, recheck preview status, and retry the existing
 tab. If they decline, keep using Playwright or skip the affected preview-only
 operation.
+
+For a certificate error on any other HTTPS origin, use that origin's documented
+trust process or leave the client-origin check skipped; `infra-web ca` does not
+repair unrelated certificates.
 
 ## Evidence and safety
 

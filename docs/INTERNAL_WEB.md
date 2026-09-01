@@ -170,18 +170,18 @@ headers.
 
 ## Certificate trust
 
-When the VM uses its local certificate authority, enroll the public CA
-certificate once on each LAN client. The command prints the file, download URL,
-and SHA-256 fingerprint:
+When the VM uses its local certificate authority, enroll the public CA only on
+LAN clients that should open the private origin. Client enrollment is optional;
+VM-local checks and managed Playwright already use the VM trust store. The
+command prints the file, download URL, and SHA-256 fingerprint:
 
 ```bash
 infra-web ca
 ```
 
 Verify the printed fingerprint before installing the public CA. See
-[Client CA trust](CLIENT_CA_TRUST.md) for safe transfer, Linux, Windows,
-ChromeOS, and Android enrollment, application-specific trust limitations, and
-removal.
+[Client CA trust](CLIENT_CA_TRUST.md) for safe transfer, desktop, ChromeOS, and
+mobile enrollment, application-specific trust limitations, and removal.
 
 Do not disable TLS verification. `site doctor` and the general `doctor`
 command verify the same trusted HTTPS endpoints that browsers should use. For

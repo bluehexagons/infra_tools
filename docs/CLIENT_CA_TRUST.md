@@ -72,10 +72,17 @@ On Windows PowerShell:
 (Get-FileHash .\infra-tools-ca.crt -Algorithm SHA256).Hash
 ```
 
+On macOS:
+
+```bash
+shasum -a 256 infra-tools-ca.crt
+```
+
 Ignore letter case and spacing when comparing the hexadecimal values. On
-Android, use a trusted checksum utility or transfer the already-verified file
-from a trusted computer. Do not install a CA whose fingerprint you cannot
-verify through a path independent of the untrusted HTTPS connection.
+Android or iPhone/iPad, use a trusted checksum utility or transfer the
+already-verified file from a trusted computer. Do not install a CA whose
+fingerprint you cannot verify through a path independent of the untrusted HTTPS
+connection.
 
 ## Linux
 
@@ -130,6 +137,17 @@ The platform procedures follow the Debian
 Arch Linux [TLS trust-management](https://wiki.archlinux.org/title/Transport_Layer_Security#Trust_management),
 and Red Hat [shared system certificate](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/securing_networks/using-shared-system-certificates)
 guidance.
+
+## macOS
+
+Import the verified `infra-tools-ca.crt` into the **System** keychain with
+Keychain Access. Double-click the imported certificate, expand **Trust**, and
+set certificate trust to **Always Trust** only after confirming its SHA-256
+fingerprint. Authenticate the change when macOS requests administrator
+approval, then fully exit and reopen T3 Code or the browser.
+
+Apple documents importing certificate files through Keychain Access and
+[changing certificate trust settings](https://support.apple.com/guide/keychain-access/change-the-trust-settings-of-a-certificate-kyca11871/mac).
 
 ## Windows
 
@@ -191,6 +209,21 @@ access. See Google's guidance for
 [manual ChromeOS certificate import](https://support.google.com/chrome/a/answer/7014689#certificates)
 and [managed ChromeOS CA deployment](https://support.google.com/chrome/a/answer/3505249).
 
+## iPhone and iPad
+
+Transfer the already-verified public certificate to the device through a
+trusted channel and install the downloaded certificate profile. A manually
+installed root is not automatically trusted for websites: open **Settings >
+General > About > Certificate Trust Settings**, enable full trust for that
+root, and confirm the warning only after checking the fingerprint through the
+independent path above. Then fully close and reopen T3 Code or the browser.
+
+On managed devices, prefer the administrator's approved Apple Configurator or
+mobile-device-management policy rather than asking the user to override
+organizational controls. Apple documents the additional
+[manual root trust step](https://support.apple.com/en-ie/102390) for iOS and
+iPadOS.
+
 ## Android
 
 Android menu names vary by manufacturer and release. On current Pixel devices,
@@ -216,8 +249,9 @@ documentation for the application-side behavior.
 ## Verify and troubleshoot
 
 After restarting the client, reopen the exact URL printed by `infra-web` and
-confirm that it renders without a certificate warning. On Linux or Windows,
-this system-trust check must succeed without `-k` or another insecure option:
+confirm that it renders without a certificate warning. On Linux, macOS, or
+Windows, this system-trust check must succeed without `-k` or another insecure
+option:
 
 ```bash
 curl https://VM:8443/
@@ -230,7 +264,8 @@ application fails, use that application's documented certificate store or
 report its trust limitation.
 
 To remove trust later, delete the installed anchor and refresh the Linux trust
-store, remove it from **Trusted Root Certification Authorities** on Windows,
-remove the imported authority or its managed policy on ChromeOS, or remove it
-from **Trusted credentials > User** on Android. Restart affected applications
-after removal.
+store, delete it from the macOS System keychain, remove it from **Trusted Root
+Certification Authorities** on Windows, remove the imported authority or its
+managed policy on ChromeOS, disable full trust and remove its profile on
+iPhone/iPad, or remove it from **Trusted credentials > User** on Android.
+Restart affected applications after removal.
