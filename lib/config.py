@@ -229,6 +229,8 @@ class SetupConfig:
     system_type: str
     machine_type: str = DEFAULT_MACHINE_TYPE
     password: MaybeStr = None
+    nopasswd: bool = False
+    harden_agent: bool = False
     ssh_key: MaybeStr = None
     timezone: str = "UTC"
     system_hostname: MaybeStr = None
@@ -415,6 +417,11 @@ class SetupConfig:
         # the requested full redeploy.
         if self.deployment_mode == "full":
             self.full_deploy = True
+
+        if self.nopasswd and self.harden_agent:
+            raise ValueError("--nopasswd cannot be combined with --harden-agent")
+        if self.harden_agent and self.username == "root":
+            raise ValueError("--harden-agent requires a non-root setup user")
 
         if self.install_data_analysis_tools:
             self.install_python = True
@@ -737,6 +744,10 @@ class SetupConfig:
         
         if self.password:
             args.append(f"--password {shlex.quote(self.password)}")
+        if self.nopasswd:
+            args.append("--nopasswd")
+        if self.harden_agent:
+            args.append("--harden-agent")
         
         if self.timezone:
             args.append(f"--timezone {shlex.quote(self.timezone)}")
@@ -1095,6 +1106,11 @@ class SetupConfig:
         # SSH key
         if self.ssh_key:
             cmd_parts.append(f"-k {shlex.quote(self.ssh_key)}")
+
+        if self.nopasswd:
+            cmd_parts.append("--nopasswd")
+        if self.harden_agent:
+            cmd_parts.append("--harden-agent")
 
         if self.hosted_node:
             cmd_parts.append(f"--provision-on {shlex.quote(self.hosted_node)}")
@@ -2076,6 +2092,8 @@ class SetupConfig:
             system_type=system_type,
             machine_type=machine_type,
             password=getattr(args, 'password', None),
+            nopasswd=_optional_bool_arg(args, 'nopasswd') is True,
+            harden_agent=_optional_bool_arg(args, 'harden_agent') is True,
             ssh_key=getattr(args, 'ssh_key', None),
             timezone=timezone,
             system_hostname=getattr(args, 'system_hostname', None),

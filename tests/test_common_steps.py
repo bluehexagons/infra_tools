@@ -348,6 +348,7 @@ class TestVMSudoers(unittest.TestCase):
             username="agent",
             system_type="workstation_dev",
             machine_type="vm",
+            nopasswd=True,
         )
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -376,6 +377,7 @@ class TestVMSudoers(unittest.TestCase):
             username="agent",
             system_type="workstation_dev",
             machine_type="vm",
+            nopasswd=True,
         )
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -390,15 +392,52 @@ class TestVMSudoers(unittest.TestCase):
 
     @patch("common.common_steps.run")
     def test_ignores_non_vm_setup(self, mock_run):
-        _ensure_vm_setup_user_sudoers(
-            SetupConfig(
-                host="testhost",
-                username="agent",
-                system_type="server_lite",
-                machine_type="hardware",
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "common.common_steps.VM_SETUP_SUDOERS_DIR", temporary
+        ):
+            _ensure_vm_setup_user_sudoers(
+                SetupConfig(
+                    host="testhost",
+                    username="agent",
+                    system_type="server_lite",
+                    machine_type="hardware",
+                )
             )
-        )
         mock_run.assert_not_called()
+
+    def test_default_removes_managed_passwordless_rule(self):
+        config = SetupConfig(
+            host="testhost",
+            username="agent",
+            system_type="agent_vm",
+            machine_type="vm",
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            sudoers_path = os.path.join(temporary, "infra-tools-agent")
+            with open(sudoers_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("agent ALL=(ALL) NOPASSWD:ALL\n")
+            with patch("common.common_steps.VM_SETUP_SUDOERS_DIR", temporary):
+                _ensure_vm_setup_user_sudoers(config)
+            self.assertFalse(os.path.exists(sudoers_path))
+
+    def test_default_refuses_modified_sudoers_rule(self):
+        config = SetupConfig(
+            host="testhost",
+            username="agent",
+            system_type="agent_vm",
+            machine_type="vm",
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            sudoers_path = os.path.join(temporary, "infra-tools-agent")
+            with open(sudoers_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("agent ALL=(ALL) NOPASSWD:/usr/bin/apt\n")
+            with patch("common.common_steps.VM_SETUP_SUDOERS_DIR", temporary):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Refusing to remove modified sudoers policy"
+                ):
+                    _ensure_vm_setup_user_sudoers(config)
 
 
 class TestDebianPackageSources(unittest.TestCase):

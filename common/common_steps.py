@@ -322,42 +322,73 @@ def setup_user(config: SetupConfig) -> None:
             if set_user_password(config.username, config.password):
                 print("  Password updated")
     
-    run(f"usermod -aG sudo {safe_username}", check=False)
+    if config.harden_agent:
+        run(f"gpasswd -d {safe_username} sudo", check=False)
+        sudo_message = "without sudo privileges"
+    else:
+        run(f"usermod -aG sudo {safe_username}", check=False)
+        sudo_message = (
+            "with passwordless sudo privileges"
+            if config.nopasswd and config.machine_type == "vm"
+            else "with password-protected sudo privileges"
+        )
     
     result = run("getent group remoteusers", check=False)
     if result.returncode == 0:
         run(f"usermod -aG remoteusers {safe_username}", check=False)
-        user_groups_message = "  ✓ User configured with sudo privileges and remoteusers group"
+        user_groups_message = (
+            f"  ✓ User configured {sudo_message} and remoteusers group"
+        )
     else:
-        user_groups_message = "  ✓ User configured with sudo privileges"
+        user_groups_message = f"  ✓ User configured {sudo_message}"
 
     print(user_groups_message)
     _ensure_vm_setup_user_sudoers(config)
 
 
 def _ensure_vm_setup_user_sudoers(config: SetupConfig) -> None:
-    """Install the VM setup user's passwordless sudo rule with safe metadata.
+    """Reconcile the VM setup user's optional passwordless sudo rule.
 
     Proxmox VM cloud-init needs this rule before the first remote setup run.
-    Keeping the rule under an infra-tools-owned filename also lets reruns repair
-    stale permissions left by older revisions without changing other sudoers
-    policy files.
+    Normal setup removes it after bootstrap; ``--nopasswd`` retains the prior
+    compatibility behavior. Keeping the rule under an infra-tools-owned
+    filename lets reruns repair or remove it without changing other policy.
     """
-    if config.machine_type != "vm" or config.username == "root":
+    if config.username == "root":
         return
     if not validate_username(config.username):
         raise ValueError(f"Invalid setup username: {config.username}")
-    if is_dry_run():
-        print(
-            "  [DRY-RUN] Would ensure VM setup sudoers drop-in has mode 0440"
-        )
-        return
-
     sudoers_path = os.path.join(
         VM_SETUP_SUDOERS_DIR,
         f"infra-tools-{config.username}",
     )
     sudoers_content = f"{config.username} ALL=(ALL) NOPASSWD:ALL\n"
+
+    if not config.nopasswd or config.machine_type != "vm":
+        if is_dry_run():
+            print("  [DRY-RUN] Would remove the managed passwordless sudo rule")
+            return
+        if not os.path.lexists(sudoers_path):
+            print("  ✓ Passwordless sudo is not enabled")
+            return
+        if os.path.islink(sudoers_path) or not os.path.isfile(sudoers_path):
+            raise RuntimeError(
+                f"Refusing unsafe managed sudoers path: {sudoers_path}"
+            )
+        with open(sudoers_path, "r", encoding="utf-8") as file_obj:
+            if file_obj.read() != sudoers_content:
+                raise RuntimeError(
+                    f"Refusing to remove modified sudoers policy: {sudoers_path}"
+                )
+        os.unlink(sudoers_path)
+        print("  ✓ Removed managed passwordless sudo rule")
+        return
+
+    if is_dry_run():
+        print(
+            "  [DRY-RUN] Would ensure VM setup sudoers drop-in has mode 0440"
+        )
+        return
 
     try:
         existing = os.stat(sudoers_path, follow_symlinks=False)

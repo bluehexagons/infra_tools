@@ -125,6 +125,8 @@ tools, not for an LXC container.
 | `username` | Optional SSH username |
 | `-k, --key PATH` | SSH private key |
 | `-p, --password PASS` | SSH password |
+| `--nopasswd` | Retain the VM setup user's unrestricted passwordless sudo compatibility rule; disabled by default |
+| `--harden-agent` | Remove the non-root setup user from `sudo` and apply the hardened coding-agent policy; mutually exclusive with `--nopasswd` |
 | `-t, --timezone TZ` | Timezone |
 | `--hostname NAME` | Set the target system hostname; distinct from the saved `--name` label |
 | `--mdns` / `--no-mdns` | Enable or disable Avahi/mDNS advertisement of the target hostname as `NAME.local` |
@@ -195,7 +197,12 @@ the route and remote setup staging, so root SSH access is not required. The
 account must have an explicit `NOPASSWD` policy because the streamed setup
 payload cannot safely share standard input with a sudo password prompt. LXC
 guests use root for the initial handoff because their setup user is created by
-that first remote setup. When setup is launched from a terminal, SSH may prompt
+that first remote setup. Cloud-init supplies this bootstrap policy on a newly
+provisioned VM. Normal setup removes the managed rule before it finishes;
+`--nopasswd` deliberately retains the previous unrestricted behavior. A later
+non-root rerun therefore requires `--nopasswd` to have been saved, while the
+default and `--harden-agent` postures rerun through the retained key-only root
+SSH path. When setup is launched from a terminal, SSH may prompt
 for the configured private-key passphrase; piped or otherwise non-interactive
 runs require the key to be loaded in an SSH agent. See
 [SSH authentication](SSH.md) for the same behavior across transfers,
@@ -347,6 +354,12 @@ All three default to GitHub CLI and Codex. `--agent-tool` values add to those
 defaults and accept comma-separated lists; use `--no-agent-tool` to remove a
 default. The full profile does not choose Proxmox capacity. It installs Node.js
 automatically for T3 Code, while Go and other project runtimes remain optional.
+The coding identity remains in the `sudo` group by default, but its sudo use
+requires the account password. `--nopasswd` restores the former VM-wide
+`NOPASSWD:ALL` policy for convenience. `--harden-agent` instead removes the
+identity from `sudo`; it is intended for CI/CD, disposable evaluation, and
+less-trusted package work where agent-controlled privilege escalation is not
+acceptable.
 The shared CLI baseline includes small coding and inspection tools such as
 `ripgrep` (`rg`), `jq`, SQLite, `file`, `tree`, `make`, and `patch`. The
 substantially larger Python analysis/notebook stack remains opt-in through
@@ -418,6 +431,8 @@ rm -f "$HOME/.infra_tools-install.sh"
 | Flag | Description |
 |------|-------------|
 | `--t3code-ready` | Add the headless T3 Code-ready profile: GitHub CLI, Codex, read-write Git, T3 web service, and protected pairing |
+| `--nopasswd` | Retain unrestricted passwordless sudo for the VM setup identity; compatibility opt-in |
+| `--harden-agent` | Remove the non-root coding identity from the `sudo` group and apply the stricter agent policy |
 | `--agent-tool TOOL[,TOOL...]` | Add one or more provider tools (`gh`, `codex`, `claude`, or `opencode`) to profile defaults |
 | `--no-agent-tool TOOL[,TOOL...]` | Disable one or more profile-default provider tools |
 | `--web-interface INTERFACE` | Install an explicit headless web interface; currently `t3code` |
@@ -1063,7 +1078,8 @@ infra-tools gogs health 192.168.1.10 --json \
 
 The command inherits the saved setup username and SSH key unless overridden
 with `--username` or `--key`. A non-root SSH user must have non-interactive
-sudo, as normal infra-tools setup users do. Health is nonzero when the service,
+sudo, which requires the setup's explicit `--nopasswd` compatibility mode;
+otherwise connect as root. Health is nonzero when the service,
 SQLite database, managed paths, local filesystem, update service/timer,
 capacity thresholds, or documented nginx upload limit is unhealthy. JSON also
 reports release identity, per-category usage, the external URL, and whether

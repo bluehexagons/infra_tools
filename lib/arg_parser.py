@@ -160,6 +160,22 @@ def add_setup_arguments(
         )
     
     parser.add_argument("-p", "--password", help="User password")
+    parser.add_argument(
+        "--nopasswd",
+        action="store_true",
+        help=(
+            "Allow the non-root VM setup user to run any sudo command without "
+            "a password (compatibility mode; disabled by default)"
+        ),
+    )
+    parser.add_argument(
+        "--harden-agent",
+        action="store_true",
+        help=(
+            "Remove the non-root setup user from sudo and apply the hardened "
+            "coding-agent policy; cannot be combined with --nopasswd"
+        ),
+    )
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")
     parser.add_argument(
         "--hostname",

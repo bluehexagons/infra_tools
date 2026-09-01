@@ -67,7 +67,10 @@ non-interactive `sudo` privileges; they do not require root SSH access. On an
 existing VM, the setup account must have an explicit `NOPASSWD` policy because
 the route check and streamed upload cannot safely consume a sudo password. LXC
 guests continue to use root for this first handoff because their setup user is
-created by the initial remote setup. Interactive runs may prompt for the
+created by the initial remote setup. Cloud-init provides the initial VM rule;
+normal setup removes it when the bootstrap finishes. Use `--nopasswd` to retain
+it for non-root reruns, or use the retained key-only root SSH account for later
+setup operations. Interactive runs may prompt for the
 configured SSH key's passphrase; non-interactive runs require that key to be
 available through an SSH agent. See [SSH authentication](SSH.md). The normal
 static network step then

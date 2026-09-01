@@ -97,11 +97,16 @@ with `sudo -v` in a separate SSH terminal is not sufficient because normal
 sudo credential caches are scoped to a terminal or parent process.
 Proxmox VM cloud-init installs that rule as
 `/etc/sudoers.d/infra-tools-USERNAME`, owned by `root:root` with mode `0440`.
-The normal VM setup flow validates and repairs that drop-in on reruns, so an
-older file with overly broad permissions is corrected automatically.
+The normal VM setup flow removes that bootstrap rule before completion. Pass
+`--nopasswd` to validate and retain it for compatibility with non-root reruns.
+Without that flag, rerun setup through the retained key-only root SSH account;
+the configured user remains in `sudo`, but sudo requires its password.
+`--harden-agent` also removes the configured user from the `sudo` group.
 For an existing VM that was not provisioned by infra-tools, grant the setup
-account the intended `NOPASSWD` sudo rule before setup. No sudo password is
-accepted, stored, passed in the archive, or written to the setup cache.
+account the intended `NOPASSWD` sudo rule before the first setup or connect as
+root. The temporary managed rule is removed unless `--nopasswd` is selected.
+No sudo password is accepted, stored, passed in the archive, or written to the
+setup cache.
 
 ## Troubleshooting
 
