@@ -18,6 +18,8 @@ Related pages:
   agent auth/config sources, sharing, and credential rotation
 - [`AGENT_SKILLS.md`](./AGENT_SKILLS.md) for managed Codex/OpenCode workflow
   skills and capability routing
+- [`AGENT_SECURITY.md`](./AGENT_SECURITY.md) for coding-user privilege,
+  Codex session policy, hardened mode, and accepted security boundaries
 - [`README.md`](./README.md) for the full documentation map
 
 ## Commands
@@ -359,7 +361,12 @@ requires the account password. `--nopasswd` restores the former VM-wide
 `NOPASSWD:ALL` policy for convenience. `--harden-agent` instead removes the
 identity from `sudo`; it is intended for CI/CD, disposable evaluation, and
 less-trusted package work where agent-controlled privilege escalation is not
-acceptable.
+acceptable. Codex sessions use auto-reviewed workspace permissions by default;
+the system requirements reject full-access session requests. Hardened sessions
+stay in the workspace boundary with no approval escalation and also disable
+Codex native browser/computer use, remote control, and unmanaged hooks. See
+[Agentic coding security](AGENT_SECURITY.md) for the exact boundaries and
+supply-chain guidance.
 The shared CLI baseline includes small coding and inspection tools such as
 `ripgrep` (`rg`), `jq`, SQLite, `file`, `tree`, `make`, and `patch`. The
 substantially larger Python analysis/notebook stack remains opt-in through

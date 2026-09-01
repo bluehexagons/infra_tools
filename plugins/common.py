@@ -33,6 +33,7 @@ PLUGIN = PluginDefinition(
         "configure_web_panel",
         "reconcile_agent_storage",
         "copy_agent_tooling_payload",
+        "configure_codex_security_policy",
         "install_browser_automation",
         "install_git_for_agent_repositories",
         "configure_git_https_credentials",
@@ -229,6 +230,7 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         install_opencode,
         reconcile_agent_storage,
     )
+    from common.agent_security_steps import configure_codex_security_policy
     from common.t3code_steps import install_t3code_web
 
     if config.has_agent_features():
@@ -259,6 +261,11 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
     # interface that probes those providers during its initial discovery.
     if config.agent_payload:
         steps.append(("Copying agent tool configuration", copy_agent_tooling_payload))
+
+    if config.install_codex:
+        steps.append(
+            ("Configuring Codex security policy", configure_codex_security_policy)
+        )
 
     git_needed = bool(
         config.agent_repos
@@ -373,6 +380,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         install_opencode,
         reconcile_agent_storage,
     )
+    from common.agent_security_steps import configure_codex_security_policy
     from common.t3code_steps import install_t3code_web
     from common.web_panel_steps import configure_web_panel
     from common.git_credential_steps import configure_git_https_credentials
@@ -400,6 +408,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "configure_web_panel": configure_web_panel,
         "reconcile_agent_storage": reconcile_agent_storage,
         "copy_agent_tooling_payload": copy_agent_tooling_payload,
+        "configure_codex_security_policy": configure_codex_security_policy,
         "install_browser_automation": install_browser_automation,
         "clone_agent_repositories": clone_agent_repositories,
         "install_git_for_agent_repositories": install_git_for_agent_repositories,

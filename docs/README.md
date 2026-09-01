@@ -22,6 +22,7 @@ references and may describe future work separately from this live contract.
 | [SSH authentication](SSH.md) | Passphrase-protected keys, terminal prompts, SSH agents, and troubleshooting |
 | [Credentials and agent configuration](CREDENTIALS.md) | Workspace passwords, GitHub/Git access, agent auth, non-secret config, sharing, and rotation |
 | [Managed agent workflow skills](AGENT_SKILLS.md) | Installed Codex/OpenCode skills, capability routing, reconciliation, and maintenance |
+| [Agentic coding security](AGENT_SECURITY.md) | Sudo, Codex approval/sandbox policy, hardened mode, accepted LAN/root boundaries, and supply-chain guidance |
 | [Authentication hardening](AUTHENTICATION_HARDENING.md) | Reachability, rate limits, failure bans, and verification for login surfaces |
 | [Agent browser automation](BROWSER_AUTOMATION.md) | Playwright provisioning, Codex/OpenCode registration, verification, and security boundaries |
 | [Client CA trust](CLIENT_CA_TRUST.md) | Diagnosing private-CA errors and optionally enrolling the infra-tools CA on desktop, ChromeOS, and mobile clients |
