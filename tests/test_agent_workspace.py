@@ -192,6 +192,7 @@ class AgentSupportTests(unittest.TestCase):
                         "path": "/secret/browser",
                         "launchers_secure": True,
                         "launcher_features": {
+                            "browser_selection": False,
                             "private_evidence": True,
                             "bounded_evidence": True,
                             "coordinate_input": True,
@@ -211,6 +212,7 @@ class AgentSupportTests(unittest.TestCase):
                         "healthy": False,
                         "issues": [
                             "launchers_missing",
+                            "mcp_browser_selection_missing",
                             "registration_missing",
                             "/secret/browser",
                         ],
@@ -257,6 +259,7 @@ class AgentSupportTests(unittest.TestCase):
             self.assertEqual(
                 bundle["browser"]["launcher_features"],
                 {
+                    "browser_selection": False,
                     "private_evidence": True,
                     "bounded_evidence": True,
                     "coordinate_input": True,
@@ -271,7 +274,11 @@ class AgentSupportTests(unittest.TestCase):
             )
             self.assertEqual(
                 bundle["browser"]["issues"],
-                ["launchers_missing", "registration_missing"],
+                [
+                    "launchers_missing",
+                    "mcp_browser_selection_missing",
+                    "registration_missing",
+                ],
             )
             self.assertEqual(
                 bundle["browser"]["remediation"],

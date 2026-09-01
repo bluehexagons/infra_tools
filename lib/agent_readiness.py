@@ -27,6 +27,7 @@ _BOOT_ID_RE = re.compile(
 _MAX_RECORD_BYTES = 256 * 1024
 _TRIGGERS = frozenset(("agent_update", "manual"))
 _BROWSER_LAUNCHER_FEATURES = (
+    "browser_selection",
     "private_evidence",
     "bounded_evidence",
     "coordinate_input",
@@ -37,6 +38,7 @@ _BROWSER_ISSUES = frozenset(
         "launchers_missing",
         "launchers_unsafe",
         "managed_defaults_stale",
+        "mcp_browser_selection_missing",
         "registration_missing",
         "smoke_test_failed",
         "stale_processes",

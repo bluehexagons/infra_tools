@@ -19,6 +19,7 @@ from lib.validation import validate_filesystem_path
 
 _INSTALLATION_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BROWSER_LAUNCHER_FEATURES = (
+    "browser_selection",
     "private_evidence",
     "bounded_evidence",
     "coordinate_input",
@@ -29,6 +30,7 @@ _BROWSER_ISSUES = frozenset(
         "launchers_missing",
         "launchers_unsafe",
         "managed_defaults_stale",
+        "mcp_browser_selection_missing",
         "registration_missing",
         "smoke_test_failed",
         "stale_processes",

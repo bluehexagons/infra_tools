@@ -98,6 +98,7 @@ class TestAgentReadinessState(unittest.TestCase):
                         "installed": True,
                         "launchers_secure": True,
                         "launcher_features": {
+                            "browser_selection": True,
                             "private_evidence": True,
                             "bounded_evidence": True,
                             "coordinate_input": True,
@@ -139,6 +140,7 @@ class TestAgentReadinessState(unittest.TestCase):
         self.assertEqual(
             browser["launcher_features"],
             {
+                "browser_selection": True,
                 "private_evidence": True,
                 "bounded_evidence": True,
                 "coordinate_input": True,
@@ -163,7 +165,10 @@ class TestAgentReadinessState(unittest.TestCase):
                     {
                         "capability": "browser",
                         "healthy": False,
-                        "issues": ["managed_defaults_stale", "/secret/browser"],
+                        "issues": [
+                            "mcp_browser_selection_missing",
+                            "/secret/browser",
+                        ],
                         "remediation": "rerun_saved_setup",
                     }
                 ],
@@ -174,7 +179,7 @@ class TestAgentReadinessState(unittest.TestCase):
 
         browser = record["capabilities"][0]
         self.assertFalse(record["healthy"])
-        self.assertEqual(browser["issues"], ["managed_defaults_stale"])
+        self.assertEqual(browser["issues"], ["mcp_browser_selection_missing"])
         self.assertEqual(browser["remediation"], "rerun_saved_setup")
         self.assertNotIn("/secret", json.dumps(record))
 

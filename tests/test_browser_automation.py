@@ -333,6 +333,8 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
 
         self.assertIn("--headless", content)
         self.assertIn("--isolated", content)
+        self.assertIn("chromium.executablePath()", content)
+        self.assertIn('--executable-path "$browser_path"', content)
         self.assertIn("--caps vision", content)
         self.assertIn('umask 077', content)
         self.assertIn(
@@ -402,6 +404,7 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
                 agent_cli,
                 "_browser_launcher_features",
                 return_value={
+                    "browser_selection": True,
                     "private_evidence": True,
                     "bounded_evidence": True,
                     "coordinate_input": True,
@@ -436,6 +439,7 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
                 agent_cli,
                 "_browser_launcher_features",
                 return_value={
+                    "browser_selection": True,
                     "private_evidence": True,
                     "bounded_evidence": True,
                     "coordinate_input": True,
@@ -472,7 +476,11 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
                 "#!/bin/sh\n"
                 "umask 077\n"
                 'output_dir="$HOME/.local/state/infra_tools/playwright-mcp"\n'
+                'browser_path="$(printf \'%s\' '
+                '"$HOME/.cache/ms-playwright/chromium/chrome")" '
+                "# chromium.executablePath()\n"
                 "exec playwright-mcp --caps vision "
+                '--executable-path "$browser_path" '
                 '--output-dir "$output_dir" --timeout-settle 1000 '
                 f"--output-max-size {agent_cli._BROWSER_OUTPUT_MAX_BYTES}\n",
                 encoding="utf-8",
@@ -511,7 +519,7 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
         self.assertEqual(result["registrations"], {"codex": True})
         self.assertTrue(result["healthy"])
 
-    def test_doctor_explains_stale_launcher_remediation(self) -> None:
+    def test_doctor_explains_missing_mcp_browser_selection(self) -> None:
         completed = SimpleNamespace(returncode=0, stdout="browser-ready\n", stderr="")
         with (
             patch.object(agent_cli.os.path, "isfile", return_value=True),
@@ -526,10 +534,11 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
                 agent_cli,
                 "_browser_launcher_features",
                 return_value={
-                    "private_evidence": False,
-                    "bounded_evidence": False,
-                    "coordinate_input": False,
-                    "webgl_settle_delay": False,
+                    "browser_selection": False,
+                    "private_evidence": True,
+                    "bounded_evidence": True,
+                    "coordinate_input": True,
+                    "webgl_settle_delay": True,
                 },
             ),
             patch.object(
@@ -543,7 +552,7 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             result = agent_cli.inspect_browser_automation("/home/agent")
 
         self.assertFalse(result["healthy"])
-        self.assertEqual(result["issues"], ["managed_defaults_stale"])
+        self.assertEqual(result["issues"], ["mcp_browser_selection_missing"])
         self.assertEqual(result["remediation"], "rerun_saved_setup")
 
     def test_doctor_detects_active_processes_with_stale_defaults(self) -> None:
@@ -558,11 +567,24 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             current.mkdir()
             stale.mkdir()
             output_dir = home / ".local" / "state" / "infra_tools" / "playwright-mcp"
+            browser_path = (
+                home
+                / ".cache"
+                / "ms-playwright"
+                / "chromium-1237"
+                / "chrome-linux64"
+                / "chrome"
+            )
+            browser_path.parent.mkdir(parents=True)
+            browser_path.write_text("browser", encoding="utf-8")
+            os.chmod(browser_path, 0o755)
             current_arguments = [
                 "/usr/bin/node",
                 agent_cli._BROWSER_MCP_CLI,
                 "--headless",
                 "--isolated",
+                "--executable-path",
+                str(browser_path),
                 "--caps",
                 "vision",
                 "--output-dir",
@@ -608,6 +630,7 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
         self.assertEqual(
             features,
             {
+                "browser_selection": False,
                 "private_evidence": False,
                 "bounded_evidence": False,
                 "coordinate_input": False,

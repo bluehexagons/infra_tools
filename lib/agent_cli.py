@@ -914,6 +914,11 @@ def _browser_launcher_features(path: Optional[str] = None) -> JSONDict:
     except OSError:
         content = ""
     return {
+        "browser_selection": (
+            'browser_path="$(' in content
+            and "chromium.executablePath()" in content
+            and '--executable-path "$browser_path"' in content
+        ),
         "private_evidence": (
             'output_dir="$HOME/.local/state/infra_tools/playwright-mcp"' in content
             and '--output-dir "$output_dir"' in content
@@ -960,9 +965,25 @@ def _browser_process_has_managed_defaults(
 ) -> bool:
     """Return whether one active MCP process has the current safe arguments."""
     capabilities = (_browser_argument_value(arguments, "--caps") or "").split(",")
+    executable_path = _browser_argument_value(arguments, "--executable-path")
+    browser_cache = os.path.realpath(
+        os.path.join(home, ".cache", "ms-playwright")
+    )
+    try:
+        managed_executable = bool(
+            executable_path
+            and os.path.isabs(executable_path)
+            and os.path.commonpath((os.path.realpath(executable_path), browser_cache))
+            == browser_cache
+            and os.path.isfile(executable_path)
+            and os.access(executable_path, os.X_OK)
+        )
+    except ValueError:
+        managed_executable = False
     return bool(
         "--headless" in arguments
         and "--isolated" in arguments
+        and managed_executable
         and "vision" in capabilities
         and _browser_argument_value(arguments, "--output-dir")
         == os.path.join(home, ".local", "state", "infra_tools", "playwright-mcp")
@@ -1070,7 +1091,13 @@ def inspect_browser_automation(
     else:
         if not launchers_secure:
             issues.append("launchers_unsafe")
-        if not managed_defaults:
+        if launcher_features.get("browser_selection") is not True:
+            issues.append("mcp_browser_selection_missing")
+        if not all(
+            bool(value)
+            for feature, value in launcher_features.items()
+            if feature != "browser_selection"
+        ):
             issues.append("managed_defaults_stale")
     if not registrations_ready:
         issues.append("registration_missing")
@@ -1084,7 +1111,10 @@ def inspect_browser_automation(
         remediation = "inspect_launcher_security_then_rerun_saved_setup"
     elif "launchers_missing" in issues or "registration_missing" in issues:
         remediation = "rerun_setup_with_browser_automation"
-    elif "managed_defaults_stale" in issues:
+    elif (
+        "mcp_browser_selection_missing" in issues
+        or "managed_defaults_stale" in issues
+    ):
         remediation = "rerun_saved_setup"
     elif "stale_processes" in issues:
         remediation = "restart_agent_sessions"
@@ -2494,6 +2524,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
                 print(
                     "  ✗ browser: agent MCP registration is missing; rerun setup "
                     "with browser automation"
+                )
+            elif "mcp_browser_selection_missing" in result.get("issues", []):
+                print(
+                    "  ✗ browser: MCP does not select managed Chromium; "
+                    "rerun the saved setup"
                 )
             elif not result.get("managed_defaults"):
                 print(

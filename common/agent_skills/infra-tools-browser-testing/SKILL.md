@@ -71,6 +71,17 @@ Keep development servers on loopback. For an external HTTPS URL, publish the
 static build or expose the loopback server with the `infra-tools-web-gateway`
 skill when that capability is installed.
 
+Do not assume T3's `environment-port` target tunnels a remote client to VM
+loopback. It rewrites the requested port onto the environment connection's
+host. A loopback/SSH connection can therefore send the collaborative browser
+to the client's own localhost, while a private-address connection still
+cannot reach a development server bound only to VM loopback. If the VM endpoint
+is healthy but both `environment-port` and a direct loopback URL fail, and a
+snapshot remains at `about:blank` with no network entry, treat that as the
+client/VM routing boundary. Use the healthy VM-local fallback for browser-engine
+coverage. Use `infra-web` only when client-visible access is actually in scope;
+do not rebind the server or widen firewall policy solely for automation.
+
 Test the URL reported by the application or `infra-web`, not a guessed port.
 Capture a small set of user-visible interactions, console failures, and a
 screenshot when it helps the handoff. Avoid recording passwords, tokens,

@@ -66,7 +66,10 @@ owns the `infra-tools-playwright` entry while preserving unrelated settings and
 MCP servers.
 Malformed or symlinked target configuration is rejected.
 
-The MCP launcher always starts Chromium in headless, isolated mode and enables
+The MCP launcher resolves the Chromium executable from the same pinned
+Playwright package used to provision the user browser cache and passes that
+path explicitly to MCP. It does not rely on MCP's default Chrome channel. The
+launcher always starts Chromium in headless, isolated mode and enables
 Playwright's bounded vision capability. Each MCP
 connection receives a temporary browser profile; cookies and login state do not
 persist between sessions. This avoids profile locking between simultaneous
@@ -122,6 +125,19 @@ an internal `infra-web` URL such as `https://192.168.x.x:8443/...` can pass
 `curl` and `infra-web doctor` on the VM yet fail in the collaborative preview
 when the client lacks a route to that LAN, is outside the gateway's allowed
 source ranges, or has not enrolled the local CA.
+
+An `environment-port` preview target is a host rewrite, not a tunnel from the
+connected client to VM loopback. T3 maps the requested port onto the host in
+the environment connection. If that connection is represented by localhost,
+the collaborative browser still requests its own localhost; if it is
+represented by a private VM address, a server bound only to VM loopback is not
+listening on that address. A healthy loopback Vite server can therefore remain
+unreachable through both `environment-port` and a direct loopback URL. Treat a
+failed navigation that leaves the tab at `about:blank` with no network request
+as a client/VM routing boundary after verifying the VM endpoint. Do not rebind
+the development server or widen firewall policy solely for automation; use
+the managed VM-local fallback, or use an explicit `infra-web` publication when
+client access is part of the task.
 
 Collaborative preview is an opportunistic test surface. During normal agent
 work, T3 may be minimized, its preview pane may be closed, or no preview
@@ -188,8 +204,9 @@ infra-tools agent doctor \
 
 Add `--json` for automation. The capability is healthy only when both managed
 launchers are executable, root-owned regular files without group or world write
-access; current private, bounded evidence, safe-coordinate, and one-second-settle
-defaults are present; every installed compatible agent has the managed MCP
+access; explicit managed-Chromium selection and current private, bounded
+evidence, safe-coordinate, and one-second-settle defaults are present; every
+installed compatible agent has the managed MCP
 registration; active managed MCP processes use those same safe defaults; and
 the local interaction/rendering smoke test passes. A stale or unsafe launcher
 is unhealthy even when its smoke test passes; inspect an unsafe path, then
@@ -200,6 +217,8 @@ all terminal agents, so explicit `--tool` flags are useful on deliberately
 minimal VMs.
 
 JSON results include a stable `issues` list and one primary `remediation` code.
+`mcp_browser_selection_missing` identifies a launcher that can pass the direct
+Chromium smoke test while MCP still defaults to an unavailable Chrome channel;
 `rerun_saved_setup` refreshes stale managed defaults;
 `rerun_setup_with_browser_automation` restores missing launchers or agent
 registration; `inspect_launcher_security_then_rerun_saved_setup` requires

@@ -52,6 +52,11 @@ PLAYWRIGHT_CLI = os.path.join(
     "playwright",
     "cli.js",
 )
+PLAYWRIGHT_MODULE = os.path.join(
+    PLAYWRIGHT_ROOT,
+    "node_modules",
+    "playwright",
+)
 PLAYWRIGHT_SMOKE_SCRIPT = os.path.join(PLAYWRIGHT_ROOT, "browser-smoke.js")
 PLAYWRIGHT_MCP_WRAPPER = "/usr/local/bin/infra-tools-playwright-mcp"
 PLAYWRIGHT_DOCTOR_WRAPPER = "/usr/local/bin/infra-tools-playwright-doctor"
@@ -65,16 +70,27 @@ PLAYWRIGHT_DEPS_MARKER = (
     f"/var/lib/infra_tools/state/playwright-deps-{PLAYWRIGHT_VERSION}"
 )
 
+_BROWSER_EXECUTABLE_SCRIPT = (
+    f'const {{ chromium }} = require("{PLAYWRIGHT_MODULE}"); '
+    "process.stdout.write(chromium.executablePath());"
+)
+
 
 _MCP_WRAPPER_CONTENT = (
     "#!/bin/sh\n"
     "set -eu\n"
     "umask 077\n"
     'export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"\n'
+    f'browser_path="$({SYSTEM_NODE} -e {shlex.quote(_BROWSER_EXECUTABLE_SCRIPT)})"\n'
+    'if [ ! -x "$browser_path" ]; then\n'
+    '  echo "Managed Playwright Chromium is not executable: $browser_path" >&2\n'
+    "  exit 1\n"
+    "fi\n"
     'output_dir="$HOME/.local/state/infra_tools/playwright-mcp"\n'
     'mkdir -p "$output_dir"\n'
     'chmod 0700 "$output_dir"\n'
     f"exec {SYSTEM_NODE} {PLAYWRIGHT_MCP_CLI} --headless --isolated \\\n"
+    '  --executable-path "$browser_path" \\\n'
     "  --caps vision \\\n"
     '  --output-dir "$output_dir" \\\n'
     f"  --timeout-settle {PLAYWRIGHT_MCP_SETTLE_TIMEOUT_MS} \\\n"
@@ -95,7 +111,9 @@ _SMOKE_SCRIPT_CONTENT = f"""'use strict';
 const {{ chromium }} = require('{PLAYWRIGHT_ROOT}/node_modules/playwright');
 
 (async () => {{
+  const executablePath = chromium.executablePath();
   const browser = await chromium.launch({{
+    executablePath,
     headless: true,
     timeout: {PLAYWRIGHT_SMOKE_ACTION_TIMEOUT_MS},
   }});
