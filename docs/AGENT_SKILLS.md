@@ -14,12 +14,26 @@ base skills:
 | --- | --- |
 | `infra-tools-agent-operations` | Readiness checks, deliberate terminal-agent updates, maintenance holds, and controller-side credential rotation |
 | `infra-tools-agent-workspace` | Isolated branches and worktrees for concurrent tasks |
-| `infra-tools-browser-testing` | Choosing collaborative T3 preview or VM-local Playwright and distinguishing client from VM reachability |
 | `infra-tools-deploy-smoke` | Preflight and layered smoke checks for test deployments |
 | `infra-tools-shared-assets` | SMB/SSHFS asset boundaries and Git LFS workflows |
 | `infra-tools-vm-triage` | Redacted host diagnostics and support snapshots |
 
-Provisioned capabilities add focused skills:
+Browser guidance is selected from the resolved setup instead of being included
+in the base catalog:
+
+| Skill | Installed browser capabilities |
+| --- | --- |
+| `infra-tools-playwright-testing` | Managed Playwright only |
+| `infra-tools-t3-preview-testing` | T3 Code collaborative preview only |
+| `infra-tools-browser-testing` | Both managed Playwright and T3 Code preview |
+
+The combined skill selects Playwright for repeatable VM-origin work when live
+collaboration is unnecessary, and selects T3 preview for shared interaction or
+client-origin checks. It routes immediately to Playwright when the T3 app is
+closed. T3-only guidance treats a closed app or untrusted client certificate as
+a browser coverage gap, not a prerequisite that blocks non-browser work.
+
+Other provisioned capabilities add focused skills:
 
 | Skill | Installed with |
 | --- | --- |
@@ -27,10 +41,9 @@ Provisioned capabilities add focused skills:
 | `infra-tools-web-gateway` | T3 Code setup or the Godot web bundle; the skill publishes and verifies managed static snapshots or live forwards |
 | `infra-tools-godot-web` | Godot web bundle |
 
-The browser-testing skill is useful even when Playwright is absent: it tells an
-agent to prefer a collaborative preview when attached and to verify the local
-browser capability before relying on it. A skill does not install the
-capability it describes.
+A skill does not install the capability it describes. A setup with neither T3
+Code nor managed Playwright receives no browser skill, avoiding instructions
+for tools that cannot exist on that VM.
 
 Claude Code does not consume the shared Codex/OpenCode skill location, so a
 Claude-only setup receives the agent management command but not this skill set.
@@ -39,9 +52,10 @@ Claude-only setup receives the agent management command but not this skill set.
 
 Setup copies repository-owned `SKILL.md` files into the target account. A rerun
 refreshes files containing `managed-by: infra_tools` and leaves identical files
-alone. It refuses symlinked paths, directories owned by another user, and a
-same-name skill without the managed marker. Removing a tool or capability does
-not delete skills or other user configuration.
+alone. It removes obsolete infra-tools-managed browser variants when the
+selected capability combination changes, while preserving unrelated skills and
+user configuration. It refuses symlinked paths, directories owned by another
+user, and a same-name skill without the managed marker.
 
 An older VM receives the current base set when its saved setup is rerun from an
 updated infra-tools control plane. `infra-tools agent update` updates Codex,
@@ -49,17 +63,19 @@ Claude Code, or OpenCode executables; it does not refresh infra-tools or these
 skills.
 
 For an explicit `--steps` setup, `install_agent_workflow_skills` installs the
-base set. The T3 Code and Godot capability steps reconcile that same base set
-alongside their focused skills, so capability-only and custom-step runs still
-produce a complete catalog.
+base and selected browser set. The Playwright, T3 Code, and Godot capability
+steps reconcile the relevant catalog as well, so capability-only and
+custom-step runs still produce appropriate guidance.
 
 ## Maintaining the catalog
 
 Skill sources live in `common/agent_skills`. Keep each entrypoint short and
 self-contained, with a precise discovery description and only non-obvious VM
 behavior. Add a base skill to `BASE_AGENT_SKILL_NAMES` in
-`common/agent_steps.py`; capability skill tuples should extend that constant so
-standalone capability setup remains complete.
+`common/agent_steps.py`. Browser variants belong in
+`BROWSER_AGENT_SKILL_NAMES` and the capability selector; other capability skill
+tuples should extend the base constant so standalone capability setup remains
+complete.
 
 Validate changes with the repository tests and the Codex skill validator when
 it is available:

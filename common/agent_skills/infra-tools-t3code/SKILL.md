@@ -81,23 +81,18 @@ redacted readiness records. Release a hold promptly after protected work.
 
 ## Browser previews
 
-Use the `infra-tools-browser-testing` skill. Prefer T3 Code's collaborative
-preview when attached. Do not interpret a navigation failure alone as a lost
-preview host. If preview status still works, inspect a snapshot and its network
-entry. A `chrome-error://chromewebdata/` document with
-`net::ERR_CERT_AUTHORITY_INVALID` means the connected client must follow the
-browser-testing skill's fingerprint verification and CA enrollment procedure;
-it is not a T3 service failure or a reason to weaken TLS.
+Use the browser skill installed for this VM: `infra-tools-browser-testing` when
+managed Playwright is also provisioned, or
+`infra-tools-t3-preview-testing` when T3 preview is the only browser surface.
+Those skills account for the preview depending on the connected T3 application
+remaining open.
 
-If preview status or opening explicitly reports that no automation host is
-available, immediately probe the separate VM-local fallback with:
-
-```bash
-infra-tools agent doctor --capability browser --json
-```
-
-The optional VM-local browser is an SSH fallback and tests a different network
-origin from the connected client's preview.
+An explicit preview `net::ERR_CERT_AUTHORITY_INVALID` is a connected-client
+trust issue, not a T3 service failure. Certificate enrollment is optional: use
+Playwright when available, or skip the affected browser operation and continue
+with server checks. Offer the verified `infra-web ca` enrollment URL and
+fingerprint only when the user wants collaborative preview access restored.
+Never weaken TLS or require client trust to complete unrelated work.
 
 ## Pairing
 

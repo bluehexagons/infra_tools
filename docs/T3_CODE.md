@@ -31,8 +31,9 @@ infra-tools agent web pair vm.example agent
 ```
 
 T3 Code sessions can expose collaborative preview tools through the client.
-Prefer those tools for interactive page inspection when available. To retain a
-VM-local Chromium fallback for SSH-only Codex or OpenCode sessions, request it
+Use them when shared interaction or client-origin evidence matters. For
+repeatable browser work that does not require collaboration, or a dependable
+browser while the T3 application is closed, request VM-local Chromium
 explicitly during setup:
 
 ```bash
@@ -42,13 +43,17 @@ infra-tools setup agent_code_vm vm.example agent \
 
 The collaborative preview uses the connected device's routes and certificate
 store, not the VM's. If it remains attached but renders
-`ERR_CERT_AUTHORITY_INVALID` for an `infra-web` URL, follow
-[Client CA trust](CLIENT_CA_TRUST.md) for verified enrollment on Linux,
-Windows, ChromeOS, or Android. A timeout or unreachable private address needs
-network diagnosis instead.
+`ERR_CERT_AUTHORITY_INVALID` for an `infra-web` URL, certificate enrollment is
+optional. Route the browser check to managed Playwright when available, or skip
+that collaborative layer and continue server checks. If the user wants preview
+access restored, use `infra-web ca` and [Client CA trust](CLIENT_CA_TRUST.md)
+for verified enrollment on Linux, Windows, ChromeOS, or Android. Never bypass
+TLS or make client trust a prerequisite for unrelated operations. A timeout or
+unreachable private address needs network diagnosis instead.
 
-Agent-enabled T3 setups install the base Codex/OpenCode workflow skills plus
-focused T3 Code and HTTPS-gateway guidance. See
+Agent-enabled T3 setups install T3-only preview guidance, or the combined
+Playwright/T3 skill when both capabilities are selected, plus focused T3 Code
+and HTTPS-gateway guidance. See
 [Managed agent workflow skills](AGENT_SKILLS.md) for the installation matrix.
 The workspace skill uses the safe local lifecycle command:
 

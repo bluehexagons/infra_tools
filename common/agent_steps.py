@@ -32,10 +32,14 @@ AGENT_SKILLS_ROOT = os.path.join(os.path.dirname(__file__), "agent_skills")
 BASE_AGENT_SKILL_NAMES = (
     "infra-tools-agent-operations",
     "infra-tools-agent-workspace",
-    "infra-tools-browser-testing",
     "infra-tools-deploy-smoke",
     "infra-tools-shared-assets",
     "infra-tools-vm-triage",
+)
+BROWSER_AGENT_SKILL_NAMES = (
+    "infra-tools-browser-testing",
+    "infra-tools-playwright-testing",
+    "infra-tools-t3-preview-testing",
 )
 _SKILL_COMPATIBLE_AGENT_TOOLS = frozenset({"codex", "opencode"})
 _AGENT_CLI_MARKER = "# Managed by infra_tools agent setup"
@@ -126,12 +130,44 @@ def _ensure_agent_skill_directory(path: str, uid: int, gid: int) -> bool:
     return True
 
 
+def browser_agent_skill_name(config: SetupConfig) -> str | None:
+    """Return the browser workflow skill matching the selected capabilities."""
+
+    playwright = config.browser_automation == "playwright"
+    t3_preview = "t3code" in (config.web_interfaces or [])
+    if playwright and t3_preview:
+        return "infra-tools-browser-testing"
+    if playwright:
+        return "infra-tools-playwright-testing"
+    if t3_preview:
+        return "infra-tools-t3-preview-testing"
+    return None
+
+
+def agent_workflow_skill_names(config: SetupConfig) -> tuple[str, ...]:
+    """Return base skills plus the capability-specific browser workflow."""
+
+    browser_skill = browser_agent_skill_name(config)
+    if browser_skill is None:
+        return BASE_AGENT_SKILL_NAMES
+    return (*BASE_AGENT_SKILL_NAMES, browser_skill)
+
+
+def _validate_managed_agent_skill_name(skill_name: str) -> None:
+    if not skill_name or any(
+        character not in "abcdefghijklmnopqrstuvwxyz0123456789-"
+        for character in skill_name
+    ):
+        raise ValueError(f"Invalid managed agent skill name: {skill_name}")
+
+
 def install_managed_agent_skills(
     username: str,
     agent_tools: StrList,
     skill_names: tuple[str, ...] = BASE_AGENT_SKILL_NAMES,
     *,
     source_root: str = AGENT_SKILLS_ROOT,
+    reconcile_skill_names: tuple[str, ...] = (),
 ) -> bool:
     """Install shared managed workflow skills for compatible coding agents."""
 
@@ -162,11 +198,7 @@ def install_managed_agent_skills(
         or changed
     )
     for skill_name in skill_names:
-        if not skill_name or any(
-            character not in "abcdefghijklmnopqrstuvwxyz0123456789-"
-            for character in skill_name
-        ):
-            raise ValueError(f"Invalid managed agent skill name: {skill_name}")
+        _validate_managed_agent_skill_name(skill_name)
         source = os.path.join(source_root, skill_name, "SKILL.md")
         validate_filesystem_path(source, must_exist=True)
         if os.path.islink(source) or not os.path.isfile(source):
@@ -202,7 +234,48 @@ def install_managed_agent_skills(
             changed = True
         os.chmod(destination, 0o644)
         os.chown(destination, account.pw_uid, account.pw_gid)
+
+    selected_names = set(skill_names)
+    for skill_name in reconcile_skill_names:
+        _validate_managed_agent_skill_name(skill_name)
+        if skill_name in selected_names:
+            continue
+        skill_dir = os.path.join(skills_root, skill_name)
+        if not os.path.lexists(skill_dir):
+            continue
+        if os.path.islink(skill_dir) or not os.path.isdir(skill_dir):
+            raise RuntimeError(f"Refusing unsafe managed agent skill: {skill_dir}")
+        if os.stat(skill_dir).st_uid != account.pw_uid:
+            raise RuntimeError(
+                f"Refusing agent skill directory owned by another user: {skill_dir}"
+            )
+        destination = os.path.join(skill_dir, "SKILL.md")
+        if not os.path.lexists(destination):
+            continue
+        if os.path.islink(destination) or not os.path.isfile(destination):
+            raise RuntimeError(f"Refusing unsafe managed agent skill: {destination}")
+        with open(destination, encoding="utf-8") as file_obj:
+            content = file_obj.read()
+        if "managed-by: infra_tools" not in content:
+            continue
+        os.unlink(destination)
+        try:
+            os.rmdir(skill_dir)
+        except OSError:
+            pass
+        changed = True
     return changed
+
+
+def reconcile_agent_workflow_skills(config: SetupConfig) -> bool:
+    """Install the selected workflow catalog and remove stale browser variants."""
+
+    return install_managed_agent_skills(
+        config.username,
+        config.selected_agent_tools(),
+        agent_workflow_skill_names(config),
+        reconcile_skill_names=BROWSER_AGENT_SKILL_NAMES,
+    )
 
 
 def install_agent_workflow_skills(config: SetupConfig) -> None:
@@ -214,7 +287,7 @@ def install_agent_workflow_skills(config: SetupConfig) -> None:
     if is_dry_run():
         print("  [DRY-RUN] Would install managed agent workflow skills")
         return
-    changed = install_managed_agent_skills(config.username, selected_tools)
+    changed = reconcile_agent_workflow_skills(config)
     if changed:
         print("  Installed managed agent workflow skills")
     else:

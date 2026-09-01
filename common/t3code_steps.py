@@ -15,9 +15,14 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
-from typing import Iterator, Sequence
+from typing import Iterator
 
-from common.agent_steps import BASE_AGENT_SKILL_NAMES, install_managed_agent_skills
+from common.agent_steps import (
+    BASE_AGENT_SKILL_NAMES,
+    BROWSER_AGENT_SKILL_NAMES,
+    agent_workflow_skill_names,
+    install_managed_agent_skills,
+)
 from common.common_steps import _run_as_login_user
 from lib.atomic_io import write_text_atomic
 from lib.auth_failure_bans import (
@@ -60,10 +65,17 @@ T3_ADMIN_PAIR_SCRIPT = (
 T3_AGENT_SKILLS_ROOT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "agent_skills"
 )
-T3_AGENT_SKILL_NAMES = (
-    *BASE_AGENT_SKILL_NAMES,
+T3_CAPABILITY_AGENT_SKILL_NAMES = (
     "infra-tools-t3code",
     "infra-tools-web-gateway",
+)
+T3_BROWSER_AGENT_SKILL_NAMES = (
+    "infra-tools-browser-testing",
+    "infra-tools-t3-preview-testing",
+)
+T3_AGENT_SKILL_NAMES = (
+    *BASE_AGENT_SKILL_NAMES,
+    *T3_CAPABILITY_AGENT_SKILL_NAMES,
 )
 DEVICE_PAIRING_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-device-pairing"
 DEVICE_PAIRING_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-device-pairing"
@@ -1091,14 +1103,18 @@ def _write_text_if_changed(path: str, content: str, mode: int) -> bool:
     return changed
 
 
-def _ensure_t3_agent_skill(username: str, agent_tools: Sequence[str]) -> bool:
+def _ensure_t3_agent_skill(config: SetupConfig) -> bool:
     """Install managed agent-VM workflow skills for compatible agents."""
 
     return install_managed_agent_skills(
-        username,
-        list(agent_tools),
-        T3_AGENT_SKILL_NAMES,
+        config.username,
+        config.selected_agent_tools(),
+        (
+            *agent_workflow_skill_names(config),
+            *T3_CAPABILITY_AGENT_SKILL_NAMES,
+        ),
         source_root=T3_AGENT_SKILLS_ROOT,
+        reconcile_skill_names=BROWSER_AGENT_SKILL_NAMES,
     )
 
 
@@ -1760,10 +1776,7 @@ def install_t3code_web(config: SetupConfig) -> None:
     os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
     os.chown(t3_cli_wrapper, account.pw_uid, account.pw_gid)
     os.chown(workspace, account.pw_uid, account.pw_gid)
-    _ensure_t3_agent_skill(
-        config.username,
-        config.selected_agent_tools(),
-    )
+    _ensure_t3_agent_skill(config)
 
     if config.device_pairing_providers:
         _configure_device_pairing(config, home, t3_cli_wrapper, host, port)

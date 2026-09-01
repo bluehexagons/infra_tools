@@ -33,13 +33,19 @@ dry run when the selected infra-tools command provides one.
 ## Verify the deployed service
 
 Check the service manager, loopback health endpoint, and public HTTPS endpoint
-as separate layers. Prefer T3 Code's collaborative preview for browser checks.
-If the session is SSH-only and the VM was explicitly provisioned with
-`--browser-automation playwright`, first run:
+as separate layers. Use the capability-specific browser skill installed on the
+VM. Prefer managed Playwright for repeatable VM-origin checks when live
+collaboration is unnecessary; prefer T3 preview when shared client-visible
+evidence or participation matters. Before using managed Playwright, run:
 
 ```bash
 infra-tools agent doctor --capability browser
 ```
+
+If only T3 preview is installed and the application is closed or its client
+does not trust the VM certificate, skip that browser layer and continue with
+the remaining deployment checks. Do not make client certificate enrollment a
+deployment prerequisite.
 
 Capture the deployed commit identifier, HTTP status, and a small set of
 user-visible smoke interactions. Never dump response bodies that may contain

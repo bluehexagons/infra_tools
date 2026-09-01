@@ -10,6 +10,14 @@ Install the CA only on devices that should access this VM. A trusted root CA
 can authenticate any HTTPS name, so confirm the source and fingerprint before
 enrolling it and remove it when the VM is retired or no longer trusted.
 
+Client enrollment is optional. If a T3 Code preview reports a certificate
+error, use managed Playwright on the VM when it is installed, because setup
+already enrolls the managed browser there. Otherwise continue server-side and
+non-browser checks, skip the client-origin browser coverage, and report that
+gap. Follow the enrollment steps below only when the user wants the client to
+open the private HTTPS origin. Never use an insecure TLS bypass as a
+workaround.
+
 ## Confirm that trust is the problem
 
 On the VM, run:

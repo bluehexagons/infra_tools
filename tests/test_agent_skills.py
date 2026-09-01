@@ -11,6 +11,9 @@ from unittest.mock import patch
 from common.agent_steps import (
     AGENT_SKILLS_ROOT,
     BASE_AGENT_SKILL_NAMES,
+    BROWSER_AGENT_SKILL_NAMES,
+    agent_workflow_skill_names,
+    browser_agent_skill_name,
     install_managed_agent_skills,
 )
 from common.godot_web_steps import GODOT_AGENT_SKILLS
@@ -32,7 +35,6 @@ class ManagedAgentSkillTests(unittest.TestCase):
         expected = {
             "infra-tools-agent-operations",
             "infra-tools-agent-workspace",
-            "infra-tools-browser-testing",
             "infra-tools-deploy-smoke",
             "infra-tools-shared-assets",
             "infra-tools-vm-triage",
@@ -83,11 +85,103 @@ class ManagedAgentSkillTests(unittest.TestCase):
         }
         installed_names = {
             *BASE_AGENT_SKILL_NAMES,
+            *BROWSER_AGENT_SKILL_NAMES,
             *T3_AGENT_SKILL_NAMES,
             *GODOT_AGENT_SKILLS,
         }
 
         self.assertEqual(source_names, installed_names)
+
+    def test_selects_browser_skill_for_the_provisioned_capabilities(self) -> None:
+        cases = (
+            (False, None, None),
+            (False, "playwright", "infra-tools-playwright-testing"),
+            (True, None, "infra-tools-t3-preview-testing"),
+            (True, "playwright", "infra-tools-browser-testing"),
+        )
+        for t3_preview, browser_automation, expected in cases:
+            with self.subTest(
+                t3_preview=t3_preview,
+                browser_automation=browser_automation,
+            ):
+                config = SetupConfig(
+                    host="host",
+                    username="agent",
+                    system_type="agent_vm",
+                    agent_tools=["codex"],
+                    web_interfaces=["t3code"] if t3_preview else None,
+                    browser_automation=browser_automation,
+                )
+
+                self.assertEqual(browser_agent_skill_name(config), expected)
+                expected_names = set(BASE_AGENT_SKILL_NAMES)
+                if expected is not None:
+                    expected_names.add(expected)
+                self.assertEqual(
+                    set(agent_workflow_skill_names(config)),
+                    expected_names,
+                )
+
+    def test_reconciles_obsolete_managed_browser_skill_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            account = self._account(home)
+            combined = "infra-tools-browser-testing"
+            playwright = "infra-tools-playwright-testing"
+            with (
+                patch("common.agent_steps.pwd.getpwnam", return_value=account),
+                patch("common.agent_steps.os.chown"),
+            ):
+                install_managed_agent_skills(
+                    "agent",
+                    ["codex"],
+                    (*BASE_AGENT_SKILL_NAMES, combined),
+                    source_root=AGENT_SKILLS_ROOT,
+                    reconcile_skill_names=BROWSER_AGENT_SKILL_NAMES,
+                )
+                self.assertTrue(
+                    install_managed_agent_skills(
+                        "agent",
+                        ["codex"],
+                        (*BASE_AGENT_SKILL_NAMES, playwright),
+                        source_root=AGENT_SKILLS_ROOT,
+                        reconcile_skill_names=BROWSER_AGENT_SKILL_NAMES,
+                    )
+                )
+
+            skill_root = os.path.join(home, ".agents", "skills")
+            self.assertFalse(
+                os.path.exists(os.path.join(skill_root, combined, "SKILL.md"))
+            )
+            self.assertTrue(
+                os.path.isfile(os.path.join(skill_root, playwright, "SKILL.md"))
+            )
+
+    def test_reconciliation_preserves_an_unmanaged_browser_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            combined = "infra-tools-browser-testing"
+            skill_dir = os.path.join(home, ".agents", "skills", combined)
+            os.makedirs(skill_dir)
+            destination = os.path.join(skill_dir, "SKILL.md")
+            with open(destination, "w", encoding="utf-8") as file_obj:
+                file_obj.write("name: user-owned\n")
+
+            with (
+                patch(
+                    "common.agent_steps.pwd.getpwnam",
+                    return_value=self._account(home),
+                ),
+                patch("common.agent_steps.os.chown"),
+            ):
+                install_managed_agent_skills(
+                    "agent",
+                    ["codex"],
+                    (*BASE_AGENT_SKILL_NAMES, "infra-tools-playwright-testing"),
+                    source_root=AGENT_SKILLS_ROOT,
+                    reconcile_skill_names=BROWSER_AGENT_SKILL_NAMES,
+                )
+
+            with open(destination, encoding="utf-8") as file_obj:
+                self.assertEqual(file_obj.read(), "name: user-owned\n")
 
     def test_skips_shared_skills_for_an_unsupported_agent(self) -> None:
         with patch("common.agent_steps.pwd.getpwnam") as getpwnam:

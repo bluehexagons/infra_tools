@@ -9,11 +9,29 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from common.agent_steps import BASE_AGENT_SKILL_NAMES
-from common.t3code_steps import T3_AGENT_SKILL_NAMES, _ensure_t3_agent_skill
+from common.t3code_steps import (
+    T3_AGENT_SKILL_NAMES,
+    _ensure_t3_agent_skill,
+)
 from lib.agent_cli import _t3_agent_skills_ready
+from lib.config import SetupConfig
 
 
 class ManagedT3AgentSkillTests(unittest.TestCase):
+    def _config(
+        self,
+        *tools: str,
+        browser_automation: str | None = None,
+    ) -> SetupConfig:
+        return SetupConfig(
+            host="host",
+            username="agent",
+            system_type="agent_vm",
+            agent_tools=list(tools),
+            web_interfaces=["t3code"],
+            browser_automation=browser_automation,
+        )
+
     def test_installs_all_self_contained_managed_skills(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             account = SimpleNamespace(
@@ -25,26 +43,69 @@ class ManagedT3AgentSkillTests(unittest.TestCase):
                 patch("common.agent_steps.pwd.getpwnam", return_value=account),
                 patch("common.agent_steps.os.chown"),
             ):
-                self.assertTrue(_ensure_t3_agent_skill("agent", ["codex"]))
+                self.assertTrue(_ensure_t3_agent_skill(self._config("codex")))
 
+            expected = {
+                *T3_AGENT_SKILL_NAMES,
+                "infra-tools-t3-preview-testing",
+            }
             self.assertEqual(
-                set(T3_AGENT_SKILL_NAMES),
+                expected,
                 {
                     *BASE_AGENT_SKILL_NAMES,
                     "infra-tools-t3code",
+                    "infra-tools-t3-preview-testing",
                     "infra-tools-web-gateway",
                 },
             )
-            for skill_name in T3_AGENT_SKILL_NAMES:
+            for skill_name in expected:
                 path = os.path.join(home, ".agents", "skills", skill_name, "SKILL.md")
                 with open(path, encoding="utf-8") as file_obj:
                     content = file_obj.read()
                 self.assertIn(f"name: {skill_name}", content)
                 self.assertIn("managed-by: infra_tools", content)
 
+    def test_t3_with_playwright_installs_only_the_combined_browser_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            account = SimpleNamespace(
+                pw_dir=home,
+                pw_uid=os.getuid(),
+                pw_gid=os.getgid(),
+            )
+            with (
+                patch("common.agent_steps.pwd.getpwnam", return_value=account),
+                patch("common.agent_steps.os.chown"),
+            ):
+                self.assertTrue(
+                    _ensure_t3_agent_skill(
+                        self._config("codex", browser_automation="playwright")
+                    )
+                )
+
+            skills_root = os.path.join(home, ".agents", "skills")
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(
+                        skills_root,
+                        "infra-tools-browser-testing",
+                        "SKILL.md",
+                    )
+                )
+            )
+            for absent in (
+                "infra-tools-playwright-testing",
+                "infra-tools-t3-preview-testing",
+            ):
+                self.assertFalse(
+                    os.path.exists(os.path.join(skills_root, absent, "SKILL.md"))
+                )
+
     def test_skips_skill_install_without_a_supported_agent(self) -> None:
+        config = self._config("codex")
+        config.install_codex = False
+        config.install_gh = True
         with patch("common.agent_steps.pwd.getpwnam") as account:
-            self.assertFalse(_ensure_t3_agent_skill("agent", ["gh"]))
+            self.assertFalse(_ensure_t3_agent_skill(config))
         account.assert_not_called()
 
     def test_doctor_requires_the_complete_managed_skill_set(self) -> None:
@@ -55,6 +116,20 @@ class ManagedT3AgentSkillTests(unittest.TestCase):
                 with open(os.path.join(directory, "SKILL.md"), "w", encoding="utf-8") as file_obj:
                     file_obj.write("metadata:\n  managed-by: infra_tools\n")
 
+            self.assertFalse(_t3_agent_skills_ready(home))
+            browser_directory = os.path.join(
+                home,
+                ".agents",
+                "skills",
+                "infra-tools-t3-preview-testing",
+            )
+            os.makedirs(browser_directory)
+            with open(
+                os.path.join(browser_directory, "SKILL.md"),
+                "w",
+                encoding="utf-8",
+            ) as file_obj:
+                file_obj.write("metadata:\n  managed-by: infra_tools\n")
             self.assertTrue(_t3_agent_skills_ready(home))
             os.unlink(
                 os.path.join(

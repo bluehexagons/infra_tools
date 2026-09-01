@@ -187,6 +187,7 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
             "_install_runtime_package",
             "_write_launchers",
             "_install_browser",
+            "reconcile_agent_workflow_skills",
             "_configure_codex",
             "_configure_opencode",
             "_run_smoke_test",
@@ -196,15 +197,17 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
             patch.object(browser_automation_steps, targets[0]) as runtime,
             patch.object(browser_automation_steps, targets[1]) as launchers,
             patch.object(browser_automation_steps, targets[2]) as browser,
-            patch.object(browser_automation_steps, targets[3]) as codex,
-            patch.object(browser_automation_steps, targets[4]) as opencode,
-            patch.object(browser_automation_steps, targets[5]) as smoke,
+            patch.object(browser_automation_steps, targets[3]) as skills,
+            patch.object(browser_automation_steps, targets[4]) as codex,
+            patch.object(browser_automation_steps, targets[5]) as opencode,
+            patch.object(browser_automation_steps, targets[6]) as smoke,
         ):
             browser_automation_steps.install_browser_automation(config)
 
         runtime.assert_called_once_with()
         launchers.assert_called_once_with()
         browser.assert_called_once_with(config)
+        skills.assert_called_once_with(config)
         codex.assert_called_once_with(config)
         opencode.assert_not_called()
         smoke.assert_called_once_with(config)

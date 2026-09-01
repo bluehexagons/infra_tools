@@ -33,10 +33,11 @@ a public plain-HTTP server or edit Nginx and UFW directly.
 
    Treat the returned URL as authoritative. Do not substitute a local port or
    bypass certificate verification with `curl -k` or an equivalent option.
-6. Use a collaborative T3 preview when attached. Otherwise, use VM-local
-   browser automation only after `infra-tools agent doctor --capability
-   browser` succeeds. Confirm that the game canvas initializes without browser
-   console errors.
+6. Use the capability-specific browser skill installed on the VM. Prefer
+   VM-local Playwright for repeatable canvas and console checks when
+   collaboration is unnecessary; use T3 preview for shared, client-origin
+   evidence. Confirm that the game canvas initializes without browser console
+   errors.
 
 Published games are independent and remain available under their stable URLs.
 Use `infra-web list` to inspect them. Remove one only when explicitly requested,
@@ -46,9 +47,11 @@ Setup enrolls the VM-local CA in the managed user's system and VM-local
 Chromium trust stores. A collaborative T3 preview may run on the connected
 client and therefore does not necessarily share that trust store. If only the
 collaborative preview fails, inspect its snapshot and network error. For an
-explicit `ERR_CERT_AUTHORITY_INVALID`, follow the
-`infra-tools-browser-testing` skill to obtain, verify, and enroll the public CA
-on that client. If VM-local automation fails trust, report the failed
+explicit `ERR_CERT_AUTHORITY_INVALID`, follow the installed T3-capable browser
+skill. Client CA enrollment is optional: use VM-local Playwright when
+available, or skip the collaborative browser layer and continue VM checks.
+Offer the verified public CA URL and fingerprint only when the user wants
+preview access restored. If VM-local automation fails trust, report the failed
 capability; rerun the saved setup only when the task includes repairing managed
 trust. Never suppress HTTPS errors.
 

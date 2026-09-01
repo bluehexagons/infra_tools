@@ -40,9 +40,11 @@ For an explicit `--steps` setup, include `install_browser_automation` after
 installing the selected compatible agent; it is available as a registered
 custom step as well.
 
-Compatible agent setups also install the `infra-tools-browser-testing` skill.
-It routes between T3's collaborative preview and this optional VM-local
-fallback; see [Managed agent workflow skills](AGENT_SKILLS.md).
+Compatible agent setups install `infra-tools-playwright-testing` when this is
+the only browser capability. A VM that also provisions T3 Code receives the
+combined `infra-tools-browser-testing` skill instead. Setup removes a stale
+infra-tools-managed browser variant when that capability combination changes;
+see [Managed agent workflow skills](AGENT_SKILLS.md).
 
 ## Installed components and agent configuration
 
@@ -119,6 +121,20 @@ secret workflow appropriate to the task; do not put passwords or session tokens
 in setup commands, repository files, prompts intended for logging, or agent
 configuration. Isolated mode discards any cookies created during the session.
 
+## Choosing Playwright or collaborative preview
+
+Playwright is not limited to emergency fallback use. Prefer it for repeatable
+headless interactions, DOM/console/network inspection, canvas input, VM
+loopback access, and browser-engine checks that do not need live collaboration.
+It remains available when the connected T3 application is closed.
+
+Prefer T3 Code's preview when the user should watch or participate, evidence
+must appear in the collaborative UI, or the task specifically tests the
+connected client's network or certificate trust. When either surface is
+equally suitable, an already attached preview is useful; otherwise VM-local
+Playwright is the dependable default. Agents should state which network origin
+produced evidence when that affects the conclusion.
+
 ## Collaborative preview and private networks
 
 T3 Code's collaborative preview and the managed Playwright fallback do not use
@@ -148,8 +164,9 @@ automation host may be attached. These are expected coverage states, not
 application-health failures and not reasons to pause unrelated implementation
 or non-browser verification.
 
-Agents should call preview status first and open a preview once when no
-automation-capable tab is attached. A tab with `visible: false` may still
+When the task selects collaborative preview, agents should call preview status
+first and open a preview once when no automation-capable tab is attached. A tab
+with `visible: false` may still
 navigate and accept input, but a minimized T3 window can make snapshots or
 recordings fail. Attempt one snapshot after navigation. If capture fails or
 times out while the tab remains available and invisible, do not repeatedly
@@ -176,9 +193,10 @@ private-URL navigation fails, separate the failure layers:
    error before treating a generic navigation failure as a detached preview;
 3. check whether the client reports a certificate error, as opposed to a
    timeout or unreachable route;
-4. use `infra-web ca` only for explicit client certificate trust errors, then
-   follow [Client CA trust](CLIENT_CA_TRUST.md) for fingerprint verification
-   and Linux, Windows, ChromeOS, or Android enrollment;
+4. for an explicit client certificate trust error, route to VM-local
+   Playwright or skip the collaborative layer; offer `infra-web ca` and
+   [Client CA trust](CLIENT_CA_TRUST.md) only when the user wants to restore
+   preview access;
 5. use the explicitly provisioned VM-local browser when a VM-origin rendering
    check is appropriate and the current agent integration permits it.
 
@@ -194,6 +212,11 @@ A client-only reachability failure is not evidence that the hosted site is
 down. Do not respond by weakening TLS, expanding gateway/firewall exposure, or
 rebinding the application. Report which network origin passed and which one
 failed so the operator can decide whether that client should have access.
+
+Client CA enrollment is never required for unrelated work. If the user does
+not want to change client trust, retain normal TLS verification, use healthy
+VM-local Playwright when it fits, and mark only the collaborative client-origin
+coverage as skipped.
 
 ## Verification
 

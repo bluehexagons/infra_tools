@@ -120,17 +120,22 @@ The guided `infra-tools shell` workstation-development flow offers the
 data-analysis bundle as a separate, default-off choice and uses the saved
 choice as the default when starting from a template.
 
-T3 Code sessions should prefer the client's collaborative preview tools when
-they are available. Add `--browser-automation playwright` when Codex or
-OpenCode also needs a VM-local Chromium fallback, including SSH-only sessions:
+Choose the browser surface for the task. Prefer managed Playwright for
+repeatable VM-origin checks and when user collaboration is unnecessary;
+prefer T3 Code's preview for a shared browser or client-origin behavior. Add
+`--browser-automation playwright` when Codex or OpenCode should provide both,
+including SSH-only sessions and checks that must continue while the T3 Code
+application is closed:
 
 ```bash
 infra-tools setup agent_code_vm 10.0.0.25 agent \
   --browser-automation playwright
 ```
 
-The fallback remains saved and restored on rerun. It is intentionally opt-in
-because its matching browser downloads can consume more than a gigabyte.
+The capability remains saved and restored on rerun. It is intentionally opt-in
+because its matching browser downloads can consume more than a gigabyte. Setup
+installs browser workflow guidance tailored to the resulting Playwright-only,
+T3-only, or combined capability set.
 
 ### Desktop agentic coding workstation with RDP
 

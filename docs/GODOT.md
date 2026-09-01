@@ -152,10 +152,13 @@ certificate covering the configured identities, active non-loopback interface
 addresses, system hostname, and loopback names. It also enrolls the CA in each
 managed user's Chromium NSS database, so Playwright and Chromium-based agents
 on the VM trust the same origin as system tools. A browser on another computer
-must trust that VM CA once; a publicly trusted certificate cannot be issued
-automatically for a private IP or an unowned internal hostname. Setup prints
-the CA file fingerprint, and the user-readable certificate is available on the
-VM at:
+must trust that VM CA only if it needs to open the private origin; client CA
+enrollment is optional. Until the user chooses to enroll it, use managed
+Playwright on the VM for browser coverage or skip the client-origin browser
+check and continue with server-side verification. A publicly trusted
+certificate cannot be issued automatically for a private IP or an unowned
+internal hostname. Setup prints the CA file fingerprint, and the user-readable
+certificate is available on the VM at:
 
 ```text
 /srv/infra-tools/web/infra-tools-ca.crt

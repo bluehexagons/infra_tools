@@ -1871,14 +1871,25 @@ def _t3_skill_ready(path: str) -> bool:
 
 def _t3_agent_skills_ready(home: str) -> bool:
     """Verify every workflow skill selected by the managed T3 setup."""
-    from common.t3code_steps import T3_AGENT_SKILL_NAMES
+    from common.t3code_steps import (
+        T3_AGENT_SKILL_NAMES,
+        T3_BROWSER_AGENT_SKILL_NAMES,
+    )
 
-    return all(
+    core_ready = all(
         _t3_skill_ready(
             os.path.join(home, ".agents", "skills", skill_name, "SKILL.md")
         )
         for skill_name in T3_AGENT_SKILL_NAMES
     )
+    browser_skills = [
+        skill_name
+        for skill_name in T3_BROWSER_AGENT_SKILL_NAMES
+        if _t3_skill_ready(
+            os.path.join(home, ".agents", "skills", skill_name, "SKILL.md")
+        )
+    ]
+    return core_ready and len(browser_skills) == 1
 
 
 def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict:

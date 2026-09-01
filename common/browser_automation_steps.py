@@ -18,6 +18,7 @@ from .agent_steps import (
     _reject_symlinked_agent_destination,
     _tool_available,
     _user_home,
+    reconcile_agent_workflow_skills,
 )
 from .common_steps import _run_as_login_user
 
@@ -525,6 +526,7 @@ def install_browser_automation(config: SetupConfig) -> None:
         _install_runtime_package()
     _write_launchers()
     _install_browser(config)
+    reconcile_agent_workflow_skills(config)
 
     selected_tools = set(config.selected_agent_tools())
     if "codex" in selected_tools:
