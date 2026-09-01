@@ -11,17 +11,31 @@ and its network access as part of the security design.
 | --- | --- | --- | --- |
 | Default | Member of `sudo`; password required | Auto-reviewed requests, workspace write access, no default shell network access | Interactive development and learning |
 | `--nopasswd` | Unrestricted `NOPASSWD:ALL` on a VM | Same Codex policy as default | Compatibility and convenient non-root setup reruns |
-| `--harden-agent` | Removed from `sudo` | Workspace write access, no approval escalation, no default shell network access | CI/CD, disposable evaluation, and less-trusted packages |
+| `--harden-agent` | Removed from administrator and root-equivalent supplementary groups | Workspace write access; no approval, web search, credential-path reads, active browser/computer features, plugins, or MCP servers | Interactive evaluation of less-trusted code |
+| `--harden-user` | `--harden-agent` plus locked password, mode-`0700` home, no sensitive log groups, and no systemd lingering | Same hardened Codex boundary | Headless CI/CD and more restricted disposable evaluation |
 
-`--nopasswd` and `--harden-agent` are mutually exclusive. A newly provisioned
+`--nopasswd` cannot be combined with either hardened mode. `--harden-user`
+implies `--harden-agent` and cannot be combined with RDP because XRDP needs an
+account password. A newly provisioned
 VM temporarily receives the passwordless rule needed for the streamed setup
 handoff. Normal setup removes it before completion. Root SSH remains available
 for later setup runs and recovery, but SSH password authentication remains
 disabled; protect the authorized private key as a root credential.
 
-The hardened flag does not lock the login itself. SSH and an explicitly
-configured desktop remain usable, while the coding identity cannot become an
-administrator through `sudo`.
+`--harden-agent` does not lock the login itself. SSH and an explicitly
+configured desktop remain usable. `--harden-user` locks only Unix password
+authentication rather than expiring the account, so authorized-key SSH stays
+available. It also disables systemd lingering; an explicitly selected T3 Code
+service enables lingering again because that service requires a persistent
+user manager.
+
+Infra-tools journals group removals and the original wider account settings in
+`/var/lib/infra_tools/agent-user-security/UID.json` before changing them.
+Use `--no-harden-user` to return to agent-only hardening, or combine it with
+`--no-harden-agent` to restore all recorded settings. An omitted hardening
+option preserves the saved posture during a patch. The root-owned mode-`0600`
+state follows the numeric user identity, so an infra-tools user rename does not
+orphan the rollback information.
 
 ## Codex enforcement
 
@@ -40,10 +54,13 @@ Codex sessions safer by default.
 
 `--harden-agent` also writes `/etc/codex/requirements.toml` and selects `never`
 within the same workspace boundary. In that mode there is no approval path to
-add permissions, login shells are disabled, and Codex native browser/computer
-use, app screenshots, remote control, and unmanaged hooks are disallowed.
-Package installation or another command that needs network access should fail
-rather than gain it through automatic review.
+add permissions. Live web search, login shells, apps and plugins, MCP servers,
+native browser/computer use, app screenshots, remote control, and unmanaged
+hooks are disallowed. The filesystem policy also denies common credential
+locations such as `.ssh`, `.gnupg`, cloud/Kubernetes configuration, GitHub CLI
+auth, package-registry credentials, Docker auth, `/run/secrets`, and `.env`
+files. Package installation or another command that needs network access
+should fail rather than gain it through automatic review.
 
 Hardened requirements are constraints, not warning preferences. Returning to
 the default posture removes an infra-tools-owned requirements file so all Codex
@@ -52,9 +69,9 @@ preserved in the default posture; hardened setup refuses to replace them, so
 organization policy must be merged deliberately.
 
 This policy covers Codex. Other provider CLIs retain their provider-native
-permission model. T3 collaborative preview and separately configured MCP
-servers are also distinct capabilities; the Codex native browser/computer
-restriction does not remove them.
+permission model. T3 collaborative preview remains a distinct client
+capability, but hardened Codex sessions cannot load MCP servers from their
+configuration.
 
 ## Accepted convenience boundaries
 
@@ -64,9 +81,10 @@ restriction does not remove them.
   the private CA. Non-loopback access requires a private/non-global source
   allowlist and active UFW. Prefer the printed managed HTTPS URL whenever the
   client can trust the VM CA.
-- Provider, Git, and GitHub credentials live under the coding identity. Code
-  running as that identity can generally read that identity's files. GitHub
-  token redesign and brokerage are outside this phase.
+- Provider, Git, and GitHub credentials live under the coding identity.
+  Hardened Codex blocks the common paths listed above, but other provider CLIs
+  and arbitrary code running directly as that identity can generally read that
+  identity's files. GitHub token redesign and brokerage are outside this phase.
 - T3 Code and agent CLIs use their documented vendor distribution/update
   channels. This reduces arbitrary download sources but does not independently
   prove every upstream artifact or transitive dependency.
@@ -79,7 +97,7 @@ hardened posture at creation:
 ```bash
 infra-tools setup agent_vm 10.0.0.40 agent \
   --provision-on pve1 \
-  --harden-agent \
+  --harden-user \
   --git-access read \
   --no-browser-automation \
   --no-default-web-ports
@@ -91,11 +109,11 @@ VM egress at the hypervisor or network firewall when packages should not reach
 the Internet. Snapshot or reprovision the VM instead of treating a clean Git
 status as proof that untrusted install scripts made no persistent changes.
 
-The hardened flag limits OS privilege and Codex shell escalation. It does not
-isolate projects from other files owned by the same user, inspect dependency
-behavior, constrain every external MCP service, or protect credentials already
-available to that UID. Use a disposable identity or VM when those boundaries
-matter.
+The hardened flags limit OS privilege and Codex capabilities. They do not
+isolate projects from other files owned by the same user outside Codex,
+inspect dependency behavior, constrain other provider CLIs, or protect
+credentials already available to arbitrary processes under that UID. Use a
+disposable identity or VM when those boundaries matter.
 
 ## Related documentation
 

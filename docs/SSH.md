@@ -102,6 +102,12 @@ The normal VM setup flow removes that bootstrap rule before completion. Pass
 Without that flag, rerun setup through the retained key-only root SSH account;
 the configured user remains in `sudo`, but sudo requires its password.
 `--harden-agent` also removes the configured user from the `sudo` group.
+It also reconciles other administrator and root-equivalent supplementary
+groups. `--harden-user` implies that policy, locks Unix password
+authentication, and makes the home directory private while leaving
+authorized-key SSH usable. A later root-driven setup with
+`--no-harden-user --no-harden-agent` restores the account settings that
+infra-tools recorded before the lockdown.
 For an existing VM that was not provisioned by infra-tools, grant the setup
 account the intended `NOPASSWD` sudo rule before the first setup or connect as
 root. The temporary managed rule is removed unless `--nopasswd` is selected.

@@ -50,6 +50,7 @@ PLUGIN = PluginDefinition(
         "configure_mdns",
         "configure_static_network",
         "setup_user",
+        "configure_agent_user_security",
         "copy_ssh_keys_to_user",
         "generate_ssh_key",
         "configure_time_sync",
@@ -83,6 +84,7 @@ def get_common_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     )
     from security.steps import create_remoteusers_group
     from common.storage_steps import setup_vm_storage
+    from common.agent_security_steps import configure_agent_user_security
     from lib.vm_storage import has_home_mount
 
     storage_step = (
@@ -99,6 +101,7 @@ def get_common_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         *(storage_step if has_home_mount(config) else []),
         ("Setting up user", setup_user),
         *(storage_step if not has_home_mount(config) else []),
+        ("Configuring agent user security", configure_agent_user_security),
         ("Copying SSH keys to user", copy_ssh_keys_to_user),
         ("Generating SSH key for user", generate_ssh_key),
         ("Configuring time synchronization", configure_time_sync),
@@ -380,7 +383,10 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         install_opencode,
         reconcile_agent_storage,
     )
-    from common.agent_security_steps import configure_codex_security_policy
+    from common.agent_security_steps import (
+        configure_agent_user_security,
+        configure_codex_security_policy,
+    )
     from common.t3code_steps import install_t3code_web
     from common.web_panel_steps import configure_web_panel
     from common.git_credential_steps import configure_git_https_credentials
@@ -425,6 +431,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "configure_mdns": configure_mdns,
         "configure_static_network": configure_static_network,
         "setup_user": setup_user,
+        "configure_agent_user_security": configure_agent_user_security,
         "copy_ssh_keys_to_user": copy_ssh_keys_to_user,
         "generate_ssh_key": generate_ssh_key,
         "configure_time_sync": configure_time_sync,

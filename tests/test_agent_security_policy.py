@@ -11,9 +11,16 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.agent_security_steps import configure_codex_security_policy
+from common.agent_security_steps import (
+    configure_agent_user_security,
+    configure_codex_security_policy,
+)
 from lib.config import SetupConfig
-from plugins.common import extend_agent_steps, get_custom_step_functions
+from plugins.common import (
+    extend_agent_steps,
+    get_common_steps,
+    get_custom_step_functions,
+)
 
 
 class TestCodexSecurityPolicy(unittest.TestCase):
@@ -67,9 +74,19 @@ class TestCodexSecurityPolicy(unittest.TestCase):
         self.assertEqual(config["approval_policy"], "never")
         self.assertFalse(config["allow_login_shell"])
         self.assertEqual(requirements["allowed_approval_policies"], ["never"])
+        self.assertEqual(requirements["allowed_web_search_modes"], [])
         self.assertTrue(requirements["allow_managed_hooks_only"])
         self.assertFalse(requirements["allow_browser_and_computer_use"])
         self.assertFalse(requirements["allow_remote_control"])
+        self.assertIn("~/.ssh", requirements["permissions"]["filesystem"]["deny_read"])
+        self.assertIn(
+            "~/.config/gh",
+            requirements["permissions"]["filesystem"]["deny_read"],
+        )
+        self.assertFalse(requirements["features"]["apps"])
+        self.assertFalse(requirements["features"]["plugins"])
+        self.assertFalse(requirements["features"]["browser_use"])
+        self.assertEqual(requirements["mcp_servers"], {})
 
     def test_rerun_can_switch_an_infra_tools_owned_policy(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -187,6 +204,29 @@ class TestCodexSecurityPolicySteps(unittest.TestCase):
         self.assertIs(
             get_custom_step_functions()["configure_codex_security_policy"],
             configure_codex_security_policy,
+        )
+
+    def test_user_policy_is_exported_and_runs_after_user_setup(self):
+        self.assertIs(
+            get_custom_step_functions()["configure_agent_user_security"],
+            configure_agent_user_security,
+        )
+        config = SetupConfig(
+            host="testhost",
+            username="agent",
+            system_type="agent_vm",
+            machine_type="vm",
+        )
+
+        labels = [label for label, _step in get_common_steps(config)]
+
+        self.assertLess(
+            labels.index("Setting up user"),
+            labels.index("Configuring agent user security"),
+        )
+        self.assertLess(
+            labels.index("Configuring agent user security"),
+            labels.index("Copying SSH keys to user"),
         )
 
     def test_policy_runs_before_t3_code_starts(self):

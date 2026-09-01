@@ -170,10 +170,21 @@ def add_setup_arguments(
     )
     parser.add_argument(
         "--harden-agent",
-        action="store_true",
+        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+        default=None if not for_remote else False,
         help=(
-            "Remove the non-root setup user from sudo and apply the hardened "
+            "Remove privileged supplementary groups and apply the hardened "
             "coding-agent policy; cannot be combined with --nopasswd"
+        ),
+    )
+    parser.add_argument(
+        "--harden-user",
+        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+        default=None if not for_remote else False,
+        help=(
+            "Also lock password login, make the home private, remove sensitive "
+            "groups, and disable user lingering; implies --harden-agent and "
+            "cannot be combined with --rdp"
         ),
     )
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")

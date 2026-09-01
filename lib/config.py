@@ -340,6 +340,7 @@ class SetupConfig:
     password: MaybeStr = None
     nopasswd: bool = False
     harden_agent: bool = False
+    harden_user: bool = False
     ssh_key: MaybeStr = None
     timezone: str = "UTC"
     system_hostname: MaybeStr = None
@@ -527,10 +528,21 @@ class SetupConfig:
         if self.deployment_mode == "full":
             self.full_deploy = True
 
+        if self.harden_user:
+            self.harden_agent = True
         if self.nopasswd and self.harden_agent:
-            raise ValueError("--nopasswd cannot be combined with --harden-agent")
+            raise ValueError(
+                "--nopasswd cannot be combined with --harden-agent or "
+                "--harden-user"
+            )
         if self.harden_agent and self.username == "root":
-            raise ValueError("--harden-agent requires a non-root setup user")
+            flag = "--harden-user" if self.harden_user else "--harden-agent"
+            raise ValueError(f"{flag} requires a non-root setup user")
+        if self.harden_user and self.enable_rdp:
+            raise ValueError(
+                "--harden-user locks password authentication and cannot be "
+                "combined with --rdp"
+            )
 
         if self.install_data_analysis_tools:
             self.install_python = True
@@ -868,7 +880,9 @@ class SetupConfig:
             args.append(f"--password {shlex.quote(self.password)}")
         if self.nopasswd:
             args.append("--nopasswd")
-        if self.harden_agent:
+        if self.harden_user:
+            args.append("--harden-user")
+        elif self.harden_agent:
             args.append("--harden-agent")
         
         if self.timezone:
@@ -1239,7 +1253,9 @@ class SetupConfig:
 
         if self.nopasswd:
             cmd_parts.append("--nopasswd")
-        if self.harden_agent:
+        if self.harden_user:
+            cmd_parts.append("--harden-user")
+        elif self.harden_agent:
             cmd_parts.append("--harden-agent")
 
         if self.hosted_node:
@@ -1797,6 +1813,8 @@ class SetupConfig:
         )
         data['install_av_tools'] = bool(self.install_av_tools)
         data['install_gl_tools'] = bool(self.install_gl_tools)
+        data['harden_agent'] = bool(self.harden_agent)
+        data['harden_user'] = bool(self.harden_user)
         data['enable_syncthing'] = bool(self.enable_syncthing)
         if self.enable_syncthing and not self.syncthing_root:
             data['syncthing_root'] = DEFAULT_SYNCTHING_ROOT
@@ -2223,7 +2241,8 @@ class SetupConfig:
             machine_type=machine_type,
             password=getattr(args, 'password', None),
             nopasswd=_optional_bool_arg(args, 'nopasswd') is True,
-            harden_agent=_optional_bool_arg(args, 'harden_agent') is True,
+            harden_agent=_optional_bool_arg(args, 'harden_agent'),
+            harden_user=_optional_bool_arg(args, 'harden_user'),
             ssh_key=getattr(args, 'ssh_key', None),
             timezone=timezone,
             system_hostname=getattr(args, 'system_hostname', None),
