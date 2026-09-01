@@ -99,6 +99,26 @@ The upstream launcher writes application startup failures, including native
 module load errors, to `~/.t3/userdata/logs/boot-service.log`. systemd's journal
 primarily records the launcher lifecycle.
 
+Service readiness does not exercise the connected desktop client's preview
+presentation. One recognizable stale state returns successful background
+navigation or DOM results while `preview_open` produces no visible sidebar or
+floating surface, status remains `visible: false`, and snapshots fail. Do not
+open replacement tabs or diagnose the application and network from that state.
+Restarting only the desktop client may retain the VM-side tab registry. If the
+user accepts interruption of all active T3 sessions, the bounded recovery is:
+
+```bash
+systemctl --user restart t3code.service
+```
+
+Reconnect the client and retry one status/open cycle. Prefer managed Playwright
+or non-browser checks when collaboration is optional. Restart the service
+before considering a whole-VM reboot so VM-side T3 state is isolated.
+infra-tools does not automatically restart a healthy T3 service on a normal
+setup rerun or maintenance schedule because that could terminate the agent
+session performing the setup; refresh/update paths already restart when the
+managed runtime or service configuration actually changes.
+
 T3 Code does not silently update after setup. A normal infra-tools rerun keeps
 the active healthy version. The T3 client can offer an explicit **Update
 server** action for this background service; prefer that action after active

@@ -94,6 +94,15 @@ with server checks. Offer the verified `infra-web ca` enrollment URL and
 fingerprint only when the user wants collaborative preview access restored.
 Never weaken TLS or require client trust to complete unrelated work.
 
+A healthy T3 doctor result does not exercise the connected desktop client's
+preview-presentation bridge. If background preview navigation or DOM checks
+work but `preview_open` produces no visible UI and snapshots keep failing, use
+the installed browser skill's stale-preview workflow. Restarting the desktop
+client may not clear VM-side tab state. Only after the user accepts interruption
+of active T3 sessions, restart the managed server with
+`systemctl --user restart t3code.service`, reconnect, and retry once. Do not
+turn this deliberate recovery into an automatic setup or monitoring restart.
+
 ## Pairing
 
 From the control system, request a one-time pairing URL:

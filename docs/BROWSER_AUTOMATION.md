@@ -177,6 +177,26 @@ When collaborative evidence is important, restoring T3 should make the
 existing tab capturable; recheck status and retry that tab rather than opening
 duplicates.
 
+A narrower failure is possible when `preview_open` returns a usable background
+tab but the desktop application never mounts a sidebar or floating preview:
+status remains `visible: false`, lightweight DOM operations can succeed, and
+snapshot capture fails or times out. This is stale T3 preview-presentation
+state, not proof of an application, route, certificate, or VM browser failure.
+Do not create more tabs. Restarting the desktop client may preserve the stale
+tab registry in the VM-side service. Use managed Playwright when collaboration
+is optional. If collaborative coverage is required, warn that every active T3
+session will be interrupted and, only with the user's approval, restart the
+server as the target user:
+
+```bash
+systemctl --user restart t3code.service
+```
+
+Reconnect the desktop client and retry status/open once. Do not use a full VM
+reboot as the first recovery step. Normal setup reruns deliberately do not
+restart an otherwise healthy T3 service because setup may itself be running
+through an active T3 session.
+
 For WebAssembly and WebGL applications, successful browser navigation can
 precede runtime initialization. A snapshot containing only a splash screen or
 progress bar confirms document rendering but not application readiness. Wait

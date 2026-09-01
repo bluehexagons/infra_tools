@@ -75,6 +75,27 @@ Opening a tab or seeing the requested URL in status is not proof of rendering.
 Confirm visible content or a snapshot. For WebAssembly/WebGL, allow one bounded
 startup interval beyond document load before judging the application frame.
 
+If `preview_open` reports a tab but no preview surface appears, status remains
+`visible: false`, and a snapshot fails, do not create more tabs. Confirm the T3
+application is open, retry the same tab once, and use a read-only page check
+only when it helps distinguish a working background renderer from a failed
+navigation. Background DOM access with no mounted UI and repeated snapshot
+failure indicates stale T3 preview-presentation state, not an application,
+route, certificate, or Playwright failure.
+
+Restarting the desktop client may leave that state in the VM-side T3 service.
+Use healthy Playwright while collaboration is optional. If client-visible
+coverage is required and the user explicitly accepts interruption of every
+active T3 session, restart the managed server as the target user:
+
+```bash
+systemctl --user restart t3code.service
+```
+
+Reconnect the client, then run status and open once against the new attachment.
+Never restart the service silently, repeatedly, or merely because a preview is
+closed; a full VM reboot is not the first recovery step.
+
 ## Certificate errors are optional to repair
 
 Only treat an explicit `net::ERR_CERT_AUTHORITY_INVALID` preview network entry

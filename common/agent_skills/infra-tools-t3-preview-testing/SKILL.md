@@ -28,6 +28,25 @@ one snapshot after navigation. If it fails while the tab remains hidden, stop
 retrying and continue with non-browser checks. Opening a tab or seeing a URL in
 status does not prove the page rendered; confirm visible content or a snapshot.
 
+If `preview_open` reports success but the user sees no preview surface, status
+stays `visible: false`, and snapshot capture fails, reuse the same tab for at
+most one confirmation. A read-only page check may show that a background
+renderer works even though T3 did not mount its UI. Treat that combination as
+stale preview-presentation state rather than an application, route, or TLS
+failure, and do not create replacement tabs.
+
+Restarting only the desktop client may preserve VM-side preview state. When
+collaborative coverage is required and the user explicitly accepts interruption
+of every active T3 session, restart the managed server as the target user:
+
+```bash
+systemctl --user restart t3code.service
+```
+
+Reconnect the client and try status/open once. Never restart the service
+silently or for ordinary preview absence. Without approval, leave the browser
+operation skipped; a full VM reboot is not the first recovery step.
+
 ## Network origin
 
 The preview runs in the connected client's context, not on the VM. An
