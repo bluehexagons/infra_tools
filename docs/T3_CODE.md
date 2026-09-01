@@ -41,6 +41,15 @@ infra-tools setup agent_code_vm vm.example agent \
   --browser-automation playwright
 ```
 
+For a collaborative check, status may report `available: true` with no current
+tab; that means the automation host is attached and the agent should open one
+tab, not that preview is unavailable. After opening, use a snapshot-first
+workflow and verify the rendered result of each input rather than relying on a
+successful dispatch response. Viewport presets retain the desktop user agent,
+and recording paths belong to the connected client's artifact store. See
+[Agent browser automation](BROWSER_AUTOMATION.md) for the full interaction,
+evidence, and fallback contract.
+
 The collaborative preview uses the connected device's routes and certificate
 store, not the VM's. If it remains attached but renders
 `ERR_CERT_AUTHORITY_INVALID` for an `infra-web` URL, certificate enrollment is
@@ -225,8 +234,11 @@ active-runtime repair is available after setup:
 infra-tools agent doctor --capability t3code --fix
 ```
 
-As of 2026-08-29, infra-tools was checked against T3 Code v0.0.36. That release
-uses service-state protocol 2, keeps the same `node-pty` and
+As of 2026-09-01, infra-tools service and collaborative-preview checks pass with
+T3 Code v0.0.37, including preview open, snapshot, semantic input, scrolling,
+viewport and appearance emulation, and client-side recording. Keyboard helpers
+still require outcome verification like every other dispatched action. The
+validated runtime uses service-state protocol 2, keeps the same `node-pty` and
 `msgpackr-extract` native dependencies, and requires Node.js `^22.16`,
 `^23.11`, or `>=24.10`. It also raises supported file uploads to 50 MiB;
 infra-tools applies the matching request-body limit to T3's managed HTTPS route

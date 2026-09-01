@@ -18,6 +18,10 @@ Call `preview_status` first. If no automation-capable tab is attached, call
 application is a normal coverage limitation, not evidence that the web
 application is unhealthy.
 
+`available: true` with `tabId: null` means the automation host is reachable but
+this agent session has no current tab. Open once and retain the returned tab ID;
+do not classify that status as preview unavailability.
+
 When the preview is unavailable, continue with build, unit, service, loopback
 HTTP, and managed gateway checks. Report which collaborative browser behavior
 was not exercised. Do not install Playwright ad hoc, bind a service to
@@ -27,6 +31,23 @@ A hidden tab may still navigate while raster capture is unavailable. Attempt
 one snapshot after navigation. If it fails while the tab remains hidden, stop
 retrying and continue with non-browser checks. Opening a tab or seeing a URL in
 status does not prove the page rendered; confirm visible content or a snapshot.
+
+Snapshot before interaction and prefer its semantic role/name locators. A
+successful action response proves dispatch, not the page outcome, so verify the
+expected state with a bounded wait, another snapshot, or a read-only state
+check. If keyboard input produces no expected change, use an equivalent
+semantic click when appropriate and report the keyboard behavior as unverified;
+do not mutate page state through evaluation to fake the check.
+
+Device presets change the CSS viewport but retain the desktop user agent.
+Snapshot again after resize or scroll, and expect scroll position to persist
+across some resizes. Restore appearance emulation to `system` after light/dark
+checks unless the task requires otherwise. Recording output belongs to the
+connected client's artifact store rather than the VM; stop every recording and
+use its returned artifact metadata without trying to read the client path from
+the VM. The current snapshot can appear as `running` in its own action timeline
+while the response is assembled; that self-entry is not a hung action after the
+snapshot has returned.
 
 If `preview_open` reports success but the user sees no preview surface, status
 stays `visible: false`, and snapshot capture fails, reuse the same tab for at

@@ -60,6 +60,12 @@ simply be closed or minimized. A hidden tab may still accept navigation while
 snapshot or recording capture is unavailable; attempt one snapshot before
 classifying coverage.
 
+`available: true` with `tabId: null` means the automation host is attached but
+this agent session has no current tab. Call `preview_open` once; do not report
+the collaborative browser as unavailable from that status alone. Preserve the
+returned `tabId` for later actions instead of relying on an implicit current
+tab after an agent-session boundary.
+
 Preview absence is a normal fallback condition. Continue immediately with
 healthy Playwright when VM-origin testing fits the task. Do not treat the
 closed T3 application as an application failure.
@@ -74,6 +80,29 @@ firewall solely for automation.
 Opening a tab or seeing the requested URL in status is not proof of rendering.
 Confirm visible content or a snapshot. For WebAssembly/WebGL, allow one bounded
 startup interval beyond document load before judging the application frame.
+
+Take a snapshot before interaction and prefer its semantic role/name locators
+over coordinates or CSS selectors. Treat a successful input helper response as
+dispatch evidence, not proof of the application outcome: follow it with a
+bounded `preview_wait_for`, snapshot, or read-only state check. If a keyboard
+helper produces no expected state change, use the equivalent semantic click
+when the task permits and report the keyboard path as unverified. Do not mutate
+the page with evaluation merely to manufacture a passing result.
+
+Viewport presets exercise CSS layout breakpoints without changing the desktop
+browser user agent. Snapshot again after resize or scroll because coordinates
+and element visibility change, and note that the scroll position can persist
+across a resize. Use appearance emulation for light/dark checks, then restore
+`system` unless the task needs the override left in place.
+
+Start a recording only when video evidence is useful and always stop it. The
+returned recording path belongs to the connected client's artifact store, not
+the VM filesystem, so use the returned artifact metadata/link rather than
+trying to copy that path from the VM. Keep credentials and unrelated user data
+out of recordings. A snapshot action timeline can show the snapshot currently
+being assembled as `running`; once the snapshot response returns, judge prior
+actions and the returned page state instead of treating that self-entry as a
+hung action.
 
 If `preview_open` reports a tab but no preview surface appears, status remains
 `visible: false`, and a snapshot fails, do not create more tabs. Confirm the T3

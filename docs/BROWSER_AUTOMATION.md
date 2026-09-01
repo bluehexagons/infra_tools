@@ -177,6 +177,40 @@ When collaborative evidence is important, restoring T3 should make the
 existing tab capturable; recheck status and retry that tab rather than opening
 duplicates.
 
+Preview availability and tab attachment are separate states. A status response
+with `available: true` and `tabId: null` confirms an automation host but means
+the current agent session has no selected tab. Open once, retain the returned
+tab ID, and use it explicitly after an agent-session boundary. Do not describe
+that state as a detached or unavailable preview.
+
+Once a visible tab is attached, use a snapshot-first workflow. Snapshot output
+provides visible text, accessibility data, semantic locators, console and
+network diagnostics, a screenshot, and recent action history. Prefer role/name
+locators from that output. Treat a successful type, press, click, or scroll
+response as proof that T3 dispatched the helper, not proof that the application
+changed: verify the expected text, URL, or rendered state with a bounded wait or
+follow-up snapshot. In particular, if a keyboard helper produces no expected
+event or application change, use the equivalent semantic click when the test
+allows it and record the keyboard path as unverified. Do not inject mutations
+through page evaluation merely to turn an unverified interaction green.
+
+Viewport presets change CSS layout dimensions while preserving T3's desktop
+browser user agent; they are breakpoint checks, not full mobile-device
+emulation. Re-snapshot after resizing or scrolling before using coordinates,
+and account for a scroll position that persists across viewport changes. Light,
+dark, and system appearance emulation changes `prefers-color-scheme`; restore
+the system setting after a bounded comparison unless the user asked to leave an
+override.
+
+Collaborative recordings are saved by the connected client. The returned path
+can therefore name a client filesystem that is not mounted on the agent VM;
+use T3's returned artifact metadata or link instead of trying to read or copy
+that path from the VM. Start recording only when video adds useful evidence,
+stop it promptly, and avoid credentials or unrelated user data. A snapshot's
+action timeline can show the snapshot currently being constructed as `running`.
+When the response itself has returned, that self-entry is expected; use prior
+completed actions and the returned page state to assess success.
+
 A narrower failure is possible when `preview_open` returns a usable background
 tab but the desktop application never mounts a sidebar or floating preview:
 status remains `visible: false`, lightweight DOM operations can succeed, and
