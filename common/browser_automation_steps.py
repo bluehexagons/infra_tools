@@ -74,6 +74,9 @@ _BROWSER_EXECUTABLE_SCRIPT = (
     f'const {{ chromium }} = require("{PLAYWRIGHT_MODULE}"); '
     "process.stdout.write(chromium.executablePath());"
 )
+_BROWSER_EXECUTABLE_COMMAND = (
+    f"{SYSTEM_NODE} -e {shlex.quote(_BROWSER_EXECUTABLE_SCRIPT)}"
+)
 
 
 _MCP_WRAPPER_CONTENT = (
@@ -81,8 +84,8 @@ _MCP_WRAPPER_CONTENT = (
     "set -eu\n"
     "umask 077\n"
     'export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"\n'
-    f'browser_path="$({SYSTEM_NODE} -e {shlex.quote(_BROWSER_EXECUTABLE_SCRIPT)})"\n'
-    'if [ ! -x "$browser_path" ]; then\n'
+    f'browser_path="$({_BROWSER_EXECUTABLE_COMMAND})"\n'
+    'if [ ! -f "$browser_path" ] || [ ! -x "$browser_path" ]; then\n'
     '  echo "Managed Playwright Chromium is not executable: $browser_path" >&2\n'
     "  exit 1\n"
     "fi\n"
@@ -400,7 +403,10 @@ def _install_browser(config: SetupConfig) -> bool:
     browser_ready = not config.refresh_packages and _run_as_login_user(
         config.username,
         user_home,
-        f"test -f \"{browser_marker}\"",
+        'export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" && '
+        f'test -f "{browser_marker}" && '
+        f'test -f "$({_BROWSER_EXECUTABLE_COMMAND})" && '
+        f'test -x "$({_BROWSER_EXECUTABLE_COMMAND})"',
         check=False,
     ).returncode == 0
     if browser_ready:
@@ -412,6 +418,8 @@ def _install_browser(config: SetupConfig) -> bool:
         user_home,
         "export PLAYWRIGHT_BROWSERS_PATH=\"$HOME/.cache/ms-playwright\" && "
         f"{SYSTEM_NODE} {shlex.quote(PLAYWRIGHT_CLI)} install chromium && "
+        f'test -f "$({_BROWSER_EXECUTABLE_COMMAND})" && '
+        f'test -x "$({_BROWSER_EXECUTABLE_COMMAND})" && '
         f"mkdir -p \"$HOME/.cache/ms-playwright\" && "
         f"printf '%s\\n' {shlex.quote(PLAYWRIGHT_VERSION)} > \"{browser_marker}\"",
     )

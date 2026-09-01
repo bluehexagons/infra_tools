@@ -209,6 +209,55 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
         opencode.assert_not_called()
         smoke.assert_called_once_with(config)
 
+    def test_browser_install_skips_only_with_marker_and_executable(self) -> None:
+        config = _config("codex")
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (
+            patch.object(browser_automation_steps, "_user_home", return_value="/home/agent"),
+            patch.object(browser_automation_steps.os.path, "exists", return_value=True),
+            patch.object(
+                browser_automation_steps,
+                "_run_as_login_user",
+                return_value=completed,
+            ) as run_as_user,
+        ):
+            changed = browser_automation_steps._install_browser(config)
+
+        self.assertFalse(changed)
+        run_as_user.assert_called_once()
+        probe = run_as_user.call_args.args[2]
+        self.assertIn('test -f "$HOME/.cache/ms-playwright/.infra-tools-chromium-', probe)
+        self.assertIn('test -f "$(/usr/bin/node -e ', probe)
+        self.assertIn('test -x "$(/usr/bin/node -e ', probe)
+
+    def test_browser_install_verifies_executable_before_recording_marker(self) -> None:
+        config = _config("codex")
+        missing_executable = SimpleNamespace(returncode=1, stdout="", stderr="")
+        installed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (
+            patch.object(browser_automation_steps, "_user_home", return_value="/home/agent"),
+            patch.object(browser_automation_steps.os.path, "exists", return_value=True),
+            patch.object(
+                browser_automation_steps,
+                "_run_as_login_user",
+                side_effect=[missing_executable, installed],
+            ) as run_as_user,
+        ):
+            changed = browser_automation_steps._install_browser(config)
+
+        self.assertTrue(changed)
+        self.assertEqual(run_as_user.call_count, 2)
+        install_command = run_as_user.call_args_list[1].args[2]
+        self.assertIn(
+            'test -f "$(/usr/bin/node -e ',
+            install_command,
+        )
+        self.assertIn(
+            'test -x "$(/usr/bin/node -e ',
+            install_command,
+        )
+        self.assertIn("printf '%s\\n'", install_command)
+
     def test_opencode_registration_merges_existing_configuration(self) -> None:
         config = _config("opencode")
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -334,6 +383,10 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
         self.assertIn("--headless", content)
         self.assertIn("--isolated", content)
         self.assertIn("chromium.executablePath()", content)
+        self.assertIn(
+            'if [ ! -f "$browser_path" ] || [ ! -x "$browser_path" ]; then',
+            content,
+        )
         self.assertIn('--executable-path "$browser_path"', content)
         self.assertIn("--caps vision", content)
         self.assertIn('umask 077', content)

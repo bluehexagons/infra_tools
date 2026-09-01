@@ -51,6 +51,9 @@ Setup installs the exact Playwright MCP version declared by infra-tools under
 integrity metadata, installs native browser dependencies, and downloads the
 matching Chromium build into the target user's Playwright cache. npm lifecycle
 scripts are disabled during the root-owned package install.
+The setup marker is written only after the resolved pinned Chromium executable is
+present and executable, so a stale marker cannot suppress a required browser
+download.
 
 The managed launchers are:
 
