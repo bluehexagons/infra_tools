@@ -362,11 +362,12 @@ requires the account password. `--nopasswd` restores the former VM-wide
 identity from `sudo`; it is intended for CI/CD, disposable evaluation, and
 less-trusted package work where agent-controlled privilege escalation is not
 acceptable. Codex sessions use auto-reviewed workspace permissions by default;
-the system requirements reject full-access session requests. Hardened sessions
-stay in the workspace boundary with no approval escalation and also disable
-Codex native browser/computer use, remote control, and unmanaged hooks. See
-[Agentic coding security](AGENT_SECURITY.md) for the exact boundaries and
-supply-chain guidance.
+standard sessions still allow an explicit user or client selection of full
+access and YOLO-like modes. Hardened sessions stay in the workspace boundary
+with no approval escalation and also disable Codex native browser/computer use,
+remote control, and unmanaged hooks. See [Agentic coding
+security](AGENT_SECURITY.md) for the exact boundaries and supply-chain
+guidance.
 The shared CLI baseline includes small coding and inspection tools such as
 `ripgrep` (`rg`), `jq`, SQLite, `file`, `tree`, `make`, and `patch`. The
 substantially larger Python analysis/notebook stack remains opt-in through

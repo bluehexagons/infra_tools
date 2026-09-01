@@ -65,12 +65,14 @@ Agent-enabled T3 setups install T3-only preview guidance, or the combined
 Playwright/T3 skill when both capabilities are selected, plus focused T3 Code
 and HTTPS-gateway guidance. See
 [Managed agent workflow skills](AGENT_SKILLS.md) for the installation matrix.
-When Codex is selected, root-owned Codex requirements constrain new T3 sessions
-to auto-reviewed workspace access even though the upstream T3 runtime currently
-requests full access by default. `--harden-agent` uses the same workspace
-boundary without an approval escalation path. This is a Codex policy and does
-not change another provider CLI's native permission model or remove T3's
-collaborative preview. See [Agentic coding security](AGENT_SECURITY.md).
+When Codex is selected, root-owned Codex defaults make direct CLI sessions use
+auto-reviewed workspace access. They do not restrict explicit user or client
+choices, so T3 can retain its upstream full-access default and users can select
+other Codex permission modes. `--harden-agent` adds system requirements that
+enforce the workspace boundary without an approval escalation path. This is a
+Codex policy and does not change another provider CLI's native permission model
+or remove T3's collaborative preview. See
+[Agentic coding security](AGENT_SECURITY.md).
 The workspace skill uses the safe local lifecycle command:
 
 ```bash

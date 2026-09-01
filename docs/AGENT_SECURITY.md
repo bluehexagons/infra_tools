@@ -25,31 +25,31 @@ administrator through `sudo`.
 
 ## Codex enforcement
 
-When Codex is selected, setup writes root-owned system policy to:
+When Codex is selected, setup writes root-owned system defaults to:
 
 ```text
 /etc/codex/config.toml
-/etc/codex/requirements.toml
 ```
 
 The default policy selects `on-request`, the `auto_review` reviewer, and the
-`:workspace` permission profile. Requirements allow only read-only or workspace
-sandboxing, so a client request for `danger-full-access` cannot silently widen
-the session. This also constrains T3 Code's upstream full-access default without
-patching T3's immutable installed runtime; Codex falls back to the compatible
-managed policy for new sessions.
+`:workspace` permission profile. These are low-precedence defaults, not
+restrictions: users and clients can still select full access, YOLO-like modes,
+or another supported profile. T3 Code may continue to request its upstream
+full-access default. This preserves an explicit user choice while making direct
+Codex sessions safer by default.
 
-`--harden-agent` selects `never` within the same workspace boundary. In that
-mode there is no approval path to add permissions, login shells are disabled,
-and Codex native browser/computer use, app screenshots, remote control, and
-unmanaged hooks are disallowed. Package installation or another command that
-needs network access should fail rather than gain it through automatic review.
+`--harden-agent` also writes `/etc/codex/requirements.toml` and selects `never`
+within the same workspace boundary. In that mode there is no approval path to
+add permissions, login shells are disabled, and Codex native browser/computer
+use, app screenshots, remote control, and unmanaged hooks are disallowed.
+Package installation or another command that needs network access should fail
+rather than gain it through automatic review.
 
-The requirements are constraints, not warning preferences. An administrator
-can deliberately replace the system policy as root. Setup updates files marked
-as infra-tools-owned but refuses to overwrite an existing unmanaged Codex
-policy; merge organization requirements deliberately instead of letting a VM
-setup weaken them.
+Hardened requirements are constraints, not warning preferences. Returning to
+the default posture removes an infra-tools-owned requirements file so all Codex
+choices are available again. Administrator-owned defaults and requirements are
+preserved in the default posture; hardened setup refuses to replace them, so
+organization policy must be merged deliberately.
 
 This policy covers Codex. Other provider CLIs retain their provider-native
 permission model. T3 collaborative preview and separately configured MCP

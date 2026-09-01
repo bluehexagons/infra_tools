@@ -42,27 +42,13 @@ class TestCodexSecurityPolicy(unittest.TestCase):
                 os.path.join(policy_dir, "config.toml"), "rb"
             ) as file_obj:
                 config = tomllib.load(file_obj)
-            with open(
-                os.path.join(policy_dir, "requirements.toml"), "rb"
-            ) as file_obj:
-                requirements = tomllib.load(file_obj)
+            requirements_path = os.path.join(policy_dir, "requirements.toml")
+            self.assertFalse(os.path.exists(requirements_path))
 
         self.assertEqual(config["approval_policy"], "on-request")
         self.assertEqual(config["approvals_reviewer"], "auto_review")
         self.assertEqual(config["default_permissions"], ":workspace")
         self.assertFalse(config["sandbox_workspace_write"]["network_access"])
-        self.assertEqual(
-            requirements["allowed_approval_policies"], ["on-request"]
-        )
-        self.assertEqual(
-            requirements["allowed_approvals_reviewers"], ["auto_review"]
-        )
-        self.assertNotIn(
-            "danger-full-access", requirements["allowed_sandbox_modes"]
-        )
-        self.assertNotIn(
-            ":danger-full-access", requirements["allowed_permission_profiles"]
-        )
 
     def test_hardened_policy_disables_approval_escalation_and_active_tools(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -97,7 +83,59 @@ class TestCodexSecurityPolicy(unittest.TestCase):
 
         self.assertEqual(requirements["allowed_approval_policies"], ["never"])
 
-    def test_refuses_to_replace_unmanaged_policy(self):
+    def test_returning_to_standard_removes_managed_requirements(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            policy_dir = os.path.join(temporary, "codex")
+            self._configure(policy_dir, hardened=True)
+            self._configure(policy_dir)
+
+            with open(
+                os.path.join(policy_dir, "config.toml"), "rb"
+            ) as file_obj:
+                config = tomllib.load(file_obj)
+
+            self.assertFalse(
+                os.path.exists(os.path.join(policy_dir, "requirements.toml"))
+            )
+
+        self.assertEqual(config["approval_policy"], "on-request")
+
+    def test_standard_preserves_unmanaged_policy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            policy_dir = os.path.join(temporary, "codex")
+            os.makedirs(policy_dir)
+            with open(
+                os.path.join(policy_dir, "config.toml"), "w", encoding="utf-8"
+            ) as file_obj:
+                file_obj.write('approval_policy = "never"\n')
+
+            self._configure(policy_dir)
+
+            with open(
+                os.path.join(policy_dir, "config.toml"),
+                "r",
+                encoding="utf-8",
+            ) as file_obj:
+                existing = file_obj.read()
+
+        self.assertEqual(existing, 'approval_policy = "never"\n')
+
+    def test_standard_preserves_unmanaged_requirements(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            policy_dir = os.path.join(temporary, "codex")
+            os.makedirs(policy_dir)
+            requirements_path = os.path.join(policy_dir, "requirements.toml")
+            with open(requirements_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write('allowed_approval_policies = ["never"]\n')
+
+            self._configure(policy_dir)
+
+            with open(requirements_path, "r", encoding="utf-8") as file_obj:
+                existing = file_obj.read()
+
+        self.assertEqual(existing, 'allowed_approval_policies = ["never"]\n')
+
+    def test_hardened_refuses_to_replace_unmanaged_policy(self):
         with tempfile.TemporaryDirectory() as temporary:
             policy_dir = os.path.join(temporary, "codex")
             os.makedirs(policy_dir)
@@ -109,7 +147,7 @@ class TestCodexSecurityPolicy(unittest.TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "Refusing to replace unmanaged Codex policy"
             ):
-                self._configure(policy_dir)
+                self._configure(policy_dir, hardened=True)
 
     def test_preflights_both_policy_files_before_writing(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -125,7 +163,7 @@ class TestCodexSecurityPolicy(unittest.TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "Refusing to replace unmanaged Codex policy"
             ):
-                self._configure(policy_dir)
+                self._configure(policy_dir, hardened=True)
 
             self.assertFalse(
                 os.path.exists(os.path.join(policy_dir, "config.toml"))

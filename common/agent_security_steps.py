@@ -6,7 +6,7 @@ import os
 import stat
 import tomllib
 
-from lib.atomic_io import write_text_atomic
+from lib.atomic_io import remove_file_durable, write_text_atomic
 from lib.config import SetupConfig
 from lib.remote_utils import is_dry_run
 
@@ -34,23 +34,19 @@ def _codex_config_content(*, hardened: bool) -> str:
     )
 
 
-def _codex_requirements_content(*, hardened: bool) -> str:
-    approval_policy = "never" if hardened else "on-request"
-    reviewer = "user" if hardened else "auto_review"
+def _codex_requirements_content() -> str:
     hardening = (
         "allow_login_shell = false\n"
         "allow_managed_hooks_only = true\n"
         "allow_browser_and_computer_use = false\n"
         "allow_appshots = false\n"
         "allow_remote_control = false\n"
-        if hardened
-        else ""
     )
     return (
         f"{_MANAGED_MARKER}\n"
-        f"# Policy: {'hardened' if hardened else 'standard'}\n"
-        f'allowed_approval_policies = ["{approval_policy}"]\n'
-        f'allowed_approvals_reviewers = ["{reviewer}"]\n'
+        "# Policy: hardened\n"
+        'allowed_approval_policies = ["never"]\n'
+        'allowed_approvals_reviewers = ["user"]\n'
         'allowed_sandbox_modes = ["read-only", "workspace-write"]\n'
         'default_permissions = ":workspace"\n'
         f"{hardening}"
@@ -86,6 +82,19 @@ def _validate_managed_codex_policy_target(path: str) -> None:
             )
 
 
+def _is_managed_codex_policy(path: str) -> bool:
+    """Return whether an existing regular policy file belongs to infra-tools."""
+
+    if not os.path.lexists(path):
+        return False
+    path_stat = os.lstat(path)
+    if not stat.S_ISREG(path_stat.st_mode):
+        return False
+    with open(path, "r", encoding="utf-8") as file_obj:
+        existing = file_obj.read()
+    return existing.startswith(f"{_MANAGED_MARKER}\n")
+
+
 def _write_managed_codex_policy(path: str, content: str) -> None:
     """Atomically replace only an absent or infra-tools-owned policy file."""
 
@@ -105,7 +114,7 @@ def _write_managed_codex_policy(path: str, content: str) -> None:
 
 
 def configure_codex_security_policy(config: SetupConfig) -> None:
-    """Set and enforce the selected Codex approval and workspace boundary."""
+    """Set overridable Codex defaults or enforce the hardened boundary."""
 
     policy_name = "hardened" if config.harden_agent else "auto-reviewed workspace"
     if is_dry_run():
@@ -120,19 +129,26 @@ def configure_codex_security_policy(config: SetupConfig) -> None:
         CODEX_SYSTEM_CONFIG_DIR, CODEX_REQUIREMENTS_NAME
     )
     config_content = _codex_config_content(hardened=config.harden_agent)
-    requirements_content = _codex_requirements_content(
-        hardened=config.harden_agent
-    )
     tomllib.loads(config_content)
-    tomllib.loads(requirements_content)
-    _validate_managed_codex_policy_target(config_path)
-    _validate_managed_codex_policy_target(requirements_path)
-    _write_managed_codex_policy(
-        config_path,
-        config_content,
-    )
-    _write_managed_codex_policy(
-        requirements_path,
-        requirements_content,
-    )
+    if config.harden_agent:
+        requirements_content = _codex_requirements_content()
+        tomllib.loads(requirements_content)
+        _validate_managed_codex_policy_target(config_path)
+        _validate_managed_codex_policy_target(requirements_path)
+        _write_managed_codex_policy(config_path, config_content)
+        _write_managed_codex_policy(requirements_path, requirements_content)
+    else:
+        if not os.path.lexists(config_path) or _is_managed_codex_policy(
+            config_path
+        ):
+            _write_managed_codex_policy(config_path, config_content)
+        else:
+            print(f"  ! Preserving unmanaged Codex defaults: {config_path}")
+
+        if _is_managed_codex_policy(requirements_path):
+            remove_file_durable(requirements_path)
+        elif os.path.lexists(requirements_path):
+            print(
+                f"  ! Preserving unmanaged Codex requirements: {requirements_path}"
+            )
     print(f"  ✓ Codex {policy_name} policy configured")
