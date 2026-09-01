@@ -125,7 +125,7 @@ class TestNodeSetup(unittest.TestCase):
         baseline_checks = {"count": 0}
 
         def run_command(command: str, *args, **kwargs):
-            if "command -v pnpm" in command:
+            if "pnpm --version" in command:
                 baseline_checks["count"] += 1
                 return SimpleNamespace(
                     returncode=1 if baseline_checks["count"] == 1 else 0,
@@ -150,6 +150,75 @@ class TestNodeSetup(unittest.TestCase):
         self.assertTrue(any("nvm install --lts" in command for command in commands))
         self.assertTrue(any("npm install -g pnpm" in command for command in commands))
         self.assertEqual(baseline_checks["count"], 2)
+        self.assertFalse(any("command -v pnpm" in command for command in commands))
+
+    @patch("common.common_steps.open", new_callable=mock_open, read_data='export NVM_DIR="$HOME/.nvm"\n')
+    @patch("common.common_steps.os.path.exists")
+    @patch("common.common_steps.run")
+    @patch("common.common_steps.get_user_home", return_value="/home/user")
+    def test_refresh_fails_when_pnpm_cannot_report_a_version(
+        self,
+        _get_home,
+        mock_run,
+        mock_exists,
+        _open,
+    ):
+        mock_exists.side_effect = lambda path: path in {
+            "/home/user/.nvm",
+            "/home/user/.nvm/nvm.sh",
+            "/home/user/.npm",
+        }
+
+        def run_command(command: str, *args, **kwargs):
+            return SimpleNamespace(
+                returncode=1 if "pnpm --version" in command else 0,
+                stdout="",
+                stderr="",
+            )
+
+        mock_run.side_effect = run_command
+        config = SetupConfig(
+            host="host",
+            username="user",
+            system_type="server_web",
+            install_node=True,
+            refresh_packages=True,
+        )
+
+        with (
+            patch.object(common_steps, "_ensure_user_tool_shell_environment"),
+            self.assertRaisesRegex(RuntimeError, "could not verify the refreshed"),
+        ):
+            common_steps.install_node(config)
+
+    @patch("common.common_steps.open", new_callable=mock_open, read_data='export NVM_DIR="$HOME/.nvm"\n')
+    @patch("common.common_steps.os.path.exists")
+    @patch("common.common_steps.run")
+    @patch("common.common_steps.get_user_home", return_value="/home/user")
+    def test_existing_unloadable_nvm_fails_setup(
+        self,
+        _get_home,
+        mock_run,
+        mock_exists,
+        _open,
+    ):
+        mock_exists.side_effect = lambda path: path in {
+            "/home/user/.nvm",
+            "/home/user/.nvm/nvm.sh",
+        }
+        mock_run.return_value = SimpleNamespace(returncode=1, stdout="", stderr="")
+        config = SetupConfig(
+            host="host",
+            username="user",
+            system_type="server_web",
+            install_node=True,
+        )
+
+        with (
+            patch.object(common_steps, "_ensure_user_tool_shell_environment"),
+            self.assertRaisesRegex(RuntimeError, "could not be loaded"),
+        ):
+            common_steps.install_node(config)
 
 
 if __name__ == "__main__":

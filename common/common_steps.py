@@ -987,6 +987,22 @@ def install_go(config: SetupConfig) -> None:
     print(f"  ✓ Go {go_version} installed")
 
 
+def _node_baseline_is_usable(
+    username: str,
+    user_home: str,
+    nvm_env: str,
+) -> bool:
+    """Return whether the nvm default Node, npm, and pnpm commands run."""
+    result = _run_as_login_user(
+        username,
+        user_home,
+        f"{nvm_env} && node --version >/dev/null 2>&1 && "
+        "npm --version >/dev/null 2>&1 && pnpm --version >/dev/null 2>&1",
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def install_node_for_user(
     username: str,
     user_home: str,
@@ -1020,18 +1036,10 @@ def install_node_for_user(
         if verify_result.returncode == 0:
             print("  ✓ nvm already installed")
         else:
-            print("  ⚠ nvm is installed but could not be loaded for user")
-            return
+            raise RuntimeError("Existing nvm installation could not be loaded for user")
 
         if not refresh:
-            baseline_result = _run_as_login_user(
-                username,
-                user_home,
-                f"{nvm_env} && command -v node >/dev/null && "
-                "command -v npm >/dev/null && command -v pnpm >/dev/null",
-                check=False,
-            )
-            if baseline_result.returncode == 0:
+            if _node_baseline_is_usable(username, user_home, nvm_env):
                 return
 
             print("  Repairing Node.js LTS, npm, and pnpm baseline")
@@ -1047,15 +1055,8 @@ def install_node_for_user(
                 user_home,
                 f"{nvm_env} && npm install -g pnpm{npm_freshness_suffix}",
             )
-            repaired_result = _run_as_login_user(
-                username,
-                user_home,
-                f"{nvm_env} && command -v node >/dev/null && "
-                "command -v npm >/dev/null && command -v pnpm >/dev/null",
-                check=False,
-            )
             _chown_existing_paths(username, _user_tool_paths(user_home))
-            if repaired_result.returncode != 0:
+            if not _node_baseline_is_usable(username, user_home, nvm_env):
                 raise RuntimeError(
                     "Node.js setup could not restore the node, npm, and pnpm baseline"
                 )
@@ -1080,6 +1081,10 @@ def install_node_for_user(
             f"{nvm_env} && npm install -g pnpm{npm_freshness_suffix}",
         )
         _chown_existing_paths(username, _user_tool_paths(user_home))
+        if not _node_baseline_is_usable(username, user_home, nvm_env):
+            raise RuntimeError(
+                "Node.js setup could not verify the refreshed node, npm, and pnpm baseline"
+            )
         print("  ✓ Node.js LTS + NPM (latest) + PNPM refreshed for user")
         return
     
@@ -1097,8 +1102,7 @@ def install_node_for_user(
     )
     _chown_existing_paths(username, _user_tool_paths(user_home))
     if result.returncode != 0 or not os.path.exists(nvm_sh):
-        print("  ✗ nvm installation failed")
-        return
+        raise RuntimeError("nvm installation failed")
     
     # Install Node.js LTS
     nvm_env = f"export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
@@ -1124,6 +1128,10 @@ def install_node_for_user(
     
     _ensure_nvm_shell_init(username, user_home)
     _chown_existing_paths(username, _user_tool_paths(user_home))
+    if not _node_baseline_is_usable(username, user_home, nvm_env):
+        raise RuntimeError(
+            "Node.js setup could not verify the installed node, npm, and pnpm baseline"
+        )
     
     print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed for user")
 

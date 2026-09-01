@@ -58,8 +58,9 @@ Node.js and uv use a conservative default policy:
   package versions are preserved when the runtime changes. If package migration
   fails, the updater restores the previous default and removes only the
   incomplete new runtime. A later setup rerun verifies the promised
-  Node/npm/PNPM baseline and repairs it if a manual change left one of those
-  commands unavailable.
+  Node/npm/PNPM baseline by running each version command and repairs it if a
+  manual change left one unavailable or unusable. Setup fails visibly when the
+  repaired baseline still cannot run instead of leaving a false-success state.
 - uv updates the uv executable itself, but uv-managed tools are upgraded only
   when ecosystem upgrades are enabled.
 - Gogs validates a downloaded release before activation and rolls back the
