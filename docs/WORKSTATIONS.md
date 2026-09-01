@@ -98,9 +98,10 @@ content; the usual `local-lvm` thin pool is appropriate for the guest root disk
 but not for `--image-storage`.
 
 The profile does not supply implicit web or RDP source ranges. The example
-opts into all private LAN ranges with `--lan-access`; use `--access-source` or
-service-specific flags for a narrower policy. Without an access source, T3
-Code remains loopback-only and RDP uses its global rate-limited fallback.
+opts into the target-adjacent private subnet with `--lan-access`; use
+`--access-source` or service-specific flags for routed, VLAN, VPN, or other
+explicit sources. Without an access source, T3 Code remains loopback-only and
+RDP uses its global rate-limited fallback.
 Omitted account and pairing passwords are requested with hidden prompts;
 an empty pairing password reuses the account password. Use
 `--git-access none --git-auth none --agent-auth none`, `--no-rdp`, `--no-web-interface`, or

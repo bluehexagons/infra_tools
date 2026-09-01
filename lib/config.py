@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import shlex
+import socket
 from dataclasses import dataclass, asdict
+from functools import lru_cache
 from typing import Optional, cast
 from lib.plugin_registry import get_system_type_definition, get_system_type_names
 from lib.types import StrList, NestedStrList, JSONDict, MaybeStr
@@ -39,12 +41,119 @@ DEFAULT_SYNCTHING_ROOT = "/srv/syncthing"
 GODOT_WEB_HTTPS_PORT = 8443
 WEB_PANEL_DEFAULT_PORT_SENTINEL = object()
 DEFAULT_AGENT_WEB_PORTS = (80, 443, 8080, 8081)
-LAN_ACCESS_SOURCES = (
-    "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
-    "fc00::/7",
+_LAN_IPV4_BLOCKS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
 )
+_LAN_IPV6_BLOCK = ipaddress.ip_network("fc00::/7")
+_DEFAULT_LAN_PREFIX_LENGTHS = {4: 24, 6: 64}
+
+
+def _is_lan_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return whether an address belongs to RFC 1918 or IPv6 ULA space."""
+
+    if isinstance(address, ipaddress.IPv4Address):
+        return any(address in network for network in _LAN_IPV4_BLOCKS)
+    return address in _LAN_IPV6_BLOCK
+
+
+def _minimum_lan_prefix_length(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> int:
+    """Return the broadest prefix that cannot escape private address space."""
+
+    if isinstance(address, ipaddress.IPv4Address):
+        return next(
+            network.prefixlen
+            for network in _LAN_IPV4_BLOCKS
+            if address in network
+        )
+    return _LAN_IPV6_BLOCK.prefixlen
+
+
+def _lan_network_from_address(value: str) -> Optional[str]:
+    """Convert one private address or interface into its LAN access network."""
+
+    normalized = value.strip().strip("[]")
+    try:
+        interface = ipaddress.ip_interface(normalized)
+    except ValueError:
+        return None
+    if not _is_lan_address(interface.ip):
+        return None
+    requested_prefix_length = (
+        interface.network.prefixlen
+        if "/" in normalized
+        else _DEFAULT_LAN_PREFIX_LENGTHS[interface.version]
+    )
+    prefix_length = max(
+        requested_prefix_length,
+        _minimum_lan_prefix_length(interface.ip),
+    )
+    return str(
+        ipaddress.ip_network(
+            f"{interface.ip}/{prefix_length}",
+            strict=False,
+        )
+    )
+
+
+def _primary_local_address(family: socket.AddressFamily) -> Optional[str]:
+    """Discover the primary local address chosen for a normal routed socket."""
+
+    destination: tuple[object, ...]
+    if family == socket.AF_INET:
+        destination = ("192.0.2.1", 9)
+    else:
+        destination = ("2001:db8::1", 9, 0, 0)
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as route_socket:
+            route_socket.connect(destination)
+            address = route_socket.getsockname()[0]
+    except OSError:
+        return None
+    return str(address)
+
+
+@lru_cache(maxsize=128)
+def _resolved_lan_networks(host: str) -> tuple[str, ...]:
+    """Resolve a setup target into adjacent private LAN networks."""
+
+    literal_network = _lan_network_from_address(host)
+    if literal_network:
+        return (literal_network,)
+
+    query_hosts = [host]
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        query_hosts = [socket.gethostname()]
+
+    addresses: StrList = []
+    for query_host in query_hosts:
+        try:
+            address_info = socket.getaddrinfo(
+                query_host,
+                None,
+                family=socket.AF_UNSPEC,
+                type=socket.SOCK_STREAM,
+            )
+        except socket.gaierror:
+            continue
+        for _family, _type, _protocol, _canonical, socket_address in address_info:
+            addresses.append(str(socket_address[0]).split("%", 1)[0])
+
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        for family in (socket.AF_INET, socket.AF_INET6):
+            local_address = _primary_local_address(family)
+            if local_address:
+                addresses.append(local_address)
+
+    networks = [
+        network
+        for address in addresses
+        if (network := _lan_network_from_address(address)) is not None
+    ]
+    return tuple(_merge_network_sources(networks))
 
 
 def _merge_network_sources(*source_lists: Optional[StrList]) -> StrList:
@@ -649,10 +758,23 @@ class SetupConfig:
         return sorted(set(ports))
 
     def effective_access_sources(self) -> StrList:
-        """Return generic sources, including the optional private-LAN preset."""
+        """Return generic sources, including inferred target-adjacent LANs."""
 
-        lan_sources = list(LAN_ACCESS_SOURCES) if self.lan_access else None
+        lan_sources = self.inferred_lan_access_sources() if self.lan_access else None
         return _merge_network_sources(lan_sources, self.access_sources)
+
+    def inferred_lan_access_sources(self) -> StrList:
+        """Infer trusted LANs from explicit target addressing and resolution."""
+
+        declared_sources = [
+            source
+            for value in (self.static_ipv4, self.static_ipv6)
+            if value and (source := _lan_network_from_address(value)) is not None
+        ]
+        return _merge_network_sources(
+            declared_sources,
+            list(_resolved_lan_networks(self.host)),
+        )
 
     def effective_rdp_sources(self) -> StrList:
         """Return generic sources plus RDP-specific additions."""
@@ -785,12 +907,20 @@ class SetupConfig:
             args.append(f"--name {shlex.quote(self.friendly_name)}")
 
         if self.lan_access:
-            args.append("--lan-access")
-        elif self.clear_lan_access:
-            args.append("--no-lan-access")
-        for source in self.access_sources or []:
-            args.append(f"--access-source {shlex.quote(source)}")
-        if self.clear_access_sources:
+            lan_sources = self.inferred_lan_access_sources()
+            if not lan_sources:
+                raise ValueError(
+                    "--lan-access could not infer a private target subnet; "
+                    "remove it and use --access-source explicitly"
+                )
+            for source in _merge_network_sources(lan_sources, self.access_sources):
+                args.append(f"--access-source {shlex.quote(source)}")
+        else:
+            if self.clear_lan_access:
+                args.append("--no-lan-access")
+            for source in self.access_sources or []:
+                args.append(f"--access-source {shlex.quote(source)}")
+        if self.clear_access_sources and not self.lan_access:
             args.append("--no-access-source")
         
         if self.enable_rdp:

@@ -12,7 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib.arg_parser import create_setup_argument_parser
-from lib.config import LAN_ACCESS_SOURCES, SetupConfig
+from lib.config import SetupConfig
 from lib.validation import validate_samba_settings, validate_web_interface_settings
 from plugins.proxmox import build_server_proxmox_steps
 from security.security_steps import (
@@ -47,7 +47,7 @@ class TestAccessSourceConfig(unittest.TestCase):
 
     def test_lan_and_service_sources_are_combined_and_deduplicated(self) -> None:
         config = SetupConfig(
-            host="host.example.test",
+            host="192.168.1.42",
             username="admin",
             system_type="workstation_dev",
             lan_access=True,
@@ -60,15 +60,149 @@ class TestAccessSourceConfig(unittest.TestCase):
 
         self.assertEqual(
             config.effective_access_sources(),
-            [*LAN_ACCESS_SOURCES, "192.168.1.0/24", "203.0.113.10"],
+            ["192.168.1.0/24", "203.0.113.10"],
         )
         self.assertEqual(
-            config.effective_rdp_sources()[-2:],
-            ["203.0.113.10", "198.51.100.0/24"],
+            config.effective_rdp_sources(),
+            [
+                "192.168.1.0/24",
+                "203.0.113.10",
+                "10.0.0.0/8",
+                "198.51.100.0/24",
+            ],
         )
         self.assertEqual(config.effective_web_interface_sources()[-1], "198.51.100.20")
         self.assertEqual(config.effective_gogs_sources()[-1], "198.51.100.30")
         self.assertEqual(config.effective_samba_sources()[-1], "198.51.100.40")
+
+    def test_lan_access_covers_common_private_ipv4_blocks(self) -> None:
+        for host, expected in (
+            ("10.20.30.40", "10.20.30.0/24"),
+            ("172.20.8.9", "172.20.8.0/24"),
+            ("192.168.68.25", "192.168.68.0/24"),
+        ):
+            with self.subTest(host=host):
+                config = SetupConfig(
+                    host=host,
+                    username="admin",
+                    system_type="server_lite",
+                    lan_access=True,
+                )
+
+                self.assertEqual(config.effective_access_sources(), [expected])
+
+    def test_lan_access_honors_explicit_static_prefixes(self) -> None:
+        config = SetupConfig(
+            host="203.0.113.10",
+            username="admin",
+            system_type="server_lite",
+            static_ipv4="10.20.30.40/20",
+            static_ipv6="fd12:3456:789a:1::10/60",
+            lan_access=True,
+        )
+
+        self.assertEqual(
+            config.effective_access_sources(),
+            ["10.20.16.0/20", "fd12:3456:789a::/60"],
+        )
+
+    def test_lan_access_never_expands_an_explicit_prefix_beyond_private_space(
+        self,
+    ) -> None:
+        config = SetupConfig(
+            host="203.0.113.10",
+            username="admin",
+            system_type="server_lite",
+            static_ipv4="192.168.1.10/15",
+            static_ipv6="fd12:3456::10/6",
+            lan_access=True,
+        )
+
+        self.assertEqual(
+            config.effective_access_sources(),
+            ["192.168.0.0/16", "fc00::/7"],
+        )
+
+    def test_lan_access_infers_ula_prefix(self) -> None:
+        config = SetupConfig(
+            host="fd12:3456:789a:1::10",
+            username="admin",
+            system_type="server_lite",
+            lan_access=True,
+        )
+
+        self.assertEqual(
+            config.effective_access_sources(),
+            ["fd12:3456:789a:1::/64"],
+        )
+
+    @patch("lib.config.socket.getaddrinfo")
+    def test_lan_access_infers_private_network_from_hostname(self, mock_resolve) -> None:
+        mock_resolve.return_value = [
+            (
+                2,
+                1,
+                6,
+                "",
+                ("192.168.50.12", 0),
+            )
+        ]
+        config = SetupConfig(
+            host="agent-lan-resolution.example.test",
+            username="admin",
+            system_type="server_lite",
+            lan_access=True,
+        )
+
+        self.assertEqual(
+            config.effective_access_sources(),
+            ["192.168.50.0/24"],
+        )
+
+    def test_remote_args_expand_lan_access_to_inferred_sources(self) -> None:
+        config = SetupConfig(
+            host="10.20.30.40",
+            username="admin",
+            system_type="server_lite",
+            lan_access=True,
+            access_sources=["100.64.0.0/10"],
+        )
+
+        remote_args = config.to_remote_args()
+
+        self.assertNotIn("--lan-access", remote_args)
+        self.assertIn("--access-source 10.20.30.0/24", remote_args)
+        self.assertIn("--access-source 100.64.0.0/10", remote_args)
+        self.assertIn("--lan-access", config.to_setup_command())
+
+    def test_clearing_custom_sources_retains_expanded_lan_access(self) -> None:
+        config = SetupConfig(
+            host="10.20.30.40",
+            username="admin",
+            system_type="server_lite",
+            lan_access=True,
+            clear_access_sources=True,
+        )
+
+        remote_args = config.to_remote_args()
+
+        self.assertIn("--access-source 10.20.30.0/24", remote_args)
+        self.assertNotIn("--no-access-source", remote_args)
+        self.assertIn("--no-access-source", config.to_setup_command())
+
+    def test_lan_access_requires_an_inferable_private_target(self) -> None:
+        config = SetupConfig(
+            host="203.0.113.10",
+            username="admin",
+            system_type="server_lite",
+            lan_access=True,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "could not infer a private target subnet",
+        ):
+            config.to_remote_args()
 
     def test_samba_source_and_metadata_cache_round_trip(self) -> None:
         parser = create_setup_argument_parser("test")
@@ -420,7 +554,7 @@ class TestProxmoxManagementFilter(unittest.TestCase):
         )
         filtered_steps = build_server_proxmox_steps(
             SetupConfig(
-                host="pve.example.test",
+                host="192.168.1.10",
                 username="root",
                 system_type="server_proxmox",
                 lan_access=True,

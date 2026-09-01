@@ -149,14 +149,14 @@ class TestAgentProfiles(unittest.TestCase):
 
     def test_agent_code_vm_lan_access_is_explicit(self) -> None:
         config = SetupConfig.from_args(
-            _setup_args(lan_access=True),
+            _setup_args(host="192.168.50.10", lan_access=True),
             "agent_code_vm",
         )
 
         self.assertTrue(config.lan_access)
         self.assertEqual(
             config.effective_rdp_sources(),
-            ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"],
+            ["192.168.50.0/24"],
         )
         self.assertEqual(
             config.effective_web_interface_sources(),

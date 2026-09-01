@@ -282,8 +282,8 @@ def add_setup_arguments(
         action=argparse.BooleanOptionalAction,
         default=None,
         help=(
-            "Allow managed inbound services from RFC 1918 IPv4 and IPv6 ULA "
-            "private networks"
+            "Allow managed inbound services from the target-adjacent private "
+            "IPv4 /24 or IPv6 ULA /64 (an explicit static prefix is honored)"
         ),
     )
 

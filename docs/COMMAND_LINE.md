@@ -159,9 +159,9 @@ tools, not for an LXC container.
 
 | Flag | Description |
 |------|-------------|
-| `--lan-access` / `--no-lan-access` | Add or remove the private-LAN preset: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, and IPv6 ULA `fc00::/7` |
+| `--lan-access` / `--no-lan-access` | Infer or remove target-adjacent LAN access: a private IPv4 target uses its `/24`, a ULA IPv6 target uses `/64`, and an explicit static prefix is honored |
 | `--access-source IP_OR_CIDR [IP_OR_CIDR ...]` | Restrict managed inbound services to one or more sources; accepts multiple values and may be repeated |
-| `--no-access-source` | Clear saved custom generic access sources; use `--no-lan-access` separately to remove the LAN preset |
+| `--no-access-source` | Clear saved custom generic access sources; use `--no-lan-access` separately to remove inferred LAN access |
 | `--rdp` / `--no-rdp` | Enable or disable XRDP |
 | `--rdp-existing-password` | Local setup only: reuse an existing non-root desktop account password; a missing profile password is requested securely |
 | `--rdp-bind-address IP` | Bind XRDP to one local IP; defaults to all IPv4 interfaces (`0.0.0.0`) |
@@ -290,6 +290,14 @@ Use `--lan-access` when every managed administrative service should be private:
 infra-tools setup workstation_dev 192.168.0.25 agent \
   --lan-access --rdp
 ```
+
+The preset is derived from the target address instead of trusting every RFC
+1918 and ULA range. This covers typical home and lab `/24` networks across the
+10/8, 172.16/12, and 192.168/16 blocks, plus ULA `/64` networks. An explicit
+`--ip` or `--ipv6` prefix is honored without expanding beyond its enclosing
+private-address block. If the target hostname does not resolve to a private
+address, setup stops; remove `--lan-access` and use `--access-source` for routed
+management networks, VLANs, VPNs, or intentionally wider subnets.
 
 For a narrower or mixed policy, one flag accepts several sources:
 

@@ -96,6 +96,22 @@ generic workflow because they require cluster-aware planning. Generic setup
 also refuses a selected Linux bridge at runtime to avoid erasing Proxmox
 bridge ports or other topology settings from ifupdown configuration.
 
+## LAN Access Inference
+
+`--lan-access` scopes managed inbound services to the target's adjacent private
+network. A target in any RFC 1918 block produces its local `/24`; an IPv6 ULA
+target produces `/64`. When `--ip` or `--ipv6` declares a private address and
+prefix, that explicit network is used instead, but it is bounded by the
+enclosing RFC 1918 or ULA block. Hostnames are resolved on the controller before
+the setup arguments are sent, so the target never expands the flag into every
+private-address range.
+
+If no private target network can be inferred, setup stops before applying the
+remote configuration. Remove the flag and use repeatable `--access-source`
+values for routed management networks, VLANs, VPN clients, or a subnet wider
+than the normal inference. `--no-lan-access` removes the saved inference on a
+later patch.
+
 ## Inventory and Firewall Planning
 
 The `network` command manages a workspace-backed, provider-neutral network
