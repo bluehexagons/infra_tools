@@ -187,12 +187,15 @@ Once a visible tab is attached, use a snapshot-first workflow. Snapshot output
 provides visible text, accessibility data, semantic locators, console and
 network diagnostics, a screenshot, and recent action history. Prefer role/name
 locators from that output. Treat a successful type, press, click, or scroll
-response as proof that T3 dispatched the helper, not proof that the application
-changed: verify the expected text, URL, or rendered state with a bounded wait or
-follow-up snapshot. In particular, if a keyboard helper produces no expected
-event or application change, use the equivalent semantic click when the test
-allows it and record the keyboard path as unverified. Do not inject mutations
-through page evaluation merely to turn an unverified interaction green.
+response as proof that T3 accepted the helper, not that the page received an
+event or changed: verify the expected text, URL, or rendered state with a
+bounded wait or follow-up snapshot. Programmatic typing can establish DOM focus
+before the connected preview has pointer-activated page input. If a subsequent
+keyboard helper produces no expected event or application change, semantically
+click its intended target and retry the key once. If it still has no effect, use
+the equivalent semantic click when the test allows it or record the keyboard
+path as unverified. Do not inject mutations through page evaluation merely to
+turn an unverified interaction green.
 
 Viewport presets change CSS layout dimensions while preserving T3's desktop
 browser user agent; they are breakpoint checks, not full mobile-device

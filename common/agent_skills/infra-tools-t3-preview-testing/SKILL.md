@@ -33,11 +33,15 @@ retrying and continue with non-browser checks. Opening a tab or seeing a URL in
 status does not prove the page rendered; confirm visible content or a snapshot.
 
 Snapshot before interaction and prefer its semantic role/name locators. A
-successful action response proves dispatch, not the page outcome, so verify the
-expected state with a bounded wait, another snapshot, or a read-only state
-check. If keyboard input produces no expected change, use an equivalent
-semantic click when appropriate and report the keyboard behavior as unverified;
-do not mutate page state through evaluation to fake the check.
+successful action response confirms the helper was accepted, not that the page
+received an event or changed, so verify the expected state with a bounded wait,
+another snapshot, or a read-only state check. Programmatic typing can set DOM
+focus without pointer-activating page input in the connected preview. If a
+keyboard helper then produces no expected
+change, semantically click the intended target and retry the key once. If it
+still has no effect, use an equivalent semantic click when appropriate or
+report the keyboard behavior as unverified; do not mutate page state through
+evaluation to fake the check.
 
 Device presets change the CSS viewport but retain the desktop user agent.
 Snapshot again after resize or scroll, and expect scroll position to persist

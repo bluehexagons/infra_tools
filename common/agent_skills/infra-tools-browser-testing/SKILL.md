@@ -82,12 +82,16 @@ Confirm visible content or a snapshot. For WebAssembly/WebGL, allow one bounded
 startup interval beyond document load before judging the application frame.
 
 Take a snapshot before interaction and prefer its semantic role/name locators
-over coordinates or CSS selectors. Treat a successful input helper response as
-dispatch evidence, not proof of the application outcome: follow it with a
-bounded `preview_wait_for`, snapshot, or read-only state check. If a keyboard
-helper produces no expected state change, use the equivalent semantic click
-when the task permits and report the keyboard path as unverified. Do not mutate
-the page with evaluation merely to manufacture a passing result.
+over coordinates or CSS selectors. A successful input helper response confirms
+the command was accepted, not that the page received an event or changed:
+follow it with a bounded `preview_wait_for`, snapshot, or read-only state check.
+Programmatic
+typing can leave an element with DOM focus before the connected preview has
+pointer-activated page input. If a keyboard helper then produces no expected
+state change, semantically click the intended keyboard target and retry the key
+once. If it still has no effect, use an equivalent semantic click when the task
+permits or report the keyboard path as unverified. Do not mutate the page with
+evaluation merely to manufacture a passing result.
 
 Viewport presets exercise CSS layout breakpoints without changing the desktop
 browser user agent. Snapshot again after resize or scroll because coordinates

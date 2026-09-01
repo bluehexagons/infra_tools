@@ -108,6 +108,24 @@ The upstream launcher writes application startup failures, including native
 module load errors, to `~/.t3/userdata/logs/boot-service.log`. systemd's journal
 primarily records the launcher lifecycle.
 
+T3 also records non-fatal provider diagnostics. It can health-check optional
+agent CLIs even when setup deliberately omitted them, so a missing-Claude or
+similar warning is not a failed configured capability; compare it with the
+doctor inventory's `required` fields. T3 polls pull-request status for open Git
+repositories as well. An intentional local-only repository with no remote can
+therefore log `SourceControlProviderError` with `provider: unknown` while local
+Git remains healthy. Do not add a remote or rename a branch solely to silence
+that PR-only warning. Repair the remote only when the repository is actually
+intended to use a supported hosting provider.
+
+T3's trace and provider-event logs are high-volume. Managed user-cache
+maintenance preserves current files while pruning numbered rotations older
+than 14 days or beyond a combined 256 MiB. The host doctor inventories the
+whole T3 log tree and warns beyond 512 MiB. Use that warning and the maintenance
+result to identify pressure; do not manually remove current files from a running
+service. A preview wait that intentionally times out can also appear as an
+application error in the log and is not, by itself, a readiness failure.
+
 Service readiness does not exercise the connected desktop client's preview
 presentation. One recognizable stale state returns successful background
 navigation or DOM results while `preview_open` produces no visible sidebar or
@@ -237,8 +255,10 @@ infra-tools agent doctor --capability t3code --fix
 As of 2026-09-01, infra-tools service and collaborative-preview checks pass with
 T3 Code v0.0.37, including preview open, snapshot, semantic input, scrolling,
 viewport and appearance emulation, and client-side recording. Keyboard helpers
-still require outcome verification like every other dispatched action. The
-validated runtime uses service-state protocol 2, keeps the same `node-pty` and
+dispatch after semantic pointer focus; programmatic typing can set DOM focus
+before page input is pointer-activated, so retry a no-op key once after clicking
+its intended target and verify the outcome. The validated runtime uses
+service-state protocol 2, keeps the same `node-pty` and
 `msgpackr-extract` native dependencies, and requires Node.js `^22.16`,
 `^23.11`, or `>=24.10`. It also raises supported file uploads to 50 MiB;
 infra-tools applies the matching request-body limit to T3's managed HTTPS route

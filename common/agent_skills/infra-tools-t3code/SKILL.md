@@ -32,6 +32,26 @@ The upstream unit is `~/.config/systemd/user/t3code.service`.
 infra-tools keeps networking and workspace settings in
 `~/.config/systemd/user/t3code.service.d/infra-tools.conf`.
 
+## Interpret logs in context
+
+T3 may health-check optional agent executables that were not selected during
+setup. A warning such as `Claude Agent CLI health check failed` is expected when
+Claude is intentionally absent; use the doctor inventory's `required` and
+capability results rather than installing an unrequested agent to silence it.
+
+T3 also polls pull-request status for open repositories. A
+`SourceControlProviderError` with `provider: unknown` is expected for an
+intentional local-only repository with no remote. Confirm the repository has no
+remote and ordinary Git operations work. Do not invent a remote or change its
+branch solely to suppress PR-only UI noise. If the repository should use
+GitHub, repair its owning remote configuration instead.
+
+infra-tools bounds numbered T3 log rotations through user-cache maintenance;
+the host doctor reports total T3 log use and warns when it crosses the managed
+threshold. Do not delete current log files while T3 is running. Treat a timeout
+created by a deliberate preview wait as action evidence, not a service failure,
+unless readiness or unrelated operations fail too.
+
 ## Updates
 
 T3 Code does not silently update. Prefer the connected client's explicit
