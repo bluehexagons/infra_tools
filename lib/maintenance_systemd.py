@@ -65,6 +65,8 @@ def configure_maintenance_timer(
     check_path: Optional[str] = None,
     user: Optional[str] = None,
     environment: Optional[dict[str, str]] = None,
+    sandbox_user_service: bool = False,
+    writable_paths: Optional[tuple[str, ...]] = None,
     randomized_delay: str = "30min",
     timeout: str = "4h",
     on_boot_sec: Optional[str] = None,
@@ -113,6 +115,43 @@ def configure_maintenance_timer(
             raise ValueError(f"Invalid service username: {user}")
         user_line = f"User={user}\n"
 
+    if writable_paths and not sandbox_user_service:
+        raise ValueError("Writable paths require a sandboxed user service")
+    if sandbox_user_service and not user:
+        raise ValueError("A sandboxed user service requires a service username")
+    sandbox_lines = ""
+    if sandbox_user_service:
+        rendered_paths: list[str] = []
+        for path in writable_paths or ():
+            validate_filesystem_path(path, must_exist=False)
+            if (
+                not os.path.isabs(path)
+                or os.path.normpath(path) != path
+                or path == os.path.sep
+            ):
+                raise ValueError(
+                    f"Sandbox writable path must be absolute and normalized: {path}"
+                )
+            rendered_paths.append(f"ReadWritePaths=-{shlex.quote(path)}")
+        sandbox_lines = "\n".join(
+            (
+                "UMask=0077",
+                "NoNewPrivileges=true",
+                "PrivateTmp=true",
+                "PrivateDevices=true",
+                "ProtectSystem=strict",
+                "ProtectHome=read-only",
+                "ProtectControlGroups=true",
+                "ProtectKernelModules=true",
+                "ProtectKernelTunables=true",
+                "LockPersonality=true",
+                "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+                "RestrictSUIDSGID=true",
+                *rendered_paths,
+                "",
+            )
+        )
+
     environment_lines = ""
     for name, value in sorted((environment or {}).items()):
         if not _ENVIRONMENT_NAME_RE.fullmatch(name):
@@ -130,7 +169,7 @@ Documentation=man:systemd.service(5)
 
 [Service]
 Type=oneshot
-{user_line}{environment_lines}ExecStart=/usr/bin/python3 {shlex.quote(script_path)}
+{user_line}{environment_lines}{sandbox_lines}ExecStart=/usr/bin/python3 {shlex.quote(script_path)}
 TimeoutStartSec={timeout}
 StandardOutput=journal
 StandardError=journal

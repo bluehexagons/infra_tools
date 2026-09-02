@@ -149,6 +149,13 @@ to an existing selected GitHub host entry and to Claude Code and OpenCode. Use
 the explicit `infra-tools agent auth set` command for every other intentional
 replacement or rotation.
 
+When Codex is selected, setup also installs a daily, non-root maintenance
+timer. It checks the VM's file-backed ChatGPT credential first and invokes
+Codex's managed refresh flow only when the cached token is approaching expiry,
+the recorded refresh is overdue, or freshness cannot be established. Current
+credentials, API-key authentication, and installations that have not signed in
+are left alone. A check also runs 15 minutes after boot.
+
 These are the standard Linux paths used by infra-tools. Vendor settings that
 relocate a tool's home or data directory are not discovered by the active
 source; use a specified file when the credentials live elsewhere.
@@ -334,7 +341,7 @@ hardware-backed credential automatically.
 | Tool | Active-source behavior | File-copy guidance |
 | --- | --- | --- |
 | GitHub CLI (`gh`) | Uses the selected `hosts.yml` token, or asks the installed controller `gh` for `gh auth token` when the token is keyring-backed | `hosts.yml` with a token or a one-line token file works; copying a keyring-only `hosts.yml` is not sufficient |
-| Codex | Reads `~/.codex/auth.json` only | Treat ChatGPT auth as renewable per-machine state. Prefer a dedicated file and let that VM write refreshes back. Setup replaces a definitively refresh-required target only from an unambiguously current staged source; do not distribute one active `auth.json` across concurrently running machines. If Codex uses `cli_auth_credentials_store = "keyring"` or `"auto"` and no file exists, configure the file backend and authenticate, or provide a separate auth file |
+| Codex | Reads `~/.codex/auth.json` only | Treat ChatGPT auth as renewable per-machine state. Prefer a dedicated file and let that VM and its expiry-aware maintenance timer write refreshes back. Setup replaces a definitively refresh-required target only from an unambiguously current staged source; do not distribute one active `auth.json` across concurrently running machines. If Codex uses `cli_auth_credentials_store = "keyring"` or `"auto"` and no file exists, configure the file backend and authenticate, or provide a separate auth file |
 | Claude Code | Reads `~/.claude/.credentials.json` when that file exists | Linux and Windows use a credentials file, but macOS commonly uses Keychain. A macOS keychain session cannot be made portable by copying this file; use a separately supplied token/file or authenticate on the VM |
 | OpenCode | Reads `~/.local/share/opencode/auth.json` when that file exists | The current auth file is plain JSON and is seeded as-is when missing. That layout appears portable, but OpenCode does not provide a general cross-machine portability guarantee, so test the target and use separate files for separate identities |
 
@@ -494,6 +501,12 @@ displays tokens, account IDs, or file contents. Rotation writes the target file
 atomically with restrictive permissions and rejects unsafe source files. For
 `gh`, rotation replaces the target `hosts.yml` with the selected host payload.
 Unlike setup, `agent auth set` deliberately replaces an existing credential.
+The host capability check also reports the installed
+`codex-auth-maintenance.timer` and treats its last failed run as an error:
+
+```bash
+infra-tools agent doctor 192.168.0.41 agent-1 --capability host --json
+```
 
 ## Sharing credentials between VMs
 
@@ -538,6 +551,9 @@ operator or provisioning service.
   read-write token as read-write even if the setup declaration says `read`.
 - Ordinary setup preserves target credentials except when it can safely replace
   refresh-required Codex auth with a current staged source.
+- A Codex-enabled VM checks file-backed ChatGPT auth daily and after boot,
+  refreshing it through Codex itself when its safe freshness metadata says a
+  refresh is needed. It never refreshes API-key auth.
 - Rotate credentials with `agent auth set` when a token expires, a VM changes
   ownership, or a VM is retired. Revoke the provider token as well when it may
   have been exposed.
@@ -575,12 +591,15 @@ auth option and, if needed, `--agent-config active`, then rotate with
 `agent auth set` for an existing VM.
 
 **Codex reports an expired authentication token.** Run `infra-tools agent
-doctor HOST USER --tool codex --json` or `infra-tools agent auth status HOST
-USER --tool codex --json`. If the cached access token is expired and
-`last_refresh` is overdue, rerun setup with a current staged Codex source,
-authenticate that VM independently, or explicitly replace it with `agent auth
-set`. Setup replaces the target only when its metadata says refresh is required
-and the staged source is unambiguously current.
+doctor HOST USER --tool codex --capability host --json` or `infra-tools agent
+auth status HOST USER --tool codex --json`. Inspect
+`codex-auth-maintenance.service` when its timer is present; rerun the saved
+setup command to install the timer on an older VM. If the job reports an
+invalid file, a missing refresh token, a provider rejection, or a login that
+remains stale, authenticate that VM independently or explicitly replace its
+credential with `agent auth set`. Setup itself replaces the target only when
+its metadata says refresh is required and the staged source is unambiguously
+current.
 
 **An agent installer reports permission denied under `~/.local/bin`.** Current
 setup repairs ownership of the target user's `.local` tree before running

@@ -69,6 +69,23 @@ class TestUserRenameHelpers(unittest.TestCase):
         self.assertEqual(managed_paths, [managed])
         self.assertEqual(unmanaged_paths, [])
 
+    def test_codex_auth_service_and_timer_are_managed_together(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service = os.path.join(tmpdir, "codex-auth-maintenance.service")
+            timer = os.path.join(tmpdir, "codex-auth-maintenance.timer")
+            with open(service, "w", encoding="utf-8") as file_obj:
+                file_obj.write("User=olduser\nEnvironment=HOME=/home/olduser\n")
+            with open(timer, "w", encoding="utf-8") as file_obj:
+                file_obj.write("OnCalendar=daily\n")
+            with patch.object(user_rename, "SYSTEMD_DIR", tmpdir):
+                managed_paths, unmanaged_paths = user_rename._managed_unit_files(
+                    "olduser",
+                    "/home/olduser",
+                )
+
+        self.assertEqual(managed_paths, [service, timer])
+        self.assertEqual(unmanaged_paths, [])
+
     def test_managed_unit_rewrite_protects_old_username_in_new_home(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             unit_path = os.path.join(tmpdir, "auto-update-node.service")

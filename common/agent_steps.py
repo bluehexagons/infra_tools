@@ -12,6 +12,7 @@ import tempfile
 from lib.agent_credentials import codex_auth_warning, inspect_codex_auth_file
 from lib.atomic_io import write_text_atomic
 from lib.config import SetupConfig
+from lib.maintenance_systemd import configure_maintenance_timer
 from lib.remote_utils import install_package, is_dry_run, run
 from lib.types import StrList
 from lib.validation import (
@@ -545,6 +546,50 @@ def install_codex(config: SetupConfig) -> None:
         label="Codex CLI",
         installer="curl -fsSL https://chatgpt.com/codex/install.sh | env CODEX_NON_INTERACTIVE=1 sh",
     )
+
+
+def configure_codex_auth_maintenance(config: SetupConfig) -> None:
+    """Keep file-backed Codex ChatGPT authentication fresh on live VMs."""
+
+    user_home = _user_home(config)
+    user_path = os.pathsep.join(
+        (
+            os.path.join(user_home, ".local", "bin"),
+            os.path.join(user_home, ".opencode", "bin"),
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+        )
+    )
+    configured = configure_maintenance_timer(
+        service_name="codex-auth-maintenance",
+        service_desc="Maintain renewable Codex authentication",
+        timer_desc="Check renewable Codex authentication daily",
+        script_path=(
+            "/opt/infra_tools/common/service_tools/codex_auth_maintenance.py"
+        ),
+        schedule="daily",
+        on_boot_sec="15min",
+        check_name="Codex authentication",
+        user=config.username,
+        environment={
+            "CODEX_HOME": os.path.join(user_home, ".codex"),
+            "HOME": user_home,
+            "LOGNAME": config.username,
+            "PATH": user_path,
+            "USER": config.username,
+            "XDG_CACHE_HOME": os.path.join(user_home, ".cache"),
+            "XDG_CONFIG_HOME": os.path.join(user_home, ".config"),
+            "XDG_DATA_HOME": os.path.join(user_home, ".local", "share"),
+            "XDG_STATE_HOME": os.path.join(user_home, ".local", "state"),
+        },
+        sandbox_user_service=True,
+        writable_paths=(os.path.join(user_home, ".codex"),),
+        timeout="2min",
+        purpose="credential maintenance",
+    )
+    if not configured:
+        raise RuntimeError("Codex authentication maintenance timer failed verification")
 
 
 def install_claude(config: SetupConfig) -> None:

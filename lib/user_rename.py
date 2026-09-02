@@ -45,6 +45,7 @@ _OPERATION_ID_RE = re.compile(r"^[0-9a-f]{16,64}$")
 MANAGED_UNIT_NAMES = {
     "auto-update-node",
     "auto-update-uv",
+    "codex-auth-maintenance",
     "user-cache-maintenance",
     "infra-tools-t3code",
     "infra-tools-t3code-connect",
@@ -307,6 +308,7 @@ def _managed_unit_files(old_username: str, old_home: str) -> tuple[list[str], li
         names = os.listdir(SYSTEMD_DIR)
     except OSError:
         return managed, unmanaged
+    managed_bases: set[str] = set()
     for name in names:
         if not name.endswith((".service", ".timer", ".path", ".mount")):
             continue
@@ -322,8 +324,27 @@ def _managed_unit_files(old_username: str, old_home: str) -> tuple[list[str], li
             continue
         if _is_managed_unit(path, content, old_username, old_home):
             managed.append(path)
+            managed_bases.add(_unit_base(path))
         else:
             unmanaged.append(path)
+
+    # Timer and path companions normally contain no username themselves, but
+    # they must be stopped with a user-scoped service during the identity
+    # cutover. Include only companions of a positively identified managed
+    # unit, preserving the allowlist boundary above.
+    managed_paths = set(managed)
+    for name in names:
+        path = os.path.join(SYSTEMD_DIR, name)
+        if (
+            _unit_base(path) not in managed_bases
+            or _unit_kind(path) not in {"timer", "path"}
+            or path in managed_paths
+            or os.path.islink(path)
+            or not os.path.isfile(path)
+        ):
+            continue
+        managed.append(path)
+        managed_paths.add(path)
     return sorted(managed), sorted(unmanaged)
 
 

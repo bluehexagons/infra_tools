@@ -94,6 +94,7 @@ _AGENT_HOST_MAINTENANCE_UNITS = (
 _AGENT_HOST_OPTIONAL_MAINTENANCE_UNITS = (
     "auto-update-godot",
     "auto-update-node",
+    "codex-auth-maintenance",
 )
 _AGENT_HOST_MIN_RECOMMENDED_MEMORY = 4 * BYTES_PER_GB
 _AGENT_HOST_LOW_AVAILABLE_MEMORY = 512 * BYTES_PER_MB

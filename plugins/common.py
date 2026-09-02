@@ -25,6 +25,7 @@ PLUGIN = PluginDefinition(
         "install_godot_bundles",
         "install_github_cli",
         "install_codex",
+        "configure_codex_auth_maintenance",
         "install_claude",
         "install_opencode",
         "install_agent_cli_launcher",
@@ -223,6 +224,7 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
     from common.agent_steps import (
         copy_agent_tooling_payload,
         clone_agent_repositories,
+        configure_codex_auth_maintenance,
         install_agent_cli_launcher,
         install_agent_workflow_skills,
         install_git_for_agent_repositories,
@@ -268,6 +270,12 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
     if config.install_codex:
         steps.append(
             ("Configuring Codex security policy", configure_codex_security_policy)
+        )
+        steps.append(
+            (
+                "Configuring Codex authentication maintenance",
+                configure_codex_auth_maintenance,
+            )
         )
 
     git_needed = bool(
@@ -373,6 +381,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
     from common.agent_steps import (
         copy_agent_tooling_payload,
         clone_agent_repositories,
+        configure_codex_auth_maintenance,
         install_agent_cli_launcher,
         install_agent_workflow_skills,
         install_git_for_agent_repositories,
@@ -406,6 +415,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_godot_bundles": install_godot_bundles,
         "install_github_cli": install_github_cli,
         "install_codex": install_codex,
+        "configure_codex_auth_maintenance": configure_codex_auth_maintenance,
         "install_claude": install_claude,
         "install_opencode": install_opencode,
         "install_agent_cli_launcher": install_agent_cli_launcher,

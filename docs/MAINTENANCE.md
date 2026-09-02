@@ -18,6 +18,7 @@ same job at the same instant.
 | `auto-update-uv.timer` | Sunday at 05:00 | Setups with Python and uv |
 | `auto-update-gogs.timer` | Sunday at 05:30 | Setups with Gogs |
 | `auto-update-godot.timer` | Sunday at 06:30 | Setups with Godot; also reconciles selected Godot bundles |
+| `codex-auth-maintenance.timer` | Daily and 15 minutes after boot | Setups with Codex; refreshes file-backed ChatGPT auth only when its cached token is approaching expiry or refresh metadata is overdue |
 | `cleanup-maintenance.timer` | Sunday at 03:30 | Security-enabled setups |
 | `user-cache-maintenance.timer` | Monday at 03:00 | Security-enabled setups with a non-root setup user |
 
@@ -30,7 +31,8 @@ Inspect a job and its recent output with:
 
 ```bash
 sudo systemctl status auto-update-apt.timer
-sudo systemctl list-timers --all '*auto-*' '*security-monitor*' '*cache-maintenance*'
+sudo systemctl list-timers --all \
+  '*auto-*' '*security-monitor*' '*cache-maintenance*' '*codex-auth*'
 sudo journalctl -u auto-update-apt.service -n 100 --no-pager
 ```
 
@@ -38,9 +40,9 @@ Required host timers are verified during setup. Failure to reload, enable,
 start, or confirm the security-monitor, APT-update, cleanup, user-cache, or
 restart timer stops setup. When the replacement APT timer cannot be verified,
 Debian's existing APT timers remain enabled.
-`infra-tools agent doctor --capability host` also reports installed Node and
-Godot update timers, while omitting those optional jobs on VMs where their
-toolchains were not selected.
+`infra-tools agent doctor --capability host` also reports installed Node,
+Godot, and Codex authentication timers, while omitting those optional jobs on
+VMs where their tools were not selected.
 
 ## Update Policy
 
@@ -93,6 +95,21 @@ update command exits nonzero if that audit is unhealthy or cannot be saved.
 The update environment is reset to that account's home so a caller's working
 directory and PATH cannot redirect the vendor installer. Setup still skips an
 installer when its command is already present.
+
+Codex-enabled setups separately install a non-root authentication maintenance
+timer. It inspects only redacted freshness metadata from `~/.codex/auth.json`.
+A current login, an API-key login, or a machine that has not signed in is a
+no-op. When a ChatGPT access token is near expiry, its last refresh is overdue,
+or its freshness cannot be established, the job asks Codex's own app server to
+run the managed refresh-token flow and then verifies the file is current. It
+does not start a model turn, copy tokens, or log account data. Invalid files,
+unsafe ownership or permissions, missing refresh tokens, protocol failures,
+and credentials that remain stale make the service fail visibly. File-backed
+ChatGPT authentication remains per-machine state; the timer does not make a
+copied login safe to share across concurrently running VMs.
+The service gets a private temporary directory, no privilege-gaining path, a
+read-only home and system view, and write access only to that user's `.codex`
+directory. It still needs outbound network access to refresh with the provider.
 
 From the control system, the equivalent remote workflow is
 `infra-tools agent update HOST USER --dry-run` followed by the same command

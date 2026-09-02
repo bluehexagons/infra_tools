@@ -75,4 +75,8 @@ Use `--active` or a protected controller-local `--file` when appropriate.
 Never print credential files or place them in a repository. Ordinary setup is
 preserve-first, but may replace refresh-required Codex auth from an
 unambiguously current staged source. `auth set` intentionally replaces the
-selected target credential in every other rotation case.
+selected target credential in every other rotation case. Codex-enabled systems
+also check file-backed ChatGPT auth daily and after boot, refreshing only stale
+or uncertain credentials through Codex's own managed flow. If Codex auth is
+unhealthy, inspect `codex-auth-maintenance.service` through the host capability
+check before replacing it.

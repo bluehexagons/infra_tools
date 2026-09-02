@@ -109,6 +109,10 @@ configuration.
   identity's files. Hardened-user mode rejects inbound SSH forwarding, but do
   not expose personal agent sockets through another channel. GitHub token
   redesign and brokerage are outside this phase.
+- Codex-enabled systems run an expiry-aware authentication check as the coding
+  identity. It delegates refresh to Codex's own managed flow and never logs or
+  copies token contents. This improves availability, not isolation: use a
+  separate ChatGPT login stream per VM and revoke it if the VM is compromised.
 - T3 Code and agent CLIs use their documented vendor distribution/update
   channels. This reduces arbitrary download sources but does not independently
   prove every upstream artifact or transitive dependency.

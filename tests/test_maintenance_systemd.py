@@ -132,6 +132,39 @@ class TestConfigureMaintenanceTimer(unittest.TestCase):
         self.assertIn("OnBootSec=30min", timer_content)
         self.assertIn("OnCalendar=daily", timer_content)
 
+    def test_sandboxes_user_service_with_bounded_writable_path(self):
+        with tempfile.TemporaryDirectory() as unit_dir, patch(
+            "lib.maintenance_systemd.SYSTEMD_DIR", unit_dir
+        ), patch("lib.maintenance_systemd.run") as mock_run:
+            mock_run.return_value = SimpleNamespace(returncode=0)
+            configured = configure_maintenance_timer(
+                service_name="credential-check",
+                service_desc="Credential check",
+                timer_desc="Credential check timer",
+                script_path="/opt/infra_tools/check.py",
+                schedule="daily",
+                check_name="Credential",
+                user="agent",
+                sandbox_user_service=True,
+                writable_paths=("/home/agent/.config/tool",),
+            )
+            with open(
+                os.path.join(unit_dir, "credential-check.service"),
+                encoding="utf-8",
+            ) as handle:
+                service_content = handle.read()
+
+        self.assertTrue(configured)
+        self.assertIn("User=agent", service_content)
+        self.assertIn("UMask=0077", service_content)
+        self.assertIn("NoNewPrivileges=true", service_content)
+        self.assertIn("ProtectSystem=strict", service_content)
+        self.assertIn("ProtectHome=read-only", service_content)
+        self.assertIn(
+            "ReadWritePaths=-/home/agent/.config/tool",
+            service_content,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
