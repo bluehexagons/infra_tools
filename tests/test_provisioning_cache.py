@@ -923,7 +923,7 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
     @patch("infra_tools.run_remote_setup", return_value=0)
     @patch("infra_tools.validate_host", return_value=True)
     @patch("infra_tools.validate_username", return_value=True)
-    def test_nopasswd_setup_user_prepares_guest_network(
+    def test_nopasswd_still_uses_root_to_prepare_guest_network(
         self,
         _mock_username,
         _mock_host,
@@ -968,7 +968,7 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         mock_route.assert_called_once_with(
             "10.0.0.50/24",
             "10.0.0.1",
-            "agent",
+            "root",
             current.ssh_key,
             dry_run=False,
         )

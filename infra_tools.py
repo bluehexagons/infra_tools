@@ -83,7 +83,6 @@ from lib.proxmox_guest import (
     ProvisionError,
     _build_guest_hostname,
     ensure_guest_ipv4_route,
-    get_provisioned_guest_ssh_user,
     refresh_managed_guest_host_keys,
 )
 from lib.proxmox_hosts import find_proxmox_host
@@ -130,7 +129,6 @@ from lib.validation import (
     validate_timezone_name,
     validate_workspace_dir,
 )
-from lib.vm_storage import has_home_mount
 from lib.workspace import get_setup_cache_dir, get_workspace_dir, set_workspace_dir
 
 
@@ -1974,12 +1972,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
             ensure_guest_ipv4_route(
                 config.static_ipv4,
                 config.network_gateway4,
-                get_provisioned_guest_ssh_user(
-                    config.machine_type,
-                    config.username,
-                    nopasswd=config.nopasswd,
-                    setup_user_deferred=has_home_mount(config),
-                ),
+                "root",
                 config.ssh_key,
                 dry_run=config.dry_run,
             )

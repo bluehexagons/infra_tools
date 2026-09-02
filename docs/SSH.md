@@ -89,22 +89,14 @@ The explicit enrollment command does not modify OpenSSH's default
 unless setup has reconciled a matching managed Proxmox guest or the user's SSH
 configuration selects the infra-tools workspace file.
 
-Hosted VM setup also needs the guest setup account to run privileged staging
-commands. The upload itself uses SSH standard input for a tar stream, so
-infra-tools never lets a remote `sudo` prompt consume that stream. It checks
-`sudo -n` and requires passwordless sudo for the setup account. Authenticating
-with `sudo -v` in a separate SSH terminal is not sufficient because normal
-sudo credential caches are scoped to a terminal or parent process.
-Proxmox VM cloud-init installs that rule as
-`/etc/sudoers.d/infra-tools-USERNAME`, owned by `root:root` with mode `0440`.
-The normal VM setup flow removes that bootstrap rule before completion. Pass
-`--nopasswd` to validate and retain it for compatibility with non-root reruns.
-Without that flag, rerun setup through the retained key-only root SSH account;
-the configured user remains in `sudo`, but sudo requires its password.
-This root transport is used for both live route preparation and the streamed
-setup upload, so the coding account is never asked for an interactive sudo
-password. With `--nopasswd`, those operations may use the configured setup
-account and validated `sudo -n` instead.
+Hosted guest setup uses retained, key-only root SSH for both live route
+preparation and the streamed setup upload. The coding account is never asked
+for an interactive sudo password, and setup does not depend on that account's
+current sudo policy. A standard VM user joins `sudo` without receiving a
+temporary passwordless bootstrap rule. Pass `--nopasswd` to install and
+validate `/etc/sudoers.d/infra-tools-USERNAME`, owned by `root:root` with mode
+`0440`, when unrestricted non-interactive sudo is desired. The stable root
+transport lets a later rerun add or remove that rule safely.
 Patch commands preserve the saved choice when the flag is omitted. Pass
 `--no-nopasswd` to remove the managed rule explicitly. Selecting `--nopasswd`
 also exits a saved hardened posture; directly combining it with an enabled
@@ -120,11 +112,10 @@ TCP, Unix-socket, X11, and tunnel forwarding for that identity and prevents
 `--no-harden-user --no-harden-agent` restores the account settings that
 infra-tools recorded before the lockdown and removes those per-user SSH
 restrictions.
-For an existing VM that was not provisioned by infra-tools, grant the setup
-account the intended `NOPASSWD` sudo rule before the first setup or connect as
-root. The temporary managed rule is removed unless `--nopasswd` is selected.
-No sudo password is accepted, stored, passed in the archive, or written to the
-setup cache.
+For an existing VM that was not provisioned by infra-tools, install the
+selected public key for root before the first setup. Infra-tools does not
+accept, store, or transmit a sudo password. The configured non-root account's
+managed `NOPASSWD` rule is present only when `--nopasswd` is selected.
 
 ## Troubleshooting
 

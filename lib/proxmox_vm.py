@@ -1571,12 +1571,14 @@ def _render_user_data(
     username: str,
     pubkey_contents: Optional[str],
     create_setup_user: bool = True,
+    nopasswd: bool = False,
 ) -> str:
     """Build a minimal cloud-init user-data document.
 
-    Optionally creates ``username`` (with sudo NOPASSWD) and installs the SSH
-    key. The rest of infra_tools' setup runs over SSH afterward, so we keep
-    this short.
+    Optionally creates ``username`` and installs the SSH key. An explicit
+    ``nopasswd`` request also installs the managed sudo rule. The rest of
+    infra_tools' setup runs over key-only root SSH, so standard users do not
+    need a temporary passwordless bootstrap rule.
     """
     if not validate_username(username):
         raise ProvisionError(f"Invalid VM setup username: {username!r}")
@@ -1605,7 +1607,7 @@ def _render_user_data(
         "    content: |",
         "      virtio_balloon",
     ]
-    if create_setup_user and username and username != "root":
+    if nopasswd and create_setup_user and username and username != "root":
         lines.extend([
             "  - path: /etc/sudoers.d/infra-tools-" + username,
             "    owner: root:root",
@@ -2334,6 +2336,7 @@ def provision_vm(
     user_data = _render_user_data(
         username=config.username, pubkey_contents=pubkey_contents,
         create_setup_user=not has_home_mount(config),
+        nopasswd=config.nopasswd,
     )
     user_data_path = _upload_user_data(
         user_data, hostname, snippet_pool, node_ip, user, ssh_opts, dry_run=dry_run

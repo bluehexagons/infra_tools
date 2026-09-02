@@ -195,17 +195,13 @@ infra-tools refreshes the Proxmox defaults instead of skipping discovery. Once
 guest SSH is available, setup also verifies the live IPv4 default route and
 repairs a missing route before package installation; the normal final network
 step persists the repaired configuration. A provisioned VM connects for this
-handoff as the configured guest username and uses non-interactive `sudo` for
-the route and remote setup staging, so root SSH access is not required. The
-account must have an explicit `NOPASSWD` policy because the streamed setup
-payload cannot safely share standard input with a sudo password prompt. LXC
-guests use root for the initial handoff because their setup user is created by
-that first remote setup. Cloud-init supplies this bootstrap policy on a newly
-provisioned VM. Normal setup removes the managed rule before it finishes;
-`--nopasswd` deliberately retains the previous unrestricted behavior. A later
-non-root rerun therefore requires `--nopasswd` to have been saved, while the
-default and hardened postures rerun through the retained key-only root SSH
-path. Patch commands preserve an omitted passwordless-sudo choice;
+handoff through retained, key-only root SSH. VMs and LXCs use the same stable
+privileged channel for route repair and streamed setup staging, so setup does
+not depend on the configured account's current sudo policy. A standard VM user
+joins `sudo` without receiving a temporary passwordless bootstrap rule.
+`--nopasswd` deliberately grants that user unrestricted non-interactive sudo;
+root transport lets a later rerun add or remove the rule safely. Patch commands
+preserve an omitted passwordless-sudo choice;
 `--no-nopasswd` removes it explicitly. Selecting `--nopasswd` exits a saved
 hardened posture, while explicitly combining it with a hardening flag is
 rejected. When setup is launched from a terminal, SSH may prompt

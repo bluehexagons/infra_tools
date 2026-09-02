@@ -234,11 +234,23 @@ class TestRenderUserData(unittest.TestCase):
     def test_creates_non_root_user(self):
         out = _render_user_data(username="alice", pubkey_contents="ssh-ed25519 KEY")
         self.assertIn("- name: alice", out)
+        self.assertIn("groups: sudo", out)
+        self.assertNotIn("NOPASSWD:ALL", out)
+        self.assertNotIn("/etc/sudoers.d/infra-tools-alice", out)
+        # SSH key is added under both root and alice.
+        self.assertEqual(out.count("ssh-ed25519 KEY"), 2)
+
+    def test_nopasswd_creates_managed_sudoers_rule(self):
+        out = _render_user_data(
+            username="alice",
+            pubkey_contents="ssh-ed25519 KEY",
+            nopasswd=True,
+        )
+
         self.assertIn("NOPASSWD:ALL", out)
         self.assertIn("/etc/sudoers.d/infra-tools-alice", out)
         self.assertIn("owner: root:root", out)
         self.assertIn("permissions: '0440'", out)
-        # SSH key is added under both root and alice.
         self.assertEqual(out.count("ssh-ed25519 KEY"), 2)
 
     def test_can_defer_setup_user_until_home_is_mounted(self):

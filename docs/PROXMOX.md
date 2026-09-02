@@ -67,11 +67,14 @@ The matching `.pub` file must sit beside the private key, and the Proxmox
 `root` account must accept that key.
 
 New VM provisioning uses an SSH identity's `.pub` file for cloud-init. The key
-is installed for both root and the configured guest setup username; the latter
-is created with non-interactive sudo and is used for the route and remote setup
-handoff. Existing-only reconciliation of a saved VM uses its established SSH
-access and does not require the matching `.pub` file to remain on the
-controller. `--key` is optional: infra-tools first uses a matching key
+is installed for both root and the configured guest setup username. Key-only
+root SSH is the stable privileged setup channel for route repair and remote
+setup handoff. The guest user joins `sudo`, but receives an unrestricted
+managed `NOPASSWD` rule only when `--nopasswd` is explicit. This also lets a
+rerun enable or remove that rule without depending on its previous state.
+Existing-only reconciliation of a saved VM uses its established SSH access and
+does not require the matching `.pub` file to remain on the controller. `--key`
+is optional: infra-tools first uses a matching key
 associated with the registered Proxmox host, then the local
 `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa` key.
 If the Proxmox node key and guest key differ, pass `--provision-key` for the

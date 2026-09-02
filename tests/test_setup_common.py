@@ -354,7 +354,7 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
         self.assertEqual(result, 0)
         mock_finish.assert_called_once_with(config, 0)
 
-    def test_hosted_vm_nopasswd_setup_uses_user_and_noninteractive_sudo(self):
+    def test_hosted_vm_nopasswd_still_uses_retained_root_ssh(self):
         from lib import setup_common
 
         config = _make_config(
@@ -370,24 +370,21 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
         process.wait.return_value = 0
 
         with patch.object(setup_common, "copy_project_files"), \
-             patch.object(setup_common, "ensure_remote_sudo", return_value=True), \
              patch.object(setup_common, "build_ssh_command", return_value=["ssh"]) as mock_build, \
              patch("subprocess.Popen", return_value=process):
             result = setup_common.run_remote_setup(config)
 
         self.assertEqual(result, 0)
-        self.assertEqual(mock_build.call_args.args[1], "agent")
+        self.assertEqual(mock_build.call_args.args[1], "root")
         self.assertEqual(
             mock_build.call_args.kwargs["batch_mode"],
             not sys.stdin.isatty(),
         )
         remote_command = mock_build.call_args.kwargs["remote_command"]
-        self.assertIn("sudo -n rm -rf /opt/infra_tools", remote_command)
-        self.assertIn("sudo -n tar xzf - -C /opt/infra_tools", remote_command)
-        self.assertIn(
-            "sudo -n python3 /opt/infra_tools/remote_setup.py",
-            remote_command,
-        )
+        self.assertIn("rm -rf /opt/infra_tools", remote_command)
+        self.assertIn("tar xzf - -C /opt/infra_tools", remote_command)
+        self.assertIn("python3 /opt/infra_tools/remote_setup.py", remote_command)
+        self.assertNotIn("sudo -n", remote_command)
 
     def test_hosted_vm_without_nopasswd_uses_retained_root_ssh(self):
         from lib import setup_common

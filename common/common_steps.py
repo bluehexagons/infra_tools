@@ -349,10 +349,9 @@ def setup_user(config: SetupConfig) -> None:
 def _ensure_vm_setup_user_sudoers(config: SetupConfig) -> None:
     """Reconcile the VM setup user's optional passwordless sudo rule.
 
-    Proxmox VM cloud-init needs this rule before the first remote setup run.
-    Normal setup removes it after bootstrap; ``--nopasswd`` retains the prior
-    compatibility behavior. Keeping the rule under an infra-tools-owned
-    filename lets reruns repair or remove it without changing other policy.
+    ``--nopasswd`` requests the capable compatibility behavior. Keeping the
+    rule under an infra-tools-owned filename lets root-driven setup reruns add,
+    repair, or remove it without changing other policy.
     """
     if config.username == "root":
         return

@@ -10,7 +10,7 @@ and its network access as part of the security design.
 | Posture | Linux account | Codex session | Intended use |
 | --- | --- | --- | --- |
 | Default | Member of `sudo`; password required | Auto-reviewed requests, workspace write access, no default shell network access | Interactive development and learning |
-| `--nopasswd` | Unrestricted `NOPASSWD:ALL` on a VM | Same Codex policy as default | Compatibility and convenient non-root setup reruns |
+| `--nopasswd` | Unrestricted `NOPASSWD:ALL` on a VM | Same Codex policy as default | High-capability coding and manual administration |
 | `--harden-agent` | Removed from administrator, host-control, and root-equivalent supplementary groups | Workspace write access; no approval, web search, credential-path reads, active browser/computer features, plugins, or MCP servers | Interactive evaluation of less-trusted code |
 | `--harden-user` | `--harden-agent` plus locked password, mode-`0700` home, no sensitive system-data or device groups, no SSH forwarding/user rc, and no systemd lingering | Same hardened Codex boundary | Headless CI/CD and more restricted disposable evaluation |
 
@@ -18,11 +18,10 @@ and its network access as part of the security design.
 a patch exits a previously saved hardened posture; use `--no-nopasswd` to
 remove it explicitly, while omitting either form preserves the saved choice.
 `--harden-user` implies `--harden-agent` and cannot be combined with RDP because
-XRDP needs an account password. A newly provisioned VM temporarily receives
-the passwordless rule needed for the streamed setup handoff. Normal setup
-removes it before completion. Root SSH remains available for later setup runs
-and recovery, but SSH password authentication remains disabled; protect the
-authorized private key as a root credential.
+XRDP needs an account password. Standard VM provisioning does not grant a
+temporary passwordless rule. Key-only root SSH is the stable privileged setup
+and recovery channel, while SSH password authentication remains disabled;
+protect the authorized private key as a root credential.
 
 `--harden-agent` does not lock the login itself. SSH and an explicitly
 configured desktop remain usable. `--harden-user` locks Unix password

@@ -29,8 +29,6 @@ from lib.agent_credentials import codex_auth_warning, inspect_codex_auth_file
 from lib.config import DEFAULT_MACHINE_TYPE, SetupConfig, _normalize_nested_specs
 from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.network_transition import finish_network_transition
-from lib.proxmox_guest import get_provisioned_guest_ssh_user
-from lib.vm_storage import has_home_mount
 from lib.proxmox_hosts import ProxmoxHost, find_proxmox_host, sync_proxmox_host
 from lib.validators import validate_host, validate_username
 from lib.validation import (
@@ -1297,16 +1295,6 @@ def run_remote_setup(config: SetupConfig) -> int:
     remote_user = "root"
     control_path: Optional[str] = None
     if not is_local:
-        remote_user = (
-            get_provisioned_guest_ssh_user(
-                config.machine_type,
-                config.username,
-                nopasswd=config.nopasswd,
-                setup_user_deferred=has_home_mount(config),
-            )
-            if config.hosted_node
-            else "root"
-        )
         control_path = get_ssh_control_path(
             config.host,
             remote_user,

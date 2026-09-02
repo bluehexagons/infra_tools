@@ -22,7 +22,6 @@ from lib.proxmox_guest import (
     ensure_guest_ipv4_route,
     _ssh_run,
     _wait_for_guest_ssh,
-    get_provisioned_guest_ssh_user,
     probe_proxmox_cluster,
     probe_proxmox_host,
     refresh_managed_guest_host_keys,
@@ -80,41 +79,6 @@ class TestGuestSshKeyResolution(unittest.TestCase):
     def test_returns_none_without_a_complete_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(resolve_guest_ssh_key(home=tmp))
-
-
-class TestProvisionedGuestSshUser(unittest.TestCase):
-    def test_home_storage_uses_root_until_setup_user_is_created(self) -> None:
-        self.assertEqual(
-            get_provisioned_guest_ssh_user(
-                "vm",
-                "agent",
-                nopasswd=True,
-                setup_user_deferred=True,
-            ),
-            "root",
-        )
-
-    def test_normal_vm_without_nopasswd_uses_retained_root_access(self) -> None:
-        self.assertEqual(
-            get_provisioned_guest_ssh_user("vm", "agent"),
-            "root",
-        )
-
-    def test_normal_vm_with_nopasswd_uses_setup_user(self) -> None:
-        self.assertEqual(
-            get_provisioned_guest_ssh_user("vm", "agent", nopasswd=True),
-            "agent",
-        )
-
-    def test_lxc_uses_root_even_when_nopasswd_is_selected(self) -> None:
-        self.assertEqual(
-            get_provisioned_guest_ssh_user(
-                "unprivileged",
-                "agent",
-                nopasswd=True,
-            ),
-            "root",
-        )
 
 
 class TestWaitForGuestSsh(unittest.TestCase):

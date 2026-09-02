@@ -62,15 +62,12 @@ Proxmox instead of silently skipping the provisioning handoff.
 After guest SSH becomes available, hosted setup verifies the live IPv4 default
 route. If cloud-init brought up the address without the route, infra-tools
 repairs it automatically before package installation. For VMs, this check and
-the remote setup upload use the configured guest setup username and its
-non-interactive `sudo` privileges; they do not require root SSH access. On an
-existing VM, the setup account must have an explicit `NOPASSWD` policy because
-the route check and streamed upload cannot safely consume a sudo password. LXC
-guests continue to use root for this first handoff because their setup user is
-created by the initial remote setup. Cloud-init provides the initial VM rule;
-normal setup removes it when the bootstrap finishes. Use `--nopasswd` to retain
-it for non-root reruns, or use the retained key-only root SSH account for later
-setup operations. Interactive runs may prompt for the
+the remote setup upload use retained, key-only root SSH. This stable privileged
+channel applies to both VMs and LXCs and does not depend on the configured
+account's current sudo policy. A standard VM user joins `sudo` without
+receiving a temporary passwordless bootstrap rule. Use `--nopasswd` to grant
+that user the managed unrestricted rule explicitly; root transport allows a
+later rerun to add or remove it safely. Interactive runs may prompt for the
 configured SSH key's passphrase; non-interactive runs require that key to be
 available through an SSH agent. See [SSH authentication](SSH.md). The normal
 static network step then

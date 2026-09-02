@@ -30,27 +30,6 @@ class ProvisionError(Exception):
     """Raised when guest provisioning fails."""
 
 
-def get_provisioned_guest_ssh_user(
-    machine_type: str,
-    setup_username: str,
-    *,
-    nopasswd: bool = False,
-    setup_user_deferred: bool = False,
-) -> str:
-    """Return the account used for privileged guest setup operations.
-
-    Managed guests retain key-only root SSH for setup reruns. A normal VM may
-    use its configured setup account when ``--nopasswd`` explicitly keeps the
-    managed sudo rule. When a new VM needs a dedicated /home filesystem,
-    setup-user creation is deferred until the first remote setup run mounts
-    that disk. LXC provisioning always bootstraps only root SSH access.
-    """
-
-    if machine_type == "vm" and nopasswd and not setup_user_deferred:
-        return setup_username
-    return "root"
-
-
 def _ssh_opts(hosted_key: Optional[str] = None) -> StrList:
     """Build SSH options list for Proxmox node connections."""
     opts = [
@@ -1119,7 +1098,6 @@ def refresh_managed_guest_host_keys(
 
 __all__ = [
     "ProvisionError",
-    "get_provisioned_guest_ssh_user",
     "_build_guest_hostname",
     "_get_bridge_prefix_length",
     "_get_corosync_config",
