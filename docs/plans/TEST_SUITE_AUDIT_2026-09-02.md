@@ -1,8 +1,9 @@
-# Test suite audit (2026-09-02)
+# Test suite audit and coverage plan (2026-09-02)
 
-Status: complete for the current test-suite review. The suite has 170 tracked
-test modules, 3,183 test methods, and 3,172 tests in the default runner. One
-live Proxmox test is intentionally skipped unless explicitly enabled.
+Status: audit complete and improvement plan finalized. The suite has 170
+tracked test modules, 3,180 class-based test methods, and 3,172 tests in the
+default runner. One live Proxmox test is intentionally skipped unless
+explicitly enabled.
 
 ## Review method
 
@@ -32,19 +33,20 @@ The only skipped default test is the destructive/live Proxmox lifecycle test.
 It remains valuable as an opt-in integration check and is correctly isolated
 behind the `live_proxmox` category.
 
-Three exact duplicate-body pairs were found, but none is safe to remove:
+Four exact duplicate-body groups were found, but none is safe to remove:
 
-| Pair | Why both remain |
+| Pair or group | Why both remain |
 | --- | --- |
 | Modern `auto_restart` setting / legacy `no_restart` mapping | Current configuration and backwards-compatible configuration are separate contracts. |
 | Routine privileged audit event / fail2ban unban event | Both verify the no-notification policy for different event sources. |
 | Full Godot release update / bundle-only update | The updater receives different update results and both paths must notify. |
+| SSH hardening skips when `sshd` is absent, the drop-in directory is unwritable, or the drop-in file is unwritable | These are separate refusal branches and protect different environmental failures, even though each verifies that no reload is attempted. |
 
-The 123 test methods without a direct `assert*` call are intentional
-acceptance, syntax, idempotency, or side-effect tests. The progress fallback
-test was the one weak exception: it claimed to verify fallback to `print` but
-only checked that no exception was raised. It now captures and asserts the
-actual output.
+An AST scan found 119 class-based test methods without a direct `assert*` call.
+Most are intentional acceptance, syntax, idempotency, or side-effect tests.
+The progress fallback test was the one weak exception: it claimed to verify
+fallback to `print` but only checked that no exception was raised. It now
+captures and asserts the actual output.
 
 The audit also removed eleven unused imports from test modules. No test was
 removed because no candidate met the project’s removal bar: deleting a test
@@ -126,8 +128,10 @@ Confirm whether they are supported public paths; if not, remove the abandoned
 implementations, and if so, wire them into the supported path and add tests.
 The `deploy/steps.py` and `sync/steps.py` files are thin compatibility facades
 and should instead get a cheap import/registration smoke test if they remain
-part of the plugin contract. The untraced `scripts/` files are command-line
-checks exercised by `make check`, so they are a lower-priority test gap.
+part of the plugin contract. The untraced `scripts/check_cli_docs.py` and
+`scripts/check_package_metadata.py` are directly exercised by `make check`;
+`scripts/update_cloud_images.py` remains a lower-priority untested command
+path.
 
 Coverage should be improved as a risk-weighted branch matrix, not by chasing a
 percentage through import-only tests. For command and system-mutating code,
@@ -137,13 +141,13 @@ must stay mocked and filesystem cases should use temporary directories.
 
 ## Safe simplification opportunities
 
-No additional test deletion is justified. A re-scan still finds only the three
-exact duplicate-body pairs recorded above, and each pair protects a distinct
-compatibility, event-source, or update-result contract. The roughly 123-method
-“no direct `assert*`” signal is also not, by itself, test slop: most of those
-tests are valid “must not raise” validator cases, syntax checks, idempotency
-checks, or side-effect tests. Non-validator side-effect tests should continue
-to assert a command, file, log, or return value explicitly.
+No additional test deletion is justified. The four duplicate-body groups
+recorded above each protect a distinct compatibility, event-source, update
+result, or environmental-failure contract. The no-direct-`assert*` signal is
+also not, by itself, test slop: most of those tests are valid “must not raise”
+validator cases, syntax checks, idempotency checks, or side-effect tests.
+Non-validator side-effect tests should continue to assert a command, file, log,
+or return value explicitly.
 
 The low-risk cleanup path is to reduce scaffolding while retaining test
 identity and behavior coverage:
@@ -162,23 +166,57 @@ identity and behavior coverage:
   The classes already provide useful grouping, so a mechanical move would add
   churn without improving coverage.
 
-## Follow-up recommendations
+## Finalized improvement plan
 
-- Keep large modules grouped by the behavior they protect. The most natural
-  future physical splits are `test_validation.py`, `test_agent_tools.py`,
-  `test_setup_common.py`, `test_provisioning_cache.py`, and
-  `test_proxmox_manage.py`; defer them until a feature change gives each split
-  a clear ownership boundary.
-- Revisit older coverage when the corresponding implementation changes. The
-  main watch list is the Proxmox helper cluster, `test_validators.py`,
-  `test_disk_utils.py`, `test_progress_utils.py`, and
-  `tests/service_tools/test_scrub_par2.py`. Their tests are still valid today,
-  but their last focused updates predate later implementation changes.
+The plan is deliberately risk-weighted. A coverage percentage is useful for
+finding blind spots, but the completion criterion is a tested behavior matrix
+for code that validates inputs, invokes remote commands, changes files, or
+performs rollback.
+
+| Phase | Scope and owner | Deliverable and exit criterion |
+| --- | --- | --- |
+| 1. Make coverage reproducible | Test infrastructure | Add a repeatable CI/local coverage command, preferably with `coverage.py` as a development-only dependency. Until that is available, retain the documented `trace` plus AST measurement. Publish per-file and branch-oriented results without enforcing a global threshold on the current baseline. |
+| 2. Close command-line blind spots | Sysadmin/CLI maintainers | Add parser and dispatcher contract tests for every sysadmin command, then focused mocked tests for the eight untraced handlers. Cover credential fallback, success, refusal, subprocess failure, timeout, and `os.execvp`/parallel-output behavior without opening real SSH or rsync connections. |
+| 3. Cover remote and filesystem boundaries | Deployment/storage maintainers | Add `tests/test_recall.py` and `tests/test_mount_utils.py`; expand `test_deploy_admin.py` and add direct `remote_deploy` cases. Use temporary directories and mocked subprocesses to cover atomic writes, modes/ownership, symlink and path rejection, mount ancestry, SMB checks, cleanup, timeout, and rollback. |
+| 4. Exercise service-tool failure matrices | Web/security maintainers | Expand webhook-manager and Cloudflare-tunnel tests around missing state, malformed input, duplicate/remove paths, validation failures, and command failures. Preserve the existing security-monitor and notification cases because their event sources differ. |
+| 5. Harden large workflows | Workflow owners | Add decision tables for `user_rename`, internal web forwarding, Proxmox helpers, Godot updates, swap/scrub, and network transitions. Prioritize failure transitions, idempotency, ownership, and rollback; do not add import-only tests just to raise the number. |
+| 6. Simplify and regroup during feature work | Test maintainers | Convert only same-contract scalar cases to `subTest` tables, extract repeated mock builders, and split large modules at existing behavior-class boundaries. Keep the pattern-driven domain suites as the primary grouping mechanism and avoid mechanical file moves. |
+| 7. Resolve unowned code | Module owners | Decide whether `lib/service_manager.py` and `lib/concurrent_sync_scrub.py` are supported. Remove them if abandoned; otherwise wire them into a supported path and add focused tests. Add import/registration smoke coverage for `deploy/steps.py` and `sync/steps.py` if their compatibility-facade role remains required. |
+
+The first implementation slice should be phases 1–3. A slice is complete when
+the new tests pass through the default runner and the relevant domain suites,
+all external commands remain mocked, and each listed failure/success branch has
+an assertion on its return value or externally visible effect. Phases 4–7 can
+follow the ownership and feature-change boundaries of the affected modules.
+
+### Simplification rules
+
+- Do not remove a test solely because its normalized body matches another test.
+  First map both tests to the same production branch and contract; otherwise
+  retain them or consolidate only their shared setup.
+- Prefer `subTest` for multiple inputs with one expected result, such as valid
+  and invalid scalar validators. Keep separate tests when error text, security
+  policy, compatibility behavior, or failure source is different.
+- Keep explicit test names for rollback, authorization, and compatibility
+  boundaries. They make failures actionable and prevent a broad table from
+  hiding which safety rule regressed.
+- Split `test_validation.py` (167 methods), `test_proxmox_manage.py` (107),
+  `test_storage.py` (104), `test_agent_tools.py` (70),
+  `test_antistatic_steps.py` (70), and `test_project_manifest.py` (66) only
+  along their existing behavior classes. The current classes already group
+  behavior, so a mechanical move is not part of this plan.
+
+### Ongoing review rules
+
+- New system-mutating code must include success, refusal, external-command
+  failure, timeout, and cleanup/rollback coverage where those paths exist.
 - Keep compatibility and security tests even when their names contain
   “legacy”; age or terminology alone is not evidence of test slop.
-- Treat the coverage priorities above as the backlog order: sysadmin dispatch,
-  mount/recall utilities, privileged deployment helpers, then large workflow
-  rollback matrices.
+- Revisit the older watch list when implementation changes: the Proxmox helper
+  cluster, `test_validators.py`, `test_disk_utils.py`, `test_progress_utils.py`,
+  and `tests/service_tools/test_scrub_par2.py`.
+- Review coverage trends by domain suite and changed files. Do not block a
+  release on a global percentage until the newly measured baseline is stable.
 
 ## Verification
 
