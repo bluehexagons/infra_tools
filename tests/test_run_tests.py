@@ -18,12 +18,32 @@ class TestRunTestsSuites(unittest.TestCase):
     def test_named_suites_are_available(self) -> None:
         self.assertIn("smoke", run_tests.TEST_SUITES)
         self.assertIn("proxmox", run_tests.TEST_SUITES)
+        self.assertIn("agent", run_tests.TEST_SUITES)
+        self.assertIn("services", run_tests.TEST_SUITES)
         self.assertIn("all", run_tests.TEST_SUITES)
 
     def test_build_named_suite(self) -> None:
         loader = unittest.TestLoader()
         suite = run_tests._build_suite(loader, [], ["smoke"])
         self.assertGreater(suite.countTestCases(), 0)
+
+    def test_combined_suites_do_not_duplicate_test_cases(self) -> None:
+        loader = unittest.TestLoader()
+        suite = run_tests._build_suite(loader, [], ["smoke", "security"])
+        test_ids = [test.id() for test in run_tests._iter_test_cases(suite)]
+        self.assertEqual(len(test_ids), len(set(test_ids)))
+
+    def test_domain_suites_cover_all_discovered_modules(self) -> None:
+        test_root = run_tests._REPO_ROOT / "tests"
+        discovered = {
+            ".".join(path.relative_to(run_tests._REPO_ROOT).with_suffix("").parts)
+            for path in test_root.rglob("test_*.py")
+            if path.is_file()
+        }
+        grouped = set().union(
+            *(run_tests.TEST_SUITES[name] for name in run_tests.TEST_SUITE_PATTERNS)
+        )
+        self.assertEqual(discovered, grouped)
 
     def test_list_suites_output(self) -> None:
         stdout = io.StringIO()

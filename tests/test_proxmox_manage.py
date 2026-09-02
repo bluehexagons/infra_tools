@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 import unittest
-from typing import Optional
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -17,9 +16,7 @@ from lib.proxmox_manage import (
     ContainerInfo,
     DEFAULT_NOTIFICATION_ENDPOINT,
     GuestAutostart,
-    HealthReport,
     ProxmoxManageError,
-    SnapshotInfo,
     _build_webhook_notification_commands,
     _parse_listsnapshot,
     _parse_pct_list,

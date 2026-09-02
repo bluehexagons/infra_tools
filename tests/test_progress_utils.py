@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import unittest
 import time
-from unittest.mock import Mock, call
+from unittest.mock import Mock
+from unittest.mock import patch
 from lib.progress_utils import (
     ProgressTracker,
     ProgressMessage,
@@ -250,9 +251,11 @@ class TestProgressTracker(unittest.TestCase):
         """Test logging falls back to print when no logger/func provided."""
         tracker = ProgressTracker(interval_seconds=1)
         tracker.last_log_time = time.time() - 2  # 2 seconds ago
-        
-        # Should not raise an error
-        tracker.log_if_due("Test message")
+
+        with patch("builtins.print") as mock_print:
+            self.assertTrue(tracker.log_if_due("Test message"))
+
+        mock_print.assert_called_once_with("Test message", flush=True)
 
 
 class TestLogProgressIfDue(unittest.TestCase):

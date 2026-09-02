@@ -21,7 +21,6 @@ from lib.concurrent_operations import (
     SimpleLockManager,
     OperationQueue,
     ConcurrentOperationManager,
-    get_operation_manager,
     _operation_manager,
 )
 from lib.operation_log import OperationLogger

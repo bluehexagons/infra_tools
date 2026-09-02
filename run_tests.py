@@ -47,6 +47,157 @@ from tests.expensive_support import (  # noqa: E402  (after sys.path tweak)
     category_env_var,
 )
 
+
+TEST_SUITE_PATTERNS: dict[str, tuple[str, ...]] = {
+    "agent": (
+        "tests/test_agent_*.py",
+        "tests/test_browser_automation.py",
+        "tests/test_device_pairing.py",
+        "tests/test_git_credentials.py",
+        "tests/test_t3_agent_skills.py",
+        "tests/test_t3code_admin_pair.py",
+        "tests/test_t3code_steps.py",
+        "tests/test_workspace_cli.py",
+    ),
+    "core": (
+        "tests/test_arg_parser_hosted.py",
+        "tests/test_atomic_io.py",
+        "tests/test_cache.py",
+        "tests/test_channel_manager.py",
+        "tests/test_config*.py",
+        "tests/test_completions.py",
+        "tests/test_concurrent_operations.py",
+        "tests/test_credentials.py",
+        "tests/test_display.py",
+        "tests/test_expensive_support.py",
+        "tests/test_interactive_shell.py",
+        "tests/test_logging_utils.py",
+        "tests/test_machine_state.py",
+        "tests/test_notifications.py",
+        "tests/test_operation_*.py",
+        "tests/test_plugin_registry.py",
+        "tests/test_progress*.py",
+        "tests/test_project_manifest.py",
+        "tests/test_remote_utils.py",
+        "tests/test_run_tests.py",
+        "tests/test_setup_report.py",
+        "tests/test_systemd_service.py",
+        "tests/test_sysadmin_user*.py",
+        "tests/test_update_policy.py",
+        "tests/test_user_rename.py",
+        "tests/test_validation.py",
+        "tests/test_validators.py",
+    ),
+    "desktop": (
+        "tests/test_av_tools.py",
+        "tests/test_browser_steps.py",
+        "tests/test_data_analysis_tools.py",
+        "tests/test_desktop_apps.py",
+        "tests/test_firmware.py",
+        "tests/test_gl_tools.py",
+        "tests/test_go_setup.py",
+        "tests/test_godot*.py",
+        "tests/test_rdp_validation.py",
+        "tests/test_xrdp*.py",
+    ),
+    "deployment": (
+        "tests/test_cicd*.py",
+        "tests/test_common_steps.py",
+        "tests/test_deploy*.py",
+        "tests/test_install*.py",
+        "tests/test_legacy_deployment.py",
+        "tests/test_manifest_deploy.py",
+        "tests/test_orchestrator_bootstrap.py",
+        "tests/test_python_setup.py",
+        "tests/test_release_management.py",
+        "tests/test_remote_setup.py",
+        "tests/test_required_setup_failures.py",
+        "tests/test_setup_common.py",
+        "tests/test_setup_dry_run.py",
+        "tests/test_upgrade_safety.py",
+        "tests/test_uv_install.py",
+        "tests/test_wheel_artifact.py",
+    ),
+    "network": (
+        "tests/test_apt_sources.py",
+        "tests/test_cloudflare*.py",
+        "tests/test_mdns.py",
+        "tests/test_network*.py",
+        "tests/test_ssh_enrollment.py",
+        "tests/test_ssh_utils.py",
+    ),
+    "proxmox": (
+        "tests/test_arg_parser_hosted.py",
+        "tests/test_cloud_images.py",
+        "tests/test_cluster_update.py",
+        "tests/test_network_proxmox.py",
+        "tests/test_node_setup.py",
+        "tests/test_provisioning_cache.py",
+        "tests/test_proxmox_*.py",
+        "tests/test_vm_*.py",
+    ),
+    "security": (
+        "tests/test_access_filters.py",
+        "tests/test_agent_security_*.py",
+        "tests/test_auth_failure_bans.py",
+        "tests/test_firewall_output.py",
+        "tests/test_git_samba_boundaries.py",
+        "tests/test_samba*.py",
+        "tests/test_security_steps.py",
+        "tests/test_shell_safety.py",
+        "tests/test_smb_mount_hardening.py",
+        "tests/test_ssh_*.py",
+    ),
+    "services": (
+        "tests/service_tools/test_*.py",
+        "tests/test_codex_auth_maintenance.py",
+        "tests/test_github_maintenance.py",
+        "tests/test_local_cli.py",
+        "tests/test_maintenance_systemd.py",
+    ),
+    "storage": (
+        "tests/service_tools/test_check_storage_ops_mounts.py",
+        "tests/service_tools/test_scrub_par2.py",
+        "tests/service_tools/test_storage_ops.py",
+        "tests/service_tools/test_sync_rsync.py",
+        "tests/service_tools/test_user_cache_maintenance.py",
+        "tests/test_backup_config.py",
+        "tests/test_disk_utils.py",
+        "tests/test_scrub_par2.py",
+        "tests/test_storage*.py",
+        "tests/test_swap*.py",
+        "tests/test_syncthing*.py",
+    ),
+    "web": (
+        "tests/test_antistatic_steps.py",
+        "tests/test_cloudflare*.py",
+        "tests/test_gogs*.py",
+        "tests/test_infra_web.py",
+        "tests/test_manifest_deploy.py",
+        "tests/test_nginx_config.py",
+        "tests/test_ssl_steps.py",
+        "tests/test_static_web_publish.py",
+        "tests/test_web*.py",
+    ),
+}
+
+
+def _discover_pattern_suite(patterns: tuple[str, ...]) -> list[str]:
+    """Return dotted test-module selectors matching the supplied patterns."""
+    selectors: list[str] = []
+    seen: set[str] = set()
+    for pattern in patterns:
+        for path in sorted(_REPO_ROOT.glob(pattern)):
+            if not path.is_file() or not path.name.startswith("test_"):
+                continue
+            relative = path.relative_to(_REPO_ROOT).with_suffix("")
+            selector = ".".join(relative.parts)
+            if selector not in seen:
+                selectors.append(selector)
+                seen.add(selector)
+    return selectors
+
+
 TEST_SUITES: dict[str, list[str]] = {
     "smoke": [
         "tests.test_config",
@@ -85,6 +236,10 @@ TEST_SUITES: dict[str, list[str]] = {
         "tests.test_proxmox_node",
         "tests.test_upgrade_safety",
     ],
+    **{
+        name: _discover_pattern_suite(patterns)
+        for name, patterns in TEST_SUITE_PATTERNS.items()
+    },
     "all": [],
 }
 
@@ -305,6 +460,15 @@ def _resolve_selector(loader: unittest.TestLoader, selector: str):
     )
 
 
+def _iter_test_cases(test):
+    """Yield individual test cases from a possibly nested unittest suite."""
+    if isinstance(test, unittest.TestSuite):
+        for child in test:
+            yield from _iter_test_cases(child)
+        return
+    yield test
+
+
 def _build_suite(
     loader: unittest.TestLoader,
     selectors: list[str],
@@ -315,11 +479,21 @@ def _build_suite(
     if not selectors and not suites:
         return loader.discover("tests", pattern="test_*.py")
     suite = unittest.TestSuite()
+    seen_test_ids: set[str] = set()
+
+    def add_selector(selector: str) -> None:
+        for test in _iter_test_cases(_resolve_selector(loader, selector)):
+            test_id = test.id()
+            if test_id in seen_test_ids:
+                continue
+            suite.addTest(test)
+            seen_test_ids.add(test_id)
+
     for suite_name in suites:
         for selector in TEST_SUITES[suite_name]:
-            suite.addTests(_resolve_selector(loader, selector))
+            add_selector(selector)
     for sel in selectors:
-        suite.addTests(_resolve_selector(loader, sel))
+        add_selector(sel)
     return suite
 
 

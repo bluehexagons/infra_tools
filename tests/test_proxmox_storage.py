@@ -12,7 +12,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib.proxmox_hosts import ProxmoxHost
 from lib.proxmox_storage import (
-    OrphanedVolume,
     ProxmoxStorageError,
     _parse_pvesm_list,
     delete_volume,
