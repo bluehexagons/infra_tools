@@ -127,7 +127,7 @@ tools, not for an LXC container.
 | `username` | Optional SSH username |
 | `-k, --key PATH` | SSH private key |
 | `-p, --password PASS` | SSH password |
-| `--nopasswd` | Retain the VM setup user's unrestricted passwordless sudo compatibility rule; disabled by default |
+| `--nopasswd` / `--no-nopasswd` | Retain or remove the VM setup user's unrestricted passwordless sudo capability rule; disabled by default |
 | `--harden-agent` / `--no-harden-agent` | Apply or remove administrator/root-equivalent group restrictions and the hardened coding-agent policy; mutually exclusive with `--nopasswd` when enabled |
 | `--harden-user` / `--no-harden-user` | Also apply or remove password locking, mode-`0700` home, sensitive system-data/device-group restrictions, SSH forwarding/user-rc restrictions, and disabled systemd lingering; enabling implies `--harden-agent` and rejects RDP |
 | `-t, --timezone TZ` | Timezone |
@@ -205,7 +205,10 @@ provisioned VM. Normal setup removes the managed rule before it finishes;
 `--nopasswd` deliberately retains the previous unrestricted behavior. A later
 non-root rerun therefore requires `--nopasswd` to have been saved, while the
 default and hardened postures rerun through the retained key-only root SSH
-path. When setup is launched from a terminal, SSH may prompt
+path. Patch commands preserve an omitted passwordless-sudo choice;
+`--no-nopasswd` removes it explicitly. Selecting `--nopasswd` exits a saved
+hardened posture, while explicitly combining it with a hardening flag is
+rejected. When setup is launched from a terminal, SSH may prompt
 for the configured private-key passphrase; piped or otherwise non-interactive
 runs require the key to be loaded in an SSH agent. See
 [SSH authentication](SSH.md) for the same behavior across transfers,
@@ -367,8 +370,9 @@ default. The full profile does not choose Proxmox capacity. It installs Node.js
 automatically for T3 Code, while Go and other project runtimes remain optional.
 The coding identity remains in the `sudo` group by default, but its sudo use
 requires the account password. `--nopasswd` restores the former VM-wide
-`NOPASSWD:ALL` policy for convenience. `--harden-agent` instead removes
-administrator and root-equivalent supplementary groups. `--harden-user` adds
+`NOPASSWD:ALL` policy for convenience, while leaving Codex's capable standard
+feature set available. `--harden-agent` instead removes administrator and
+root-equivalent supplementary groups. `--harden-user` adds
 a private home, password lock, sensitive system-data/device-group removal,
 disabled SSH forwarding and user rc, and disabled systemd lingering, making it
 suitable for headless CI/CD and disposable evaluation; it cannot be combined
@@ -451,7 +455,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 | Flag | Description |
 |------|-------------|
 | `--t3code-ready` | Add the headless T3 Code-ready profile: GitHub CLI, Codex, read-write Git, T3 web service, and protected pairing |
-| `--nopasswd` | Retain unrestricted passwordless sudo for the VM setup identity; compatibility opt-in |
+| `--nopasswd` / `--no-nopasswd` | Retain or remove unrestricted passwordless sudo for the VM setup identity; capability opt-in |
 | `--harden-agent` / `--no-harden-agent` | Apply or remove administrator/root-equivalent supplementary-group restrictions and the stricter agent policy |
 | `--harden-user` / `--no-harden-user` | Apply or remove the password lock, private home, sensitive system-data/device-group restrictions, SSH forwarding/user-rc restrictions, and disabled lingering; enabling implies agent hardening and is incompatible with RDP |
 | `--agent-tool TOOL[,TOOL...]` | Add one or more provider tools (`gh`, `codex`, `claude`, or `opencode`) to profile defaults |

@@ -311,6 +311,13 @@ def merge_setup_configs(
     merged_dict = asdict(cached_config)
     new_dict = asdict(new_config)
     preserve_keys = preserve_keys or set()
+
+    # Selecting passwordless sudo is an explicit request for the capable,
+    # non-hardened posture. SetupConfig still rejects callers that explicitly
+    # combine this option with either hardened mode.
+    if new_config.nopasswd:
+        merged_dict["harden_agent"] = False
+        merged_dict["harden_user"] = False
     
     for key, value in new_dict.items():
         if key in ('host', 'system_type'):

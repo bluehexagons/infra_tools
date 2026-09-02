@@ -162,10 +162,11 @@ def add_setup_arguments(
     parser.add_argument("-p", "--password", help="User password")
     parser.add_argument(
         "--nopasswd",
-        action="store_true",
+        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+        default=None if not for_remote else False,
         help=(
-            "Allow the non-root VM setup user to run any sudo command without "
-            "a password (compatibility mode; disabled by default)"
+            "Enable or disable unrestricted passwordless sudo for the non-root "
+            "VM setup user (capability/compatibility mode; disabled by default)"
         ),
     )
     parser.add_argument(

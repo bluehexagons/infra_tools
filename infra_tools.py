@@ -983,6 +983,8 @@ def _execute_patch_config(config: SetupConfig) -> int:
 
 def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
     preserve_keys: set[str] = set()
+    if getattr(args, "nopasswd", None) is None:
+        preserve_keys.add("nopasswd")
     explicit_swap_mode = getattr(args, "swap_mode", None)
     if explicit_swap_mode is None:
         preserve_keys.add("swap_mode")

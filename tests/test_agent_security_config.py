@@ -8,6 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from infra_tools import _patch_preserve_keys
 from lib.arg_parser import create_setup_argument_parser
 from lib.cache import merge_setup_configs
 from lib.config import SetupConfig
@@ -87,6 +88,15 @@ class TestAgentSecurityConfig(unittest.TestCase):
         self.assertIsNone(args.harden_agent)
         self.assertIsNone(args.harden_user)
 
+    def test_parser_distinguishes_omitted_and_disabled_nopasswd(self):
+        parser = create_setup_argument_parser("test")
+
+        omitted = parser.parse_args(["testhost", "agent"])
+        disabled = parser.parse_args(["testhost", "agent", "--no-nopasswd"])
+
+        self.assertIsNone(omitted.nopasswd)
+        self.assertFalse(disabled.nopasswd)
+
     def test_parser_accepts_harden_user(self):
         parser = create_setup_argument_parser("test")
         args = parser.parse_args(["testhost", "agent", "--harden-user"])
@@ -134,6 +144,59 @@ class TestAgentSecurityConfig(unittest.TestCase):
         )
         self.assertFalse(removed.harden_user)
         self.assertFalse(removed.harden_agent)
+
+    def test_patch_merge_preserves_omitted_nopasswd_and_allows_removal(self):
+        parser = create_setup_argument_parser("test")
+        cached = SetupConfig(
+            host="testhost",
+            username="agent",
+            system_type="agent_vm",
+            nopasswd=True,
+        )
+
+        omitted_args = parser.parse_args(["testhost", "agent"])
+        omitted = SetupConfig.from_args(omitted_args, "agent_vm")
+        preserved = merge_setup_configs(
+            cached,
+            omitted,
+            preserve_keys=_patch_preserve_keys(omitted_args),
+        )
+
+        self.assertTrue(preserved.nopasswd)
+
+        disabled_args = parser.parse_args(
+            ["testhost", "agent", "--no-nopasswd"]
+        )
+        disabled = SetupConfig.from_args(disabled_args, "agent_vm")
+        removed = merge_setup_configs(
+            preserved,
+            disabled,
+            preserve_keys=_patch_preserve_keys(disabled_args),
+        )
+
+        self.assertFalse(removed.nopasswd)
+
+    def test_selecting_nopasswd_exits_cached_hardened_posture(self):
+        cached = SetupConfig(
+            host="testhost",
+            username="agent",
+            system_type="agent_vm",
+            harden_user=True,
+        )
+        selected = SetupConfig(
+            host="testhost",
+            username="agent",
+            system_type="agent_vm",
+            nopasswd=True,
+            harden_agent=None,
+            harden_user=None,
+        )
+
+        merged = merge_setup_configs(cached, selected)
+
+        self.assertTrue(merged.nopasswd)
+        self.assertFalse(merged.harden_agent)
+        self.assertFalse(merged.harden_user)
 
 
 if __name__ == "__main__":

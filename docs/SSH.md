@@ -101,6 +101,10 @@ The normal VM setup flow removes that bootstrap rule before completion. Pass
 `--nopasswd` to validate and retain it for compatibility with non-root reruns.
 Without that flag, rerun setup through the retained key-only root SSH account;
 the configured user remains in `sudo`, but sudo requires its password.
+Patch commands preserve the saved choice when the flag is omitted. Pass
+`--no-nopasswd` to remove the managed rule explicitly. Selecting `--nopasswd`
+also exits a saved hardened posture; directly combining it with an enabled
+hardening flag is rejected.
 `--harden-agent` also removes the configured user from the `sudo` group.
 It also reconciles other administrator and root-equivalent supplementary
 groups. `--harden-user` implies that policy, locks Unix password

@@ -24,7 +24,9 @@ from plugins.common import (
 
 
 class TestCodexSecurityPolicy(unittest.TestCase):
-    def _config(self, *, hardened: bool = False) -> SetupConfig:
+    def _config(
+        self, *, hardened: bool = False, nopasswd: bool = False
+    ) -> SetupConfig:
         return SetupConfig(
             host="testhost",
             username="agent",
@@ -32,13 +34,18 @@ class TestCodexSecurityPolicy(unittest.TestCase):
             machine_type="vm",
             install_codex=True,
             harden_agent=hardened,
+            nopasswd=nopasswd,
         )
 
-    def _configure(self, directory: str, *, hardened: bool = False) -> None:
+    def _configure(
+        self, directory: str, *, hardened: bool = False, nopasswd: bool = False
+    ) -> None:
         with patch(
             "common.agent_security_steps.CODEX_SYSTEM_CONFIG_DIR", directory
         ), patch("common.agent_security_steps.os.chown"):
-            configure_codex_security_policy(self._config(hardened=hardened))
+            configure_codex_security_policy(
+                self._config(hardened=hardened, nopasswd=nopasswd)
+            )
 
     def test_standard_policy_uses_auto_review_and_workspace_permissions(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -56,6 +63,26 @@ class TestCodexSecurityPolicy(unittest.TestCase):
         self.assertEqual(config["approvals_reviewer"], "auto_review")
         self.assertEqual(config["default_permissions"], ":workspace")
         self.assertFalse(config["sandbox_workspace_write"]["network_access"])
+
+    def test_nopasswd_keeps_capable_standard_codex_policy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            policy_dir = os.path.join(temporary, "codex")
+            self._configure(policy_dir, nopasswd=True)
+
+            with open(
+                os.path.join(policy_dir, "config.toml"), "rb"
+            ) as file_obj:
+                config = tomllib.load(file_obj)
+
+            self.assertFalse(
+                os.path.exists(os.path.join(policy_dir, "requirements.toml"))
+            )
+
+        self.assertEqual(config["approval_policy"], "on-request")
+        self.assertEqual(config["approvals_reviewer"], "auto_review")
+        self.assertEqual(config["default_permissions"], ":workspace")
+        self.assertNotIn("allow_login_shell", config)
+        self.assertNotIn("features", config)
 
     def test_hardened_policy_disables_approval_escalation_and_active_tools(self):
         with tempfile.TemporaryDirectory() as temporary:
