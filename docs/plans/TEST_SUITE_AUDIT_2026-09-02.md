@@ -86,6 +86,82 @@ suite. The existing `smoke`, `proxmox`, `security`, and `integration` suites
 remain available as targeted workflows; `all` and the default invocation still
 use unittest discovery.
 
+## Coverage review
+
+The optional `coverage` package is not installed in this environment, so a
+one-off standard-library `trace` run of `run_tests.py` was combined with an
+AST statement-line map. This is an approximate prioritization signal, not a
+branch-coverage gate: it measures the default suite only, counts a statement
+as covered when its source line executed, and does not include the opt-in live
+Proxmox test.
+
+The run covered 29,723 of approximately 43,365 statement lines (68.5%) across
+204 tracked non-test Python files. 189 files executed at least one statement;
+15 did not. The largest gaps are concentrated in a small number of user-facing
+and privileged workflows rather than in the validation code that has the most
+test methods:
+
+| Area | Approximate coverage | Evidence and meaningful next test |
+| --- | ---: | --- |
+| `lib/recall.py` | 17/132 (12.9%) | Interactive-shell tests patch the recall command; add focused tests for stored-config success, missing/invalid data, SSH timeout, reconstruction, and extra-feature rendering. |
+| `lib/mount_utils.py` | 16/114 (14.0%) | Storage tests cover the `/mnt` predicate but not mountpoint ancestry, SMB probing, accessibility, callback failure, or multi-path results; add mocked-command tests with temporary directories. |
+| `web/service_tools/webhook_manager.py` | 39/186 (21.0%) | Current coverage reaches the “default new repositories to main” behavior; exercise config absence, list/add/remove/test commands, duplicate handling, and script validation. |
+| `web/service_tools/deploy_admin.py` | 40/176 (22.7%) | Existing tests focus on three validators; add temporary-directory tests for regular-file/size/owner checks, atomic replacement, symlink handling, rollback, and command failures. |
+| `lib/remote_deploy.py` | 48/184 (26.1%) | Orchestration tests mostly patch the deployment helpers; cover rsync/SCP/SSH success, failure, timeout, cleanup, and safe-path branches directly with mocked subprocesses. |
+| `lib/user_rename.py` and `common/service_tools/infra_web.py` | 36.2% and 44.4% | These are large, security-sensitive workflows. Add decision-table tests for rollback, idempotency, ownership, and failure transitions rather than shallow tests for every helper. |
+
+The eight lazy sysadmin handlers (`sysadmin_fan`, `sysadmin_health`,
+`sysadmin_keys`, `sysadmin_mount`, `sysadmin_reachable`, `sysadmin_ssh`,
+`sysadmin_transfer`, and `sysadmin_upgrade`) did not execute at all in the
+trace run. There are parser tests for the user-rename command, but no general
+parser/dispatcher contract test for the sysadmin command family. This is the
+highest-value addition: verify each `_sysadmin_cmd` dispatches the parsed
+arguments correctly, then test handler success, failure, and credential
+fallbacks with `subprocess.run`, `os.execvp`, and concurrency mocked.
+
+Two other untraced modules deserve a code-ownership decision before new tests
+are written. `lib/service_manager.py` and `lib/concurrent_sync_scrub.py` have
+no repository consumers beyond their own definitions and no focused tests.
+Confirm whether they are supported public paths; if not, remove the abandoned
+implementations, and if so, wire them into the supported path and add tests.
+The `deploy/steps.py` and `sync/steps.py` files are thin compatibility facades
+and should instead get a cheap import/registration smoke test if they remain
+part of the plugin contract. The untraced `scripts/` files are command-line
+checks exercised by `make check`, so they are a lower-priority test gap.
+
+Coverage should be improved as a risk-weighted branch matrix, not by chasing a
+percentage through import-only tests. For command and system-mutating code,
+the useful cases are validation refusal, dry-run/idempotent behavior, success,
+external-command failure, timeout, and cleanup/rollback. All external commands
+must stay mocked and filesystem cases should use temporary directories.
+
+## Safe simplification opportunities
+
+No additional test deletion is justified. A re-scan still finds only the three
+exact duplicate-body pairs recorded above, and each pair protects a distinct
+compatibility, event-source, or update-result contract. The roughly 123-method
+“no direct `assert*`” signal is also not, by itself, test slop: most of those
+tests are valid “must not raise” validator cases, syntax checks, idempotency
+checks, or side-effect tests. Non-validator side-effect tests should continue
+to assert a command, file, log, or return value explicitly.
+
+The low-risk cleanup path is to reduce scaffolding while retaining test
+identity and behavior coverage:
+
+- Use `subTest` tables for closely related scalar validation cases in
+  `test_validators.py` and `test_validation.py`, while keeping separate tests
+  where the error message or security rule is materially different.
+- Extract repeated mock setup/builders from broad service-tool tests when the
+  setup is identical. This makes new failure-path tests cheaper without
+  hiding which contract failed.
+- Split large files only at existing behavior-class boundaries when a feature
+  change provides a natural owner. Current candidates are
+  `test_validation.py` (167 methods), `test_proxmox_manage.py` (107),
+  `test_storage.py` (104), `test_agent_tools.py` (70),
+  `test_antistatic_steps.py` (70), and `test_project_manifest.py` (66).
+  The classes already provide useful grouping, so a mechanical move would add
+  churn without improving coverage.
+
 ## Follow-up recommendations
 
 - Keep large modules grouped by the behavior they protect. The most natural
@@ -100,11 +176,15 @@ use unittest discovery.
   but their last focused updates predate later implementation changes.
 - Keep compatibility and security tests even when their names contain
   “legacy”; age or terminology alone is not evidence of test slop.
+- Treat the coverage priorities above as the backlog order: sysadmin dispatch,
+  mount/recall utilities, privileged deployment helpers, then large workflow
+  rollback matrices.
 
 ## Verification
 
 - `python3 run_tests.py` — 3,172 passed, 1 skipped.
 - `python3 run_tests.py test_progress_utils test_run_tests` — 48 passing.
 - `make check` — compilation, documentation, packaging, artifact, and test checks passed.
+- One-off `trace` plus AST review — approximately 68.5% of tracked production statement lines; 15 files untraced.
 - `python3 -m py_compile run_tests.py tests/test_progress_utils.py tests/test_run_tests.py` — passing.
 - `git diff --check` — passing after the final diff review.
