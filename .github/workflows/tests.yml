@@ -39,7 +39,10 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install build
+          python3 -m pip install build 'coverage>=7.0'
 
       - name: Run checks
         run: make check
+
+      - name: Report coverage
+        run: make coverage

@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import stat
+import tempfile
 import unittest
+from unittest.mock import patch
 
+import web.service_tools.deploy_admin as deploy_admin
 from lib.remote_deploy import _validate_config_name, _validate_deploy_path
 from web.service_tools.deploy_admin import validate_config_name, validate_service_name
 
@@ -34,6 +39,136 @@ class TestDeployAdminValidation(unittest.TestCase):
         for invalid in ("/var/www", "/var/www/../../etc", "/etc/passwd", "relative/path"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 _validate_deploy_path(invalid, "/var/www")
+
+
+class TestDeployAdminFileOperations(unittest.TestCase):
+    def _paths(self, root: str) -> tuple[str, str, str]:
+        available = os.path.join(root, "available")
+        enabled = os.path.join(root, "enabled")
+        staged_prefix = os.path.join(root, "staged-")
+        os.makedirs(available)
+        os.makedirs(enabled)
+        return available, enabled, staged_prefix
+
+    def test_install_writes_config_enables_site_and_removes_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            available, enabled, staged_prefix = self._paths(root)
+            staged_path = f"{staged_prefix}example.conf"
+            with open(staged_path, "wb") as staged:
+                staged.write(b"server {}\n")
+
+            with patch.object(deploy_admin, "NGINX_AVAILABLE_DIR", available), patch.object(deploy_admin, "NGINX_ENABLED_DIR", enabled), patch.object(deploy_admin, "STAGED_CONFIG_PREFIX", staged_prefix), patch.object(deploy_admin, "NGINX_BINARY", "/mock/nginx"), patch.object(deploy_admin, "_run_checked") as run_checked:
+                deploy_admin.install_nginx_config("example")
+
+            installed = os.path.join(available, "example")
+            link = os.path.join(enabled, "example")
+            with open(installed, "rb") as config:
+                self.assertEqual(config.read(), b"server {}\n")
+            self.assertEqual(os.readlink(link), installed)
+            self.assertFalse(os.path.exists(staged_path))
+            run_checked.assert_called_once_with(["/mock/nginx", "-t"])
+
+    def test_install_rolls_back_previous_site_when_validation_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            available, enabled, staged_prefix = self._paths(root)
+            installed = os.path.join(available, "example")
+            link = os.path.join(enabled, "example")
+            with open(installed, "wb") as config:
+                config.write(b"old config\n")
+            os.chmod(installed, 0o640)
+            os.symlink("/old/example", link)
+            staged_path = f"{staged_prefix}example.conf"
+            with open(staged_path, "wb") as staged:
+                staged.write(b"new config\n")
+
+            with patch.object(deploy_admin, "NGINX_AVAILABLE_DIR", available), patch.object(deploy_admin, "NGINX_ENABLED_DIR", enabled), patch.object(deploy_admin, "STAGED_CONFIG_PREFIX", staged_prefix), patch.object(deploy_admin, "_run_checked", side_effect=RuntimeError("invalid nginx")):
+                with self.assertRaisesRegex(RuntimeError, "invalid nginx"):
+                    deploy_admin.install_nginx_config("example")
+
+            with open(installed, "rb") as config:
+                self.assertEqual(config.read(), b"old config\n")
+            self.assertEqual(os.stat(installed).st_mode & 0o777, 0o640)
+            self.assertEqual(os.readlink(link), "/old/example")
+            self.assertFalse(os.path.exists(staged_path))
+
+    def test_install_rejects_stage_owned_by_another_user(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            available, enabled, staged_prefix = self._paths(root)
+            staged_path = f"{staged_prefix}example.conf"
+            with open(staged_path, "wb") as staged:
+                staged.write(b"server {}\n")
+
+            with patch.object(deploy_admin, "NGINX_AVAILABLE_DIR", available), patch.object(deploy_admin, "NGINX_ENABLED_DIR", enabled), patch.object(deploy_admin, "STAGED_CONFIG_PREFIX", staged_prefix), patch.dict(deploy_admin.os.environ, {"SUDO_UID": str(os.getuid() + 1)}):
+                with self.assertRaisesRegex(ValueError, "owned by the invoking user"):
+                    deploy_admin.install_nginx_config("example")
+
+            self.assertTrue(os.path.exists(staged_path))
+
+    def test_remove_deletes_site_after_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            available, enabled, staged_prefix = self._paths(root)
+            installed = os.path.join(available, "example")
+            link = os.path.join(enabled, "example")
+            with open(installed, "wb") as config:
+                config.write(b"config")
+            os.symlink(installed, link)
+
+            with patch.object(deploy_admin, "NGINX_AVAILABLE_DIR", available), patch.object(deploy_admin, "NGINX_ENABLED_DIR", enabled), patch.object(deploy_admin, "NGINX_BINARY", "/mock/nginx"), patch.object(deploy_admin, "_run_checked") as run_checked:
+                deploy_admin.remove_nginx_config("example")
+
+            self.assertFalse(os.path.lexists(installed))
+            self.assertFalse(os.path.lexists(link))
+            run_checked.assert_called_once_with(["/mock/nginx", "-t"])
+
+    def test_remove_restores_site_when_validation_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            available, enabled, _ = self._paths(root)
+            installed = os.path.join(available, "example")
+            link = os.path.join(enabled, "example")
+            with open(installed, "wb") as config:
+                config.write(b"config")
+            os.symlink("/old/example", link)
+
+            with patch.object(deploy_admin, "NGINX_AVAILABLE_DIR", available), patch.object(deploy_admin, "NGINX_ENABLED_DIR", enabled), patch.object(deploy_admin, "_run_checked", side_effect=RuntimeError("invalid nginx")):
+                with self.assertRaisesRegex(RuntimeError, "invalid nginx"):
+                    deploy_admin.remove_nginx_config("example")
+
+            with open(installed, "rb") as config:
+                self.assertEqual(config.read(), b"config")
+            self.assertEqual(os.readlink(link), "/old/example")
+
+    def test_regular_file_reader_rejects_directories_and_limits_size(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            file_path = os.path.join(directory, "config")
+            with open(file_path, "wb") as config:
+                config.write(b"abc")
+            content, mode, owner = deploy_admin._read_regular_file(file_path, 3)
+            self.assertEqual(content, b"abc")
+            self.assertEqual(mode, stat.S_IMODE(os.stat(file_path).st_mode))
+            self.assertEqual(owner, os.stat(file_path).st_uid)
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                deploy_admin._read_regular_file(file_path, 2)
+            with self.assertRaisesRegex(ValueError, "regular file"):
+                deploy_admin._read_regular_file(directory, 10)
+
+
+class TestDeployAdminCommands(unittest.TestCase):
+    def test_reload_and_restart_build_privileged_commands(self) -> None:
+        with patch.object(deploy_admin, "_run_checked") as run_checked:
+            deploy_admin.reload_nginx()
+            deploy_admin.restart_service("node-api")
+
+        self.assertEqual(run_checked.call_args_list[0].args, ([deploy_admin.NGINX_BINARY, "-t"],))
+        self.assertEqual(run_checked.call_args_list[1].args, ([deploy_admin.SYSTEMCTL_BINARY, "reload", "nginx.service"],))
+        self.assertEqual(run_checked.call_args_list[2].args, ([deploy_admin.SYSTEMCTL_BINARY, "restart", "node-api.service"],))
+
+    def test_main_requires_root_before_parsing_operation(self) -> None:
+        with patch.object(deploy_admin.os, "geteuid", return_value=1000):
+            self.assertEqual(deploy_admin.main(["reload-nginx"]), 1)
+
+        with patch.object(deploy_admin.os, "geteuid", return_value=0), patch.object(deploy_admin, "reload_nginx") as reload_nginx:
+            self.assertEqual(deploy_admin.main(["reload-nginx"]), 0)
+        reload_nginx.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 # Test suite audit and coverage plan (2026-09-02)
 
-Status: audit complete and improvement plan finalized. The suite has 170
-tracked test modules, 3,180 class-based test methods, and 3,172 tests in the
-default runner. One live Proxmox test is intentionally skipped unless
-explicitly enabled.
+Status: audit complete and improvement plan finalized; the first implementation
+slice is implemented and verified. The suite now has 175 tracked test modules,
+3,261 class-based test methods, and 3,250 tests in the default runner. One live
+Proxmox test is intentionally skipped unless explicitly enabled.
 
 ## Review method
 
@@ -90,12 +90,11 @@ use unittest discovery.
 
 ## Coverage review
 
-The optional `coverage` package is not installed in this environment, so a
-one-off standard-library `trace` run of `run_tests.py` was combined with an
-AST statement-line map. This is an approximate prioritization signal, not a
-branch-coverage gate: it measures the default suite only, counts a statement
-as covered when its source line executed, and does not include the opt-in live
-Proxmox test.
+The original audit used a one-off standard-library `trace` run because the
+optional `coverage` package was not installed in that environment. That result
+is an approximate prioritization signal, not a branch-coverage gate: it
+measures the default suite only, counts a statement as covered when its source
+line executed, and does not include the opt-in live Proxmox test.
 
 The run covered 29,723 of approximately 43,365 statement lines (68.5%) across
 204 tracked non-test Python files. 189 files executed at least one statement;
@@ -213,6 +212,52 @@ suites, and no test opens a real network connection or mutates the local
 machine. Named maintainers should be assigned to the role owners in the phase
 table before implementation begins.
 
+## First-slice implementation update
+
+The first test implementation adds the coverage plumbing and the phase 2–3
+tests described above:
+
+- `pyproject.toml` now exposes `coverage.py` through the development-only
+  `dev` extra. `make coverage` runs the default suite with branch measurement,
+  omits test/build artifacts from the report, and deliberately has no global
+  fail-under threshold yet. CI installs the optional reporter and reports its
+  output as a normal check after `make check`.
+- `tests/test_sysadmin_cli.py` covers registration, nested `key`/`ssh-key`
+  parsing, dispatcher argument mapping, missing command errors, and unknown
+  dispatches. `tests/test_sysadmin_handlers.py` covers the eight previously
+  untraced handler modules with mocked SSH, rsync, subprocess, `execvp`, and
+  concurrency boundaries.
+- `tests/test_recall.py`, `tests/test_mount_utils.py`, the expanded
+  `tests/test_deploy_admin.py`, and `tests/test_remote_deploy.py` cover the
+  stored/reconstructed recall paths, mount ancestry and SMB checks, temporary
+  file and symlink rollback, and direct deployment command success/failure,
+  timeout, cleanup, and path-validation behavior. Filesystem tests use
+  temporary directories only.
+- The new modules are included in the `core`, `storage`, and `deployment`
+  pattern suites in `run_tests.py`, preserving the existing overlap and
+  de-duplication behavior.
+
+One parser usability gap remains explicitly recorded: because `fan` currently
+uses a greedy `hosts` positional followed by a remainder command, the documented
+multi-host form with `-- command` is not reliably separated by `argparse`.
+The tests cover registration and dispatch independently without blessing that
+ambiguous parse. A future CLI change should add a dedicated delimiter/parser
+contract test before changing the syntax.
+
+The two unowned modules, `lib/service_manager.py` and
+`lib/concurrent_sync_scrub.py`, remain an ownership decision for their module
+maintainers; this slice intentionally adds no tests for them and does not
+delete potentially recoverable code.
+
+The first-slice coverage run now provides the repeatable baseline for future
+comparisons: `coverage.py` reports 43,455 production statements, 16,856
+branches, and 68% total branch-aware coverage for the default suite. The report
+is intentionally informational while ownership and risk-weighted priorities
+settle; changed-file and domain-suite trends are the next useful gates.
+
+For a local report, install the optional tooling with
+`python3 -m pip install -e '.[dev]'` and run `make coverage`.
+
 ### Simplification rules
 
 - Do not remove a test solely because its normalized body matches another test.
@@ -246,8 +291,12 @@ table before implementation begins.
 
 ## Verification
 
-- `python3 run_tests.py` — 3,172 passed, 1 skipped.
+- `python3 run_tests.py` — 3,250 passed, 1 skipped.
 - `python3 run_tests.py test_progress_utils test_run_tests` — 48 passing.
+- `python3 run_tests.py --suite core --suite storage --suite deployment` —
+  1,561 passing.
+- `make coverage` — 43,455 statements, 16,856 branches, 68% total coverage;
+  no global threshold enforced.
 - `make check` — compilation, documentation, packaging, artifact, and test checks passed.
 - One-off `trace` plus AST review — approximately 68.5% of tracked production statement lines; 15 files untraced.
 - `python3 -m py_compile run_tests.py tests/test_progress_utils.py tests/test_run_tests.py` — passing.

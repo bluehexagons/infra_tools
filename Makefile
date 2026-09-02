@@ -1,5 +1,5 @@
 # Makefile for infra_tools development tasks
-.PHONY: check test test-verbose help clean compile docs-check package-check artifact-check
+.PHONY: check test test-verbose coverage help clean compile docs-check package-check artifact-check
 
 # Default target
 help:
@@ -22,6 +22,7 @@ help:
 	@echo "  make test-verbose            # Full test names and all output"
 	@echo "  make test TEST=test_scrub_par2"
 	@echo "  make test TEST=service_tools/test_storage_ops"
+	@echo "  make coverage          Run the default suite with branch coverage"
 
 # Run the same checks as continuous integration.
 check: compile docs-check package-check artifact-check test
@@ -42,6 +43,13 @@ ifdef TEST
 else
 	@python3 run_tests.py
 endif
+
+# Run the default suite with reproducible branch coverage reporting. The
+# optional dev dependency is intentionally separate from the normal check.
+coverage:
+	python3 -m coverage erase
+	python3 -m coverage run --branch --source=. --omit='tests/*,build/*,dist/*,.venv/*,*/__pycache__/*' run_tests.py
+	python3 -m coverage report --show-missing
 
 # Run all tests with verbose output
 test-verbose:
