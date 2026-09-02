@@ -22,7 +22,7 @@ and groups whose boundaries had become unclear as the repository grew.
 
 ## Findings and decisions
 
-### No obsolete tests identified
+### No obsolete tests identified in the tracked test suite
 
 All discovered test modules import successfully and pass in the default suite.
 The legacy deployment tests remain useful: `deploy.deploy_steps` and
@@ -175,19 +175,43 @@ performs rollback.
 
 | Phase | Scope and owner | Deliverable and exit criterion |
 | --- | --- | --- |
-| 1. Make coverage reproducible | Test infrastructure | Add a repeatable CI/local coverage command, preferably with `coverage.py` as a development-only dependency. Until that is available, retain the documented `trace` plus AST measurement. Publish per-file and branch-oriented results without enforcing a global threshold on the current baseline. |
+| 1. Establish coverage and ownership gates | Test infrastructure and module owners | Add a repeatable CI/local coverage command, preferably with `coverage.py` as a development-only dependency, using branch measurement. Until that is available, retain the documented `trace` plus AST measurement. Publish per-file and branch-oriented results without enforcing a global threshold on the current baseline. At this gate, decide whether `lib/service_manager.py` and `lib/concurrent_sync_scrub.py` are supported before writing tests for them. |
 | 2. Close command-line blind spots | Sysadmin/CLI maintainers | Add parser and dispatcher contract tests for every sysadmin command, then focused mocked tests for the eight untraced handlers. Cover credential fallback, success, refusal, subprocess failure, timeout, and `os.execvp`/parallel-output behavior without opening real SSH or rsync connections. |
 | 3. Cover remote and filesystem boundaries | Deployment/storage maintainers | Add `tests/test_recall.py` and `tests/test_mount_utils.py`; expand `test_deploy_admin.py` and add direct `remote_deploy` cases. Use temporary directories and mocked subprocesses to cover atomic writes, modes/ownership, symlink and path rejection, mount ancestry, SMB checks, cleanup, timeout, and rollback. |
 | 4. Exercise service-tool failure matrices | Web/security maintainers | Expand webhook-manager and Cloudflare-tunnel tests around missing state, malformed input, duplicate/remove paths, validation failures, and command failures. Preserve the existing security-monitor and notification cases because their event sources differ. |
 | 5. Harden large workflows | Workflow owners | Add decision tables for `user_rename`, internal web forwarding, Proxmox helpers, Godot updates, swap/scrub, and network transitions. Prioritize failure transitions, idempotency, ownership, and rollback; do not add import-only tests just to raise the number. |
 | 6. Simplify and regroup during feature work | Test maintainers | Convert only same-contract scalar cases to `subTest` tables, extract repeated mock builders, and split large modules at existing behavior-class boundaries. Keep the pattern-driven domain suites as the primary grouping mechanism and avoid mechanical file moves. |
-| 7. Resolve unowned code | Module owners | Decide whether `lib/service_manager.py` and `lib/concurrent_sync_scrub.py` are supported. Remove them if abandoned; otherwise wire them into a supported path and add focused tests. Add import/registration smoke coverage for `deploy/steps.py` and `sync/steps.py` if their compatibility-facade role remains required. |
 
 The first implementation slice should be phases 1–3. A slice is complete when
 the new tests pass through the default runner and the relevant domain suites,
 all external commands remain mocked, and each listed failure/success branch has
-an assertion on its return value or externally visible effect. Phases 4–7 can
+an assertion on its return value or externally visible effect. Phases 4–6 can
 follow the ownership and feature-change boundaries of the affected modules.
+
+### Handoff contract for the first slice
+
+Implement the first slice in these boundaries:
+
+1. Coverage plumbing: add the development-only dependency or documented
+   fallback, a local `make coverage`-style command, and CI reporting. Do not
+   fail CI on the current global percentage. Resolve the two unowned modules at
+   this point; either remove them as abandoned or assign them a supported path
+   and tests.
+2. Sysadmin command surface: add parser/dispatcher tests in
+   `tests/test_sysadmin_cli.py` and focused handler tests grouped under the
+   sysadmin domain. Include nested `key`/`ssh-key` commands and the eight
+   currently untraced handlers. Use mocks for SSH, rsync, subprocess, exec, and
+   concurrency.
+3. Remote/filesystem boundaries: add `tests/test_recall.py` and
+   `tests/test_mount_utils.py`, then expand `tests/test_deploy_admin.py` and
+   add direct remote-deployment tests. Use temporary directories and assert
+   return values, commands, permissions, state, cleanup, or rollback effects.
+
+The first slice is ready to merge only when its coverage report is reproducible,
+its new tests run through both the default runner and the relevant domain
+suites, and no test opens a real network connection or mutates the local
+machine. Named maintainers should be assigned to the role owners in the phase
+table before implementation begins.
 
 ### Simplification rules
 
@@ -217,6 +241,8 @@ follow the ownership and feature-change boundaries of the affected modules.
   and `tests/service_tools/test_scrub_par2.py`.
 - Review coverage trends by domain suite and changed files. Do not block a
   release on a global percentage until the newly measured baseline is stable.
+- Do not add tests for an unowned module until its supported/abandoned status
+  is recorded; this prevents dead code from becoming a permanent test surface.
 
 ## Verification
 
