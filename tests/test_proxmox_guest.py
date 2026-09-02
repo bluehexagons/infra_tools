@@ -88,15 +88,32 @@ class TestProvisionedGuestSshUser(unittest.TestCase):
             get_provisioned_guest_ssh_user(
                 "vm",
                 "agent",
+                nopasswd=True,
                 setup_user_deferred=True,
             ),
             "root",
         )
 
-    def test_normal_vm_uses_setup_user(self) -> None:
+    def test_normal_vm_without_nopasswd_uses_retained_root_access(self) -> None:
         self.assertEqual(
             get_provisioned_guest_ssh_user("vm", "agent"),
+            "root",
+        )
+
+    def test_normal_vm_with_nopasswd_uses_setup_user(self) -> None:
+        self.assertEqual(
+            get_provisioned_guest_ssh_user("vm", "agent", nopasswd=True),
             "agent",
+        )
+
+    def test_lxc_uses_root_even_when_nopasswd_is_selected(self) -> None:
+        self.assertEqual(
+            get_provisioned_guest_ssh_user(
+                "unprivileged",
+                "agent",
+                nopasswd=True,
+            ),
+            "root",
         )
 
 

@@ -34,17 +34,19 @@ def get_provisioned_guest_ssh_user(
     machine_type: str,
     setup_username: str,
     *,
+    nopasswd: bool = False,
     setup_user_deferred: bool = False,
 ) -> str:
-    """Return the account infra-tools can use after guest provisioning.
+    """Return the account used for privileged guest setup operations.
 
-    Cloud-init creates the configured setup account with passwordless sudo for
-    normal VMs. When a new VM needs a dedicated /home filesystem, setup-user
-    creation is deferred until the first remote setup run mounts that disk.
-    LXC provisioning always bootstraps only root SSH access.
+    Managed guests retain key-only root SSH for setup reruns. A normal VM may
+    use its configured setup account when ``--nopasswd`` explicitly keeps the
+    managed sudo rule. When a new VM needs a dedicated /home filesystem,
+    setup-user creation is deferred until the first remote setup run mounts
+    that disk. LXC provisioning always bootstraps only root SSH access.
     """
 
-    if machine_type == "vm" and not setup_user_deferred:
+    if machine_type == "vm" and nopasswd and not setup_user_deferred:
         return setup_username
     return "root"
 

@@ -910,6 +910,64 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         mock_route.assert_called_once_with(
             "10.0.0.50/24",
             "10.0.0.1",
+            "root",
+            current.ssh_key,
+            dry_run=False,
+        )
+
+    @patch("lib.proxmox_vm.provision_vm")
+    @patch("infra_tools.register_proxmox_setup_host")
+    @patch("infra_tools.save_setup_command")
+    @patch("infra_tools.store_cli_credentials")
+    @patch("infra_tools.print_setup_summary")
+    @patch("infra_tools.run_remote_setup", return_value=0)
+    @patch("infra_tools.validate_host", return_value=True)
+    @patch("infra_tools.validate_username", return_value=True)
+    def test_nopasswd_setup_user_prepares_guest_network(
+        self,
+        _mock_username,
+        _mock_host,
+        _mock_remote,
+        _mock_summary,
+        _mock_credentials,
+        _mock_save,
+        _mock_register,
+        mock_provision,
+    ) -> None:
+        current = _config(
+            nopasswd=True,
+            friendly_name="agent-min-1",
+            system_hostname="agent-host",
+        )
+        cached = _config(
+            nopasswd=True,
+            hosted_node="10.0.0.10",
+            friendly_name="agent-min-1",
+            system_hostname="agent-host",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=current), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch(
+                 "infra_tools._prepare_runtime_config_for_cli",
+                 side_effect=lambda config: config,
+             ), \
+             patch("infra_tools.refresh_managed_guest_host_keys"), \
+             patch("infra_tools.ensure_guest_ipv4_route") as mock_route:
+            result = infra_tools.run_setup_command(
+                _args(friendly_name="agent-min-1", system_hostname="agent-host")
+            )
+
+        self.assertEqual(result, 0)
+        mock_provision.assert_not_called()
+        mock_route.assert_called_once_with(
+            "10.0.0.50/24",
+            "10.0.0.1",
             "agent",
             current.ssh_key,
             dry_run=False,

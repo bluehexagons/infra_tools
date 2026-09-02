@@ -1301,6 +1301,7 @@ def run_remote_setup(config: SetupConfig) -> int:
             get_provisioned_guest_ssh_user(
                 config.machine_type,
                 config.username,
+                nopasswd=config.nopasswd,
                 setup_user_deferred=has_home_mount(config),
             )
             if config.hosted_node

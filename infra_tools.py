@@ -1977,6 +1977,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
                 get_provisioned_guest_ssh_user(
                     config.machine_type,
                     config.username,
+                    nopasswd=config.nopasswd,
                     setup_user_deferred=has_home_mount(config),
                 ),
                 config.ssh_key,

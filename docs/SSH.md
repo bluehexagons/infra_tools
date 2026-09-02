@@ -101,6 +101,10 @@ The normal VM setup flow removes that bootstrap rule before completion. Pass
 `--nopasswd` to validate and retain it for compatibility with non-root reruns.
 Without that flag, rerun setup through the retained key-only root SSH account;
 the configured user remains in `sudo`, but sudo requires its password.
+This root transport is used for both live route preparation and the streamed
+setup upload, so the coding account is never asked for an interactive sudo
+password. With `--nopasswd`, those operations may use the configured setup
+account and validated `sudo -n` instead.
 Patch commands preserve the saved choice when the flag is omitted. Pass
 `--no-nopasswd` to remove the managed rule explicitly. Selecting `--nopasswd`
 also exits a saved hardened posture; directly combining it with an enabled
