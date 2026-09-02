@@ -82,6 +82,14 @@ fail2ban bans contain the source IP and jail. Protected-file audit events carry
 paths, actors, operations, and executables where auditd provides them. PAM/
 faillock account lockouts are reported as warning-level account events.
 
+Audit events produced during a recorded `infra-tools` setup window are treated
+as expected maintenance and excluded from later security notifications. The
+setup success or failure notification remains the record of that work, while
+audited changes after the setup window are still reported. Audit notification
+subjects and summaries describe the affected control (accounts, administrator
+access, SSH configuration, or kernel modules) and explicitly distinguish
+reviewable evidence from proof of compromise.
+
 The monitor also reports an unavailable auditd, fail2ban, or SSH journal source
 as a monitoring-health event only when the problem starts (and again when it
 recovers). It holds the event cursor while collection is incomplete so events

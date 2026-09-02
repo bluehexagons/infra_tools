@@ -67,6 +67,34 @@ class TestSecurityMonitor(unittest.TestCase):
         mock_notify.assert_not_called()
         mock_save.assert_called_once()
 
+    def test_managed_setup_window_is_applied_only_to_audit_collection(self):
+        window = (
+            datetime.now() - timedelta(minutes=5),
+            datetime.now() - timedelta(minutes=1),
+        )
+        prior_cursor = (datetime.now() - timedelta(minutes=15)).isoformat()
+        certificate = XrdpCertificateHealth("not_configured", "", "")
+        with patch.object(
+            security_monitor, "load_notification_configs_from_state", return_value=[]
+        ), patch.object(
+            security_monitor, "_load_state", return_value={"last_run": prior_cursor}
+        ), patch.object(
+            security_monitor, "managed_setup_audit_window", return_value=window
+        ), patch.object(
+            security_monitor, "_check_fail2ban", return_value=([], [], None)
+        ) as fail2ban, patch.object(
+            security_monitor, "_check_auditd", return_value=([], False, [])
+        ) as auditd, patch.object(
+            security_monitor, "_check_ssh_failures", return_value=(0, None)
+        ) as ssh, patch.object(
+            security_monitor, "inspect_xrdp_certificate", return_value=certificate
+        ), patch.object(security_monitor, "_save_state"):
+            self.assertEqual(security_monitor.main(), 0)
+
+        self.assertEqual(auditd.call_args.kwargs["excluded_window"], window)
+        self.assertEqual(auditd.call_args.args[0], fail2ban.call_args.args[0])
+        self.assertEqual(auditd.call_args.args[0], ssh.call_args.args[0])
+
     @patch(
         "security.service_tools.security_monitor.inspect_xrdp_certificate",
         return_value=XrdpCertificateHealth("not_configured", "", ""),
@@ -244,6 +272,63 @@ type=PATH msg=audit(124): name=\"/etc/sudoers.d/ops\"\ntype=SYSCALL msg=audit(12
         self.assertEqual(events[0]["paths"], ["/etc/sudoers", "/etc/sudoers.d/ops"])
         self.assertIn("1000", events[0]["actors"])
         self.assertIn("/usr/bin/visudo", events[0]["executables"])
+        self.assertEqual(events[0]["meaning"], "administrator access policy changed")
+
+    def test_audit_events_inside_managed_setup_window_are_excluded(self):
+        output = """----
+type=PATH msg=audit(1766400000.100:1): name=\"/etc/passwd\"
+----
+type=PATH msg=audit(1766400300.100:2): name=\"/etc/passwd\"
+"""
+        setup_start = datetime.fromtimestamp(1766399999)
+        setup_end = datetime.fromtimestamp(1766400001)
+
+        events = security_monitor._parse_audit_events(
+            "identity", output, (setup_start, setup_end)
+        )
+
+        self.assertEqual(events[0]["event_count"], 1)
+        expected = datetime.fromtimestamp(1766400300.1).isoformat(timespec="seconds")
+        self.assertEqual(events[0]["first_seen"], expected)
+
+    def test_interpreted_ausearch_timestamp_is_excluded(self):
+        output = """----
+type=PATH msg=audit(08/22/2026 12:00:00.100:1): name=\"/etc/passwd\"
+"""
+
+        events = security_monitor._parse_audit_events(
+            "identity",
+            output,
+            (datetime(2026, 8, 22, 11, 59), datetime(2026, 8, 22, 12, 1)),
+        )
+
+        self.assertEqual(events, [])
+
+    def test_audit_notification_explains_meaning_and_gives_specific_action(self):
+        since = datetime(2026, 8, 22, 12, 0, 0)
+        details = security_monitor._format_security_details(
+            since=since,
+            now=since + timedelta(minutes=15),
+            status="warning",
+            bans=[],
+            unbans=[],
+            audit_keys=["sudoers"],
+            ssh_failures=0,
+            certificate_event=None,
+            audit_events=[
+                {
+                    "type": "auditd",
+                    "key": "sudoers",
+                    "severity": "warning",
+                    "event_count": 1,
+                    "paths": ["/etc/sudoers.d/ops"],
+                }
+            ],
+        )
+
+        self.assertIn("administrator access policy changed", details)
+        self.assertIn("not confirmation that the host was compromised", details)
+        self.assertIn("Confirm recent sudo policy changes were approved", details)
 
     @patch("security.service_tools.security_monitor.shutil.which")
     def test_missing_ausearch_is_reported_when_auditd_is_installed(self, mock_which):

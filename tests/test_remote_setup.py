@@ -79,6 +79,8 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
             remote_setup, "save_machine_state", save_machine
         ), patch.object(
             remote_setup, "save_setup_config", save_config
+        ), patch.object(
+            remote_setup, "record_setup_activity"
         ), patch(
             "lib.machine_state.load_machine_state",
             return_value={
@@ -113,6 +115,8 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
                 raise RuntimeError("failed")
 
             with patch.object(remote_setup, "SETUP_OPERATION_FILE", marker_path), patch.object(
+                remote_setup, "record_setup_activity"
+            ), patch.object(
                 remote_setup, "_run_main", side_effect=fail_after_begin
             ), patch.object(remote_setup, "_remove_secret_payloads"):
                 with self.assertRaisesRegex(RuntimeError, "failed"):
@@ -135,6 +139,8 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
             remote_setup,
             "SETUP_OPERATION_FILE",
             os.path.join(tmpdir, "setup-operation.json"),
+        ), patch.object(
+            remote_setup, "record_setup_activity"
         ):
             store = OperationStateStore(remote_setup.SETUP_OPERATION_FILE)
             started = store.begin(

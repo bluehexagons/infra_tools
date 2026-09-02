@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 from lib.logging_utils import get_service_logger, log_event
 from lib.atomic_io import write_json_atomic
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
+from lib.security_activity import managed_setup_audit_window
 from lib.types import JSONDict
 from lib.validation import validate_filesystem_path
 from lib.xrdp_certificate import XrdpCertificateHealth, inspect_xrdp_certificate
@@ -65,7 +66,14 @@ _CRITICAL_KEYS = ('identity', 'sudoers', 'sshd_config', 'modules')
 # auditd keys included in notifications but not used to raise severity —
 # 'privileged' fires on every sudo call, which is routine admin activity.
 _INFO_KEYS = ('privileged',)
-_SECURITY_EVENT_SCHEMA_VERSION = 1
+_AUDIT_KEY_LABELS = {
+    'identity': 'account database changed',
+    'sudoers': 'administrator access policy changed',
+    'sshd_config': 'SSH server configuration changed',
+    'modules': 'kernel module activity',
+    'privileged': 'privileged command execution',
+}
+_SECURITY_EVENT_SCHEMA_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -147,9 +155,43 @@ def _audit_field_values(record: str, field_name: str) -> list[str]:
     return values
 
 
-def _parse_audit_events(key: str, output: str) -> list[JSONDict]:
+def _audit_record_timestamp(record: str) -> datetime | None:
+    """Return the local timestamp embedded in an audit event record."""
+    epoch_match = re.search(r'\bmsg=audit\((\d+(?:\.\d+)?):', record)
+    if epoch_match:
+        try:
+            return datetime.fromtimestamp(float(epoch_match.group(1)))
+        except (OSError, OverflowError, ValueError):
+            return None
+    interpreted_match = re.search(
+        r'\bmsg=audit\((\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})(?:\.\d+)?:\d+\)',
+        record,
+    )
+    if interpreted_match:
+        try:
+            return datetime.strptime(interpreted_match.group(1), '%m/%d/%Y %H:%M:%S')
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_audit_events(
+    key: str,
+    output: str,
+    excluded_window: tuple[datetime, datetime] | None = None,
+) -> list[JSONDict]:
     """Summarise ausearch records without forwarding raw audit log text."""
     records = [record for record in output.split('----') if 'type=' in record]
+    if excluded_window:
+        window_start, window_end = excluded_window
+        records = [
+            record
+            for record in records
+            if (
+                (timestamp := _audit_record_timestamp(record)) is None
+                or not window_start <= timestamp <= window_end
+            )
+        ]
     if not records:
         return []
 
@@ -157,7 +199,11 @@ def _parse_audit_events(key: str, output: str) -> list[JSONDict]:
     operations: list[str] = []
     actors: list[str] = []
     executables: list[str] = []
+    timestamps: list[datetime] = []
     for record in records:
+        timestamp = _audit_record_timestamp(record)
+        if timestamp is not None:
+            timestamps.append(timestamp)
         for path in _audit_field_values(record, 'name'):
             if path not in paths and len(paths) < _SSH_MAX_BREAKDOWN:
                 paths.append(path)
@@ -177,6 +223,7 @@ def _parse_audit_events(key: str, output: str) -> list[JSONDict]:
         'key': key,
         'severity': 'warning' if key in _CRITICAL_KEYS else 'info',
         'event_count': len(records),
+        'meaning': _AUDIT_KEY_LABELS.get(key, 'security-sensitive system activity'),
     }
     if paths:
         event['paths'] = paths
@@ -186,10 +233,17 @@ def _parse_audit_events(key: str, output: str) -> list[JSONDict]:
         event['actors'] = actors
     if executables:
         event['executables'] = executables
+    if timestamps:
+        event['first_seen'] = min(timestamps).isoformat(timespec='seconds')
+        event['last_seen'] = max(timestamps).isoformat(timespec='seconds')
     return [event]
 
 
-def _ausearch_events(key: str, since: datetime) -> tuple[list[JSONDict], str | None]:
+def _ausearch_events(
+    key: str,
+    since: datetime,
+    excluded_window: tuple[datetime, datetime] | None = None,
+) -> tuple[list[JSONDict], str | None]:
     """Return summarised auditd events for a key and any collection error."""
     since_date = since.strftime('%m/%d/%Y')
     since_time = since.strftime('%H:%M:%S')
@@ -199,7 +253,7 @@ def _ausearch_events(key: str, since: datetime) -> tuple[list[JSONDict], str | N
             capture_output=True, text=True, check=False, timeout=15,
         )
         if result.returncode == 0:
-            return _parse_audit_events(key, result.stdout), None
+            return _parse_audit_events(key, result.stdout, excluded_window), None
         if result.returncode == 1:
             return [], None
         details = result.stderr.strip() or f'ausearch exited {result.returncode}'
@@ -214,7 +268,10 @@ def _ausearch_has_events(key: str, since: datetime) -> tuple[bool, str | None]:
     return bool(events), error
 
 
-def _check_auditd(since: datetime) -> tuple[list[JSONDict], bool, list[str]]:
+def _check_auditd(
+    since: datetime,
+    excluded_window: tuple[datetime, datetime] | None = None,
+) -> tuple[list[JSONDict], bool, list[str]]:
     """Return triggered keys, critical status, and collection errors."""
     if not shutil.which('ausearch'):
         # auditd is deliberately optional on the dedicated Proxmox flow and
@@ -227,7 +284,7 @@ def _check_auditd(since: datetime) -> tuple[list[JSONDict], bool, list[str]]:
     has_critical = False
     errors: list[str] = []
     for key in _CRITICAL_KEYS + _INFO_KEYS:
-        key_events, error = _ausearch_events(key, since)
+        key_events, error = _ausearch_events(key, since, excluded_window)
         if error:
             errors.append(error)
         if key_events:
@@ -523,6 +580,7 @@ def _normalise_audit_event(event: object) -> JSONDict:
         'key': key,
         'severity': 'warning' if key in _CRITICAL_KEYS else 'info',
         'event_count': 1,
+        'meaning': _AUDIT_KEY_LABELS.get(key, 'security-sensitive system activity'),
     }
 
 
@@ -568,9 +626,17 @@ def _format_fail2ban_event(event: JSONDict) -> str:
 
 def _format_audit_event(event: JSONDict) -> str:
     """Format summarised audit evidence for an operator."""
-    parts = [f"key={event.get('key', 'unknown')}"]
+    key = str(event.get('key', 'unknown'))
+    parts = [
+        str(event.get('meaning', _AUDIT_KEY_LABELS.get(key, 'security-sensitive activity'))),
+        f"audit_key={key}",
+    ]
     if 'event_count' in event:
         parts.append(f"events={event['event_count']}")
+    if 'first_seen' in event:
+        parts.append(f"first_seen={event['first_seen']}")
+    if 'last_seen' in event and event.get('last_seen') != event.get('first_seen'):
+        parts.append(f"last_seen={event['last_seen']}")
     for field in ('paths', 'operations', 'actors', 'executables'):
         values = event.get(field)
         if isinstance(values, list) and values:
@@ -607,6 +673,9 @@ def _build_security_data(
                 "key": key,
                 "severity": "warning" if key in _CRITICAL_KEYS else "info",
                 "event_count": 1,
+                "meaning": _AUDIT_KEY_LABELS.get(
+                    key, "security-sensitive system activity"
+                ),
             }
             for key in audit_keys
         )
@@ -713,7 +782,8 @@ def _format_security_details(
     if unbans:
         lines.append(f"  - Fail2ban unbans: {len(unbans)}")
     if audit_keys:
-        lines.append(f"  - Audit events: {', '.join(audit_keys)}")
+        descriptions = [_AUDIT_KEY_LABELS.get(key, key) for key in audit_keys]
+        lines.append(f"  - Protected changes: {', '.join(descriptions)}")
     if ssh_failures >= _SSH_FAILURE_THRESHOLD:
         lines.append(
             f"  - SSH authentication failures: {ssh_failures} "
@@ -738,7 +808,16 @@ def _format_security_details(
         if audit_events:
             lines.extend(_format_audit_event(event) for event in audit_events)
         else:
-            lines.extend(f"  - key={key}" for key in audit_keys)
+            lines.extend(
+                f"  - {_AUDIT_KEY_LABELS.get(key, key)} | audit_key={key}"
+                for key in audit_keys
+            )
+        lines.extend([
+            "",
+            "What this means:",
+            "  - Auditd observed a security-sensitive system change.",
+            "  - This is evidence to review, not confirmation that the host was compromised.",
+        ])
     if ssh_failures >= _SSH_FAILURE_THRESHOLD:
         lines.extend([
             "",
@@ -807,8 +886,14 @@ def _security_actions(
         actions.append("Confirm the locked accounts are expected and investigate repeated lockouts.")
     if ssh_failures >= _SSH_FAILURE_THRESHOLD and not bans:
         actions.append("Review SSH authentication logs for unexpected access.")
-    if any(key in _CRITICAL_KEYS for key in audit_keys):
-        actions.append("Verify the affected identity, sudoers, SSH, or module changes.")
+    if 'identity' in audit_keys:
+        actions.append("Confirm recent account, group, or credential-file changes were approved.")
+    if 'sudoers' in audit_keys:
+        actions.append("Confirm recent sudo policy changes were approved and preserve least privilege.")
+    if 'sshd_config' in audit_keys:
+        actions.append("Confirm recent SSH server configuration changes were approved.")
+    if 'modules' in audit_keys:
+        actions.append("Confirm the reported kernel module activity was expected.")
     if certificate_event:
         actions.append("Check XRDP certificate/key health if the change was not planned.")
     if collection_recovered and not actions:
@@ -853,7 +938,18 @@ def main() -> int:
     bans, unbans, fail2ban_error = _check_fail2ban(since)
     bans = [_normalise_fail2ban_event(event) for event in bans]
     unbans = [_normalise_fail2ban_event(event) for event in unbans]
-    audit_results, audit_critical, audit_errors = _check_auditd(since)
+    audit_exclusion = managed_setup_audit_window(since, now)
+    if audit_exclusion:
+        log_event(
+            logger,
+            "Excluding auditd events from a managed infra-tools setup window",
+            audit_window_start=audit_exclusion[0].isoformat(),
+            audit_window_end=audit_exclusion[1].isoformat(),
+        )
+    audit_results, audit_critical, audit_errors = _check_auditd(
+        since,
+        excluded_window=audit_exclusion,
+    )
     audit_events = [_normalise_audit_event(event) for event in audit_results]
     audit_keys = _audit_event_keys(audit_events)
     ssh_result, ssh_error = _check_ssh_failures(since)
@@ -985,7 +1081,9 @@ def main() -> int:
             f"{len(bans)} fail2ban ban{'s' if len(bans) != 1 else ''}"
         )
     if critical_audit_keys:
-        summary_parts.append(f"auditd: {', '.join(critical_audit_keys)}")
+        summary_parts.extend(
+            _AUDIT_KEY_LABELS.get(key, key) for key in critical_audit_keys
+        )
     if ssh_failures >= _SSH_FAILURE_THRESHOLD:
         summary_parts.append(f"{ssh_failures} SSH failures")
     if has_lockouts:
@@ -1059,7 +1157,8 @@ def main() -> int:
         job="security_monitor",
         status=status,
         message=(
-            f"Security monitor found noteworthy activity since {since_str}. "
+            f"Security monitor found activity to review since {since_str}. "
+            "The findings are evidence, not by themselves confirmation of a compromise. "
             "Review the summary and suggested actions below."
         ),
         details=details,

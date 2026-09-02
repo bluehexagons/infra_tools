@@ -25,6 +25,7 @@ from lib.machine_state import (
 from lib.notifications import send_setup_notification
 from lib.operation_state import OperationRecord, OperationStateStore
 from lib.remote_utils import detect_os, is_dry_run, set_dry_run
+from lib.security_activity import record_setup_activity
 from lib.setup_report import SetupReport, get_setup_report
 from lib.validation import (
     validate_agent_repositories,
@@ -53,6 +54,17 @@ REMOTE_DEVICE_PAIRING_PAYLOAD_DIR = "/opt/infra_tools/device_pairing_payload"
 REMOTE_WEB_PANEL_PAYLOAD_DIR = "/opt/infra_tools/web_panel_payload"
 SETUP_OPERATION_FILE = os.path.join(STATE_DIR, "setup-operation.json")
 _active_setup_operation: Optional[tuple[OperationStateStore, OperationRecord]] = None
+
+
+def _record_security_setup_activity(record: OperationRecord, status: str) -> None:
+    """Keep notification bookkeeping from changing the setup outcome."""
+    try:
+        record_setup_activity(record, status)
+    except (OSError, ValueError) as exc:
+        print(
+            f"Warning: Could not record the managed setup audit window: {exc}",
+            file=sys.stderr,
+        )
 
 
 def _begin_setup_operation(config: SetupConfig) -> None:
@@ -107,6 +119,7 @@ def _begin_setup_operation(config: SetupConfig) -> None:
             context=context,
         )
     _active_setup_operation = (store, record)
+    _record_security_setup_activity(record, "in_progress")
 
 
 def _transition_setup_operation(phase: str, context: dict[str, object]) -> None:
@@ -123,6 +136,7 @@ def _complete_setup_operation() -> None:
     if _active_setup_operation is None:
         return
     store, record = _active_setup_operation
+    _record_security_setup_activity(record, "succeeded")
     store.complete(record.operation_id)
     _active_setup_operation = None
 
@@ -138,6 +152,7 @@ def _record_setup_failure(error: Exception) -> None:
         status="recovery_required",
         context={**record.context, "error_type": type(error).__name__},
     )
+    _record_security_setup_activity(updated, "failed")
     _active_setup_operation = (store, updated)
 
 

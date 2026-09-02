@@ -147,6 +147,7 @@ TEST_SUITE_PATTERNS: dict[str, tuple[str, ...]] = {
         "tests/test_firewall_output.py",
         "tests/test_git_samba_boundaries.py",
         "tests/test_samba*.py",
+        "tests/test_security_activity.py",
         "tests/test_security_steps.py",
         "tests/test_shell_safety.py",
         "tests/test_smb_mount_hardening.py",
