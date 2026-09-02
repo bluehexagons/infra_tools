@@ -9,6 +9,7 @@ import shlex
 import shutil
 from urllib.parse import quote
 
+from lib.atomic_io import write_text_atomic
 from lib.maintenance_systemd import configure_maintenance_timer
 from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
@@ -21,6 +22,7 @@ from lib.machine_state import (
 )
 from lib.remote_utils import is_dry_run, run
 from lib.validation import validate_network_ip_or_cidr
+from lib.validators import validate_username
 
 _LEGACY_UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"
 _LEGACY_MANAGED_ORIGINS_FILE = "/etc/infra_tools/unattended_upgrades_origins.list"
@@ -469,6 +471,18 @@ ClientAliveCountMax 2
 LoginGraceTime 30
 AllowGroups remoteusers
 """
+    if config.harden_user:
+        if not validate_username(config.username):
+            raise ValueError(
+                "Cannot apply hardened SSH user policy to an invalid username"
+            )
+        hardening_content += f"""
+# Restrict the coding identity without disabling authorized-key shell access.
+Match User {config.username}
+    DisableForwarding yes
+    PermitUserRC no
+Match all
+"""
 
     if is_dry_run():
         print("  [DRY-RUN] Would apply the managed SSH hardening drop-in")
@@ -506,8 +520,7 @@ AllowGroups remoteusers
             return
 
     try:
-        with open(_SSHD_DROPIN_FILE, "w") as f:
-            f.write(hardening_content)
+        write_text_atomic(_SSHD_DROPIN_FILE, hardening_content, mode=0o600)
     except OSError as exc:
         print(
             "  ⚠ Skipping SSH hardening (cannot write "
@@ -523,8 +536,7 @@ AllowGroups remoteusers
             if existing is None:
                 os.remove(_SSHD_DROPIN_FILE)
             else:
-                with open(_SSHD_DROPIN_FILE, "w") as f:
-                    f.write(existing)
+                write_text_atomic(_SSHD_DROPIN_FILE, existing, mode=0o600)
         except OSError as exc:
             print(f"  ⚠ Failed to restore the previous SSH hardening drop-in: {exc}")
             return
@@ -533,7 +545,10 @@ AllowGroups remoteusers
 
     run("systemctl reload sshd || systemctl reload ssh", check=True)
 
-    print("  ✓ SSH hardened (drop-in: key-only auth, timeouts, AllowGroups remoteusers)")
+    details = "key-only auth, timeouts, AllowGroups remoteusers"
+    if config.harden_user:
+        details += ", coding-user forwarding disabled"
+    print(f"  ✓ SSH hardened (drop-in: {details})")
 
 
 def harden_kernel(config: SetupConfig) -> None:

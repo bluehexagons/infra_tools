@@ -199,6 +199,112 @@ class TestAgentUserSecurity(unittest.TestCase):
                 )
                 self.assertFalse(os.path.exists(state_path))
 
+    def test_harden_user_locks_and_restores_passwordless_account(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = os.path.join(temporary, "home")
+            state_dir = os.path.join(temporary, "state")
+            os.mkdir(home)
+            os.chmod(home, 0o750)
+            account = self._account(home)
+            password_statuses = iter(("NP", "NP", "L"))
+
+            def run_command(
+                command: list[str],
+                **_kwargs: object,
+            ) -> subprocess.CompletedProcess[str]:
+                stdout = ""
+                if command[:2] == ["passwd", "--status"]:
+                    stdout = (
+                        f"agent {next(password_statuses)} "
+                        "2026-01-01 0 99999 7 -1\n"
+                    )
+                return subprocess.CompletedProcess(command, 0, stdout, "")
+
+            with patch(
+                "common.agent_security_steps.AGENT_USER_SECURITY_STATE_DIR",
+                state_dir,
+            ), patch(
+                "common.agent_security_steps.pwd.getpwnam",
+                return_value=account,
+            ), patch(
+                "common.agent_security_steps.os.getgrouplist",
+                return_value=[account.pw_gid],
+            ), patch(
+                "common.agent_security_steps.grp.getgrgid",
+                return_value=SimpleNamespace(gr_name="agent"),
+            ), patch(
+                "common.agent_security_steps.can_manage_system_services",
+                return_value=False,
+            ), patch(
+                "common.agent_security_steps.os.chown"
+            ), patch(
+                "common.agent_security_steps.run",
+                side_effect=run_command,
+            ) as mock_run:
+                configure_agent_user_security(self._config(harden_user=True))
+
+                mock_run.assert_any_call(["usermod", "--lock", "agent"])
+                state_path = os.path.join(state_dir, f"{account.pw_uid}.json")
+                with open(state_path, "r", encoding="utf-8") as file_obj:
+                    state = json.load(file_obj)
+                self.assertEqual(
+                    state["user_controls"]["password_status"], "NP"
+                )
+
+                mock_run.reset_mock()
+                configure_agent_user_security(self._config())
+
+                mock_run.assert_any_call(["passwd", "--delete", "agent"])
+                self.assertEqual(stat.S_IMODE(os.stat(home).st_mode), 0o750)
+                self.assertFalse(os.path.exists(state_path))
+
+    def test_missing_group_remains_journaled_for_a_later_restore(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = os.path.join(temporary, "home")
+            state_dir = os.path.join(temporary, "state")
+            os.mkdir(home)
+            os.mkdir(state_dir, mode=0o700)
+            account = self._account(home)
+            state_path = os.path.join(state_dir, f"{account.pw_uid}.json")
+            with open(state_path, "w", encoding="utf-8") as file_obj:
+                json.dump(
+                    {
+                        "version": 1,
+                        "uid": account.pw_uid,
+                        "removed_groups": ["docker"],
+                        "user_controls": None,
+                    },
+                    file_obj,
+                )
+            os.chmod(state_path, 0o600)
+
+            with patch(
+                "common.agent_security_steps.AGENT_USER_SECURITY_STATE_DIR",
+                state_dir,
+            ), patch(
+                "common.agent_security_steps.pwd.getpwnam",
+                return_value=account,
+            ), patch(
+                "common.agent_security_steps.os.getgrouplist",
+                return_value=[account.pw_gid],
+            ), patch(
+                "common.agent_security_steps.grp.getgrgid",
+                return_value=SimpleNamespace(gr_name="agent"),
+            ), patch(
+                "common.agent_security_steps.grp.getgrnam",
+                side_effect=KeyError,
+            ), patch(
+                "common.agent_security_steps.os.chown"
+            ), patch(
+                "common.agent_security_steps.run"
+            ) as mock_run:
+                configure_agent_user_security(self._config())
+
+            mock_run.assert_not_called()
+            with open(state_path, "r", encoding="utf-8") as file_obj:
+                state = json.load(file_obj)
+            self.assertEqual(state["removed_groups"], ["docker"])
+
 
 if __name__ == "__main__":
     unittest.main()

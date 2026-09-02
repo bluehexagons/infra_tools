@@ -104,10 +104,14 @@ the configured user remains in `sudo`, but sudo requires its password.
 `--harden-agent` also removes the configured user from the `sudo` group.
 It also reconciles other administrator and root-equivalent supplementary
 groups. `--harden-user` implies that policy, locks Unix password
-authentication, and makes the home directory private while leaving
-authorized-key SSH usable. A later root-driven setup with
+authentication even when the account previously had no password, makes the
+home directory private, and removes sensitive system-data and device groups
+while leaving authorized-key shell SSH usable. It also disables SSH agent,
+TCP, Unix-socket, X11, and tunnel forwarding for that identity and prevents
+`~/.ssh/rc` execution. A later root-driven setup with
 `--no-harden-user --no-harden-agent` restores the account settings that
-infra-tools recorded before the lockdown.
+infra-tools recorded before the lockdown and removes those per-user SSH
+restrictions.
 For an existing VM that was not provisioned by infra-tools, grant the setup
 account the intended `NOPASSWD` sudo rule before the first setup or connect as
 root. The temporary managed rule is removed unless `--nopasswd` is selected.

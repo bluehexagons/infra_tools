@@ -11,8 +11,8 @@ and its network access as part of the security design.
 | --- | --- | --- | --- |
 | Default | Member of `sudo`; password required | Auto-reviewed requests, workspace write access, no default shell network access | Interactive development and learning |
 | `--nopasswd` | Unrestricted `NOPASSWD:ALL` on a VM | Same Codex policy as default | Compatibility and convenient non-root setup reruns |
-| `--harden-agent` | Removed from administrator and root-equivalent supplementary groups | Workspace write access; no approval, web search, credential-path reads, active browser/computer features, plugins, or MCP servers | Interactive evaluation of less-trusted code |
-| `--harden-user` | `--harden-agent` plus locked password, mode-`0700` home, no sensitive log groups, and no systemd lingering | Same hardened Codex boundary | Headless CI/CD and more restricted disposable evaluation |
+| `--harden-agent` | Removed from administrator, host-control, and root-equivalent supplementary groups | Workspace write access; no approval, web search, credential-path reads, active browser/computer features, plugins, or MCP servers | Interactive evaluation of less-trusted code |
+| `--harden-user` | `--harden-agent` plus locked password, mode-`0700` home, no sensitive system-data or device groups, no SSH forwarding/user rc, and no systemd lingering | Same hardened Codex boundary | Headless CI/CD and more restricted disposable evaluation |
 
 `--nopasswd` cannot be combined with either hardened mode. `--harden-user`
 implies `--harden-agent` and cannot be combined with RDP because XRDP needs an
@@ -23,11 +23,13 @@ for later setup runs and recovery, but SSH password authentication remains
 disabled; protect the authorized private key as a root credential.
 
 `--harden-agent` does not lock the login itself. SSH and an explicitly
-configured desktop remain usable. `--harden-user` locks only Unix password
-authentication rather than expiring the account, so authorized-key SSH stays
-available. It also disables systemd lingering; an explicitly selected T3 Code
-service enables lingering again because that service requires a persistent
-user manager.
+configured desktop remain usable. `--harden-user` locks Unix password
+authentication, including an account that previously had no password, rather
+than expiring the account, so authorized-key SSH stays available. It also
+disables SSH agent, TCP, Unix-socket, X11, and tunnel forwarding for that user
+and prevents `~/.ssh/rc` execution. It disables systemd lingering too; an
+explicitly selected T3 Code service enables lingering again because that
+service requires a persistent user manager.
 
 Infra-tools journals group removals and the original wider account settings in
 `/var/lib/infra_tools/agent-user-security/UID.json` before changing them.
@@ -35,7 +37,11 @@ Use `--no-harden-user` to return to agent-only hardening, or combine it with
 `--no-harden-agent` to restore all recorded settings. An omitted hardening
 option preserves the saved posture during a patch. The root-owned mode-`0600`
 state follows the numeric user identity, so an infra-tools user rename does not
-orphan the rollback information.
+orphan the rollback information. If a recorded group is temporarily absent,
+the journal retains it and a later setup rerun retries the restoration. An
+explicit rollback restores a recorded passwordless state too, so use the
+hardened posture or set a real password instead when password authentication
+must remain unavailable.
 
 ## Codex enforcement
 
@@ -53,14 +59,25 @@ full-access default. This preserves an explicit user choice while making direct
 Codex sessions safer by default.
 
 `--harden-agent` also writes `/etc/codex/requirements.toml` and selects `never`
-within the same workspace boundary. In that mode there is no approval path to
-add permissions. Live web search, login shells, apps and plugins, MCP servers,
+within an infra-tools-defined workspace profile. That profile explicitly
+disables command networking, so a user cannot re-enable it through the legacy
+workspace network setting. In that mode there is no approval path to add
+permissions. Live web search, login shells, apps and plugins, MCP servers,
 native browser/computer use, app screenshots, remote control, and unmanaged
 hooks are disallowed. The filesystem policy also denies common credential
-locations such as `.ssh`, `.gnupg`, cloud/Kubernetes configuration, GitHub CLI
-auth, package-registry credentials, Docker auth, `/run/secrets`, and `.env`
-files. Package installation or another command that needs network access
-should fail rather than gain it through automatic review.
+locations such as Codex and other provider auth files, `.ssh`, `.gnupg`,
+cloud/Kubernetes configuration, Git hosting credentials, password stores and
+keyrings, package-registry credentials, container auth, `/run/secrets`, and
+`.env` files. Package installation or another command that needs network
+access should fail rather than gain it through automatic review.
+
+As additional defense in depth, the hardened system default filters shell
+environment variable names containing `KEY`, `SECRET`, or `TOKEN`. The current
+Codex requirements schema does not make that environment setting an enforced
+constraint, so do not inject sensitive environment variables into an
+untrusted session and assume the filter is an isolation boundary.
+Hardened setup also disables Codex's in-app updater; apply reviewed agent
+updates deliberately with `infra-tools agent update --tool codex`.
 
 Hardened requirements are constraints, not warning preferences. Returning to
 the default posture removes an infra-tools-owned requirements file so all Codex
@@ -84,7 +101,9 @@ configuration.
 - Provider, Git, and GitHub credentials live under the coding identity.
   Hardened Codex blocks the common paths listed above, but other provider CLIs
   and arbitrary code running directly as that identity can generally read that
-  identity's files. GitHub token redesign and brokerage are outside this phase.
+  identity's files. Hardened-user mode rejects inbound SSH forwarding, but do
+  not expose personal agent sockets through another channel. GitHub token
+  redesign and brokerage are outside this phase.
 - T3 Code and agent CLIs use their documented vendor distribution/update
   channels. This reduces arbitrary download sources but does not independently
   prove every upstream artifact or transitive dependency.

@@ -73,14 +73,32 @@ class TestCodexSecurityPolicy(unittest.TestCase):
 
         self.assertEqual(config["approval_policy"], "never")
         self.assertFalse(config["allow_login_shell"])
+        profile_name = config["default_permissions"]
+        self.assertEqual(profile_name, "infra_tools_hardened_workspace")
+        self.assertFalse(
+            config["shell_environment_policy"]["ignore_default_excludes"]
+        )
         self.assertEqual(requirements["allowed_approval_policies"], ["never"])
         self.assertEqual(requirements["allowed_web_search_modes"], [])
         self.assertTrue(requirements["allow_managed_hooks_only"])
         self.assertFalse(requirements["allow_browser_and_computer_use"])
         self.assertFalse(requirements["allow_remote_control"])
+        self.assertTrue(
+            requirements["allowed_permission_profiles"][profile_name]
+        )
+        self.assertNotIn(
+            ":workspace", requirements["allowed_permission_profiles"]
+        )
+        self.assertFalse(
+            requirements["permissions"][profile_name]["network"]["enabled"]
+        )
         self.assertIn("~/.ssh", requirements["permissions"]["filesystem"]["deny_read"])
         self.assertIn(
             "~/.config/gh",
+            requirements["permissions"]["filesystem"]["deny_read"],
+        )
+        self.assertIn(
+            "~/.codex/auth.json",
             requirements["permissions"]["filesystem"]["deny_read"],
         )
         self.assertFalse(requirements["features"]["apps"])
@@ -121,10 +139,12 @@ class TestCodexSecurityPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             policy_dir = os.path.join(temporary, "codex")
             os.makedirs(policy_dir)
+            os.chmod(policy_dir, 0o755)
             with open(
                 os.path.join(policy_dir, "config.toml"), "w", encoding="utf-8"
             ) as file_obj:
                 file_obj.write('approval_policy = "never"\n')
+            os.chmod(os.path.join(policy_dir, "config.toml"), 0o644)
 
             self._configure(policy_dir)
 
@@ -141,9 +161,11 @@ class TestCodexSecurityPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             policy_dir = os.path.join(temporary, "codex")
             os.makedirs(policy_dir)
+            os.chmod(policy_dir, 0o755)
             requirements_path = os.path.join(policy_dir, "requirements.toml")
             with open(requirements_path, "w", encoding="utf-8") as file_obj:
                 file_obj.write('allowed_approval_policies = ["never"]\n')
+            os.chmod(requirements_path, 0o644)
 
             self._configure(policy_dir)
 
@@ -156,10 +178,12 @@ class TestCodexSecurityPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             policy_dir = os.path.join(temporary, "codex")
             os.makedirs(policy_dir)
+            os.chmod(policy_dir, 0o755)
             with open(
                 os.path.join(policy_dir, "config.toml"), "w", encoding="utf-8"
             ) as file_obj:
                 file_obj.write('approval_policy = "never"\n')
+            os.chmod(os.path.join(policy_dir, "config.toml"), 0o644)
 
             with self.assertRaisesRegex(
                 RuntimeError, "Refusing to replace unmanaged Codex policy"
@@ -170,12 +194,14 @@ class TestCodexSecurityPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             policy_dir = os.path.join(temporary, "codex")
             os.makedirs(policy_dir)
+            os.chmod(policy_dir, 0o755)
             with open(
                 os.path.join(policy_dir, "requirements.toml"),
                 "w",
                 encoding="utf-8",
             ) as file_obj:
                 file_obj.write('allowed_approval_policies = ["never"]\n')
+            os.chmod(os.path.join(policy_dir, "requirements.toml"), 0o644)
 
             with self.assertRaisesRegex(
                 RuntimeError, "Refusing to replace unmanaged Codex policy"
@@ -197,6 +223,53 @@ class TestCodexSecurityPolicy(unittest.TestCase):
                 RuntimeError, "Refusing unsafe Codex policy directory"
             ):
                 self._configure(policy_dir)
+
+    def test_refuses_writable_policy_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            policy_dir = os.path.join(temporary, "codex")
+            os.makedirs(policy_dir)
+            os.chmod(policy_dir, 0o777)
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Refusing unsafe Codex policy directory"
+            ):
+                self._configure(policy_dir)
+
+    def test_refuses_writable_managed_policy_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            policy_dir = os.path.join(temporary, "codex")
+            os.makedirs(policy_dir)
+            os.chmod(policy_dir, 0o755)
+            config_path = os.path.join(policy_dir, "config.toml")
+            with open(config_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write(
+                    "# Managed by infra-tools coding-agent security policy.\n"
+                )
+            os.chmod(config_path, 0o666)
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Refusing unsafe Codex policy path"
+            ):
+                self._configure(policy_dir, hardened=True)
+
+    def test_hardened_writes_requirements_before_overridable_defaults(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            policy_dir = os.path.join(temporary, "codex")
+            with patch(
+                "common.agent_security_steps.CODEX_SYSTEM_CONFIG_DIR",
+                policy_dir,
+            ), patch(
+                "common.agent_security_steps.os.chown"
+            ), patch(
+                "common.agent_security_steps._write_managed_codex_policy"
+            ) as mock_write:
+                configure_codex_security_policy(self._config(hardened=True))
+
+        written_names = [
+            os.path.basename(invocation.args[0])
+            for invocation in mock_write.call_args_list
+        ]
+        self.assertEqual(written_names, ["requirements.toml", "config.toml"])
 
 
 class TestCodexSecurityPolicySteps(unittest.TestCase):

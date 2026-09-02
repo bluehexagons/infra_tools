@@ -183,8 +183,9 @@ def add_setup_arguments(
         default=None if not for_remote else False,
         help=(
             "Also lock password login, make the home private, remove sensitive "
-            "groups, and disable user lingering; implies --harden-agent and "
-            "cannot be combined with --rdp"
+            "system-data and device groups, disable SSH forwarding/user rc, "
+            "and disable user lingering; implies --harden-agent and cannot "
+            "be combined with --rdp"
         ),
     )
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")

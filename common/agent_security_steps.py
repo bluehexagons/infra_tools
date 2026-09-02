@@ -28,6 +28,7 @@ CODEX_REQUIREMENTS_NAME = "requirements.toml"
 AGENT_USER_SECURITY_STATE_DIR = "/var/lib/infra_tools/agent-user-security"
 SYSTEMD_LINGER_DIR = "/var/lib/systemd/linger"
 _MANAGED_MARKER = "# Managed by infra-tools coding-agent security policy."
+_HARDENED_CODEX_PROFILE = "infra_tools_hardened_workspace"
 _USER_SECURITY_STATE_VERSION = 1
 _AGENT_DENIED_GROUPS = frozenset(
     {
@@ -37,19 +38,50 @@ _AGENT_DENIED_GROUPS = frozenset(
         "incus",
         "incus-admin",
         "kvm",
+        "kmem",
         "libvirt",
         "libvirt-qemu",
         "lxd",
+        "microk8s",
+        "podman",
         "root",
         "shadow",
+        "staff",
         "sudo",
+        "vboxusers",
         "wheel",
     }
 )
 _USER_DENIED_GROUPS = _AGENT_DENIED_GROUPS | {
     "adm",
-    "staff",
+    "audio",
+    "backup",
+    "bluetooth",
+    "cdrom",
+    "dialout",
+    "dip",
+    "fax",
+    "floppy",
+    "input",
+    "lp",
+    "lpadmin",
+    "mail",
+    "netdev",
+    "operator",
+    "pcap",
+    "plugdev",
+    "render",
+    "sasl",
+    "scanner",
+    "src",
     "systemd-journal",
+    "tape",
+    "tty",
+    "uucp",
+    "utmp",
+    "video",
+    "voice",
+    "wireshark",
 }
 
 
@@ -57,16 +89,26 @@ def _codex_config_content(*, hardened: bool) -> str:
     approval_policy = "never" if hardened else "on-request"
     reviewer = "user" if hardened else "auto_review"
     hardening = "allow_login_shell = false\n" if hardened else ""
+    permission_profile = (
+        _HARDENED_CODEX_PROFILE if hardened else ":workspace"
+    )
+    environment_hardening = (
+        "\n[shell_environment_policy]\n"
+        "ignore_default_excludes = false\n"
+        if hardened
+        else ""
+    )
     return (
         f"{_MANAGED_MARKER}\n"
         f"# Policy: {'hardened' if hardened else 'standard'}\n"
         f'approval_policy = "{approval_policy}"\n'
         f'approvals_reviewer = "{reviewer}"\n'
         'sandbox_mode = "workspace-write"\n'
-        'default_permissions = ":workspace"\n'
+        f'default_permissions = "{permission_profile}"\n'
         f"{hardening}"
         "\n[sandbox_workspace_write]\n"
         "network_access = false\n"
+        f"{environment_hardening}"
     )
 
 
@@ -85,11 +127,16 @@ def _codex_requirements_content() -> str:
         'allowed_approvals_reviewers = ["user"]\n'
         "allowed_web_search_modes = []\n"
         'allowed_sandbox_modes = ["read-only", "workspace-write"]\n'
-        'default_permissions = ":workspace"\n'
+        f'default_permissions = "{_HARDENED_CODEX_PROFILE}"\n'
         f"{hardening}"
         "\n[allowed_permission_profiles]\n"
         '":read-only" = true\n'
-        '":workspace" = true\n'
+        f'{_HARDENED_CODEX_PROFILE} = true\n'
+        f"\n[permissions.{_HARDENED_CODEX_PROFILE}]\n"
+        'description = "Workspace access with network disabled by policy."\n'
+        'extends = ":workspace"\n'
+        f"\n[permissions.{_HARDENED_CODEX_PROFILE}.network]\n"
+        "enabled = false\n"
         "\n[permissions.filesystem]\n"
         "deny_read = [\n"
         '    "/**/*.env",\n'
@@ -98,16 +145,33 @@ def _codex_requirements_content() -> str:
         '    "~/.aws",\n'
         '    "~/.azure",\n'
         '    "~/.cargo/credentials*",\n'
+        '    "~/.claude/.credentials.json",\n'
+        '    "~/.codex/auth.json",\n'
+        '    "~/.config/containers/auth.json",\n'
         '    "~/.config/gcloud",\n'
         '    "~/.config/gh",\n'
+        '    "~/.config/glab-cli",\n'
+        '    "~/.config/huggingface",\n'
+        '    "~/.config/pypoetry/auth.toml",\n'
+        '    "~/.config/rclone",\n'
+        '    "~/.config/sops",\n'
         '    "~/.docker/config.json",\n'
+        '    "~/.gem/credentials",\n'
         '    "~/.git-credentials",\n'
         '    "~/.gnupg",\n'
+        '    "~/.gradle/gradle.properties",\n'
         '    "~/.kube",\n'
+        '    "~/.local/share/keyrings",\n'
+        '    "~/.local/share/opencode/auth.json",\n'
+        '    "~/.m2/settings.xml",\n'
         '    "~/.netrc",\n'
         '    "~/.npmrc",\n'
+        '    "~/.oci",\n'
+        '    "~/.password-store",\n'
         '    "~/.pypirc",\n'
         '    "~/.ssh",\n'
+        '    "~/.terraform.d/credentials.tfrc.json",\n'
+        '    "~/.vault-token",\n'
         "]\n"
         "\n[features]\n"
         "apps = false\n"
@@ -321,7 +385,7 @@ def _apply_user_controls(
 ) -> None:
     home, _home_mode = _validated_user_home(account)
     os.chmod(home, 0o700, follow_symlinks=False)
-    if _password_status(config.username) == "P":
+    if _password_status(config.username) != "L":
         run(["usermod", "--lock", config.username])
     if (
         can_manage_system_services(config.machine_type)
@@ -340,6 +404,13 @@ def _restore_user_controls(
     current_password_status = _password_status(config.username)
     if controls["password_status"] == "P" and current_password_status == "L":
         run(["usermod", "--unlock", config.username])
+    elif controls["password_status"] == "NP" and current_password_status == "L":
+        run(["passwd", "--delete", config.username])
+    elif (
+        controls["password_status"] == "L"
+        and current_password_status != "L"
+    ):
+        run(["usermod", "--lock", config.username])
     linger_enabled = controls["linger_enabled"]
     if (
         isinstance(linger_enabled, bool)
@@ -413,6 +484,7 @@ def configure_agent_user_security(config: SetupConfig) -> None:
     for group_name in sorted(removed_groups - desired_denied_groups):
         if not _group_exists(group_name):
             print(f"  ! Cannot restore missing group: {group_name}")
+            continue
         elif group_name not in current_groups:
             run(
                 [
@@ -451,12 +523,24 @@ def configure_agent_user_security(config: SetupConfig) -> None:
 def _ensure_codex_policy_directory() -> None:
     if os.path.lexists(CODEX_SYSTEM_CONFIG_DIR):
         directory_stat = os.lstat(CODEX_SYSTEM_CONFIG_DIR)
-        if not stat.S_ISDIR(directory_stat.st_mode):
+        if (
+            not stat.S_ISDIR(directory_stat.st_mode)
+            or directory_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(directory_stat.st_mode) & 0o022
+        ):
             raise RuntimeError(
                 f"Refusing unsafe Codex policy directory: {CODEX_SYSTEM_CONFIG_DIR}"
             )
-        return
-    os.makedirs(CODEX_SYSTEM_CONFIG_DIR, mode=0o755)
+    else:
+        os.makedirs(CODEX_SYSTEM_CONFIG_DIR, mode=0o755)
+    os.chown(CODEX_SYSTEM_CONFIG_DIR, 0, 0)
+    os.chmod(CODEX_SYSTEM_CONFIG_DIR, 0o755)
+
+
+def _has_managed_codex_policy_marker(path: str) -> bool:
+    with open(path, "r", encoding="utf-8") as file_obj:
+        first_line = file_obj.readline(len(_MANAGED_MARKER) + 2)
+    return first_line == f"{_MANAGED_MARKER}\n"
 
 
 def _validate_managed_codex_policy_target(path: str) -> None:
@@ -464,11 +548,13 @@ def _validate_managed_codex_policy_target(path: str) -> None:
 
     if os.path.lexists(path):
         path_stat = os.lstat(path)
-        if not stat.S_ISREG(path_stat.st_mode):
+        if (
+            not stat.S_ISREG(path_stat.st_mode)
+            or path_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(path_stat.st_mode) & 0o022
+        ):
             raise RuntimeError(f"Refusing unsafe Codex policy path: {path}")
-        with open(path, "r", encoding="utf-8") as file_obj:
-            existing = file_obj.read()
-        if not existing.startswith(f"{_MANAGED_MARKER}\n"):
+        if not _has_managed_codex_policy_marker(path):
             raise RuntimeError(
                 f"Refusing to replace unmanaged Codex policy: {path}"
             )
@@ -482,9 +568,12 @@ def _is_managed_codex_policy(path: str) -> bool:
     path_stat = os.lstat(path)
     if not stat.S_ISREG(path_stat.st_mode):
         return False
-    with open(path, "r", encoding="utf-8") as file_obj:
-        existing = file_obj.read()
-    return existing.startswith(f"{_MANAGED_MARKER}\n")
+    if (
+        path_stat.st_uid != os.geteuid()
+        or stat.S_IMODE(path_stat.st_mode) & 0o022
+    ):
+        raise RuntimeError(f"Refusing unsafe Codex policy path: {path}")
+    return _has_managed_codex_policy_marker(path)
 
 
 def _write_managed_codex_policy(path: str, content: str) -> None:
@@ -527,8 +616,8 @@ def configure_codex_security_policy(config: SetupConfig) -> None:
         tomllib.loads(requirements_content)
         _validate_managed_codex_policy_target(config_path)
         _validate_managed_codex_policy_target(requirements_path)
-        _write_managed_codex_policy(config_path, config_content)
         _write_managed_codex_policy(requirements_path, requirements_content)
+        _write_managed_codex_policy(config_path, config_content)
     else:
         if not os.path.lexists(config_path) or _is_managed_codex_policy(
             config_path

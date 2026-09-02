@@ -131,17 +131,21 @@ class TestHardenSSH(unittest.TestCase):
     @patch("security.security_steps.shutil.which", return_value="/usr/sbin/sshd")
     @patch("security.security_steps.run")
     @patch("security.security_steps.os.makedirs")
-    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.write_text_atomic")
     @patch("security.security_steps.os.path.exists", return_value=False)
     def test_writes_dropin_with_hardening_directives(
-        self, _exists, mock_file, _md, mock_run, _which
+        self, _exists, mock_write, _md, mock_run, _which
     ):
         mock_run.return_value = SimpleNamespace(returncode=0)
         harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
 
-        opened_paths = [args[0] for args, _ in mock_file.call_args_list]
-        self.assertIn("/etc/ssh/sshd_config.d/99-infra-tools-hardening.conf", opened_paths)
-        written = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        mock_write.assert_called_once()
+        self.assertEqual(
+            mock_write.call_args.args[0],
+            "/etc/ssh/sshd_config.d/99-infra-tools-hardening.conf",
+        )
+        self.assertEqual(mock_write.call_args.kwargs, {"mode": 0o600})
+        written = mock_write.call_args.args[1]
         for directive in (
             "PermitRootLogin prohibit-password",
             "PasswordAuthentication no",
@@ -150,13 +154,52 @@ class TestHardenSSH(unittest.TestCase):
             "ClientAliveInterval 300",
         ):
             self.assertIn(directive, written)
+        self.assertNotIn("Match User", written)
 
     @patch("security.security_steps.shutil.which", return_value="/usr/sbin/sshd")
     @patch("security.security_steps.run")
     @patch("security.security_steps.os.makedirs")
-    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.write_text_atomic")
     @patch("security.security_steps.os.path.exists", return_value=False)
-    def test_validates_sshd_before_reload(self, _exists, _file, _md, mock_run, _which):
+    def test_hardened_user_disables_ssh_forwarding_and_user_rc(
+        self, _exists, mock_write, _md, mock_run, _which
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+
+        harden_ssh(
+            SetupConfig(
+                username="agent",
+                host="h",
+                system_type="server_lite",
+                harden_user=True,
+            )
+        )
+
+        written = mock_write.call_args.args[1]
+        self.assertIn("Match User agent", written)
+        self.assertIn("    DisableForwarding yes", written)
+        self.assertIn("    PermitUserRC no", written)
+        self.assertTrue(written.endswith("Match all\n"))
+
+    def test_hardened_user_rejects_invalid_username(self):
+        config = SetupConfig(
+            username="agent bad",
+            host="h",
+            system_type="server_lite",
+            harden_user=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "invalid username"):
+            harden_ssh(config)
+
+    @patch("security.security_steps.shutil.which", return_value="/usr/sbin/sshd")
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.makedirs")
+    @patch("security.security_steps.write_text_atomic")
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_validates_sshd_before_reload(
+        self, _exists, _write, _md, mock_run, _which
+    ):
         mock_run.return_value = SimpleNamespace(returncode=0)
         harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
         run_commands = [args[0] for args, _ in mock_run.call_args_list]
@@ -166,11 +209,11 @@ class TestHardenSSH(unittest.TestCase):
     @patch("security.security_steps.shutil.which", return_value="/usr/sbin/sshd")
     @patch("security.security_steps.run")
     @patch("security.security_steps.os.makedirs")
-    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.write_text_atomic")
     @patch("security.security_steps.os.path.exists", return_value=False)
     @patch("security.security_steps.os.remove")
     def test_removes_new_dropin_when_validation_fails(
-        self, mock_remove, _exists, _file, _md, mock_run, _which
+        self, mock_remove, _exists, _write, _md, mock_run, _which
     ):
         mock_run.return_value = SimpleNamespace(returncode=1)
         harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
@@ -185,16 +228,17 @@ class TestHardenSSH(unittest.TestCase):
     @patch("security.security_steps.run")
     @patch("security.security_steps.os.makedirs")
     @patch("security.security_steps.open", new_callable=mock_open, read_data="previous\n")
+    @patch("security.security_steps.write_text_atomic")
     @patch("security.security_steps.os.path.exists", return_value=True)
     def test_restores_existing_dropin_when_validation_fails(
-        self, _exists, mock_file, _md, mock_run, _which
+        self, _exists, mock_write, _file, _md, mock_run, _which
     ):
         mock_run.return_value = SimpleNamespace(returncode=1)
 
         harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
 
-        writes = [call.args[0] for call in mock_file().write.call_args_list]
-        self.assertEqual(writes[-1], "previous\n")
+        self.assertEqual(mock_write.call_args_list[-1].args[1], "previous\n")
+        self.assertEqual(mock_write.call_args_list[-1].kwargs, {"mode": 0o600})
         run_commands = [args[0] for args, _ in mock_run.call_args_list]
         self.assertFalse(any(cmd.startswith("systemctl reload sshd") for cmd in run_commands))
 
@@ -218,12 +262,12 @@ class TestHardenSSH(unittest.TestCase):
     @patch("security.security_steps.run")
     @patch("security.security_steps.os.makedirs")
     @patch(
-        "security.security_steps.open",
+        "security.security_steps.write_text_atomic",
         side_effect=PermissionError(13, "Permission denied"),
     )
     @patch("security.security_steps.os.path.exists", return_value=False)
     def test_skips_when_dropin_file_is_not_writable(
-        self, _exists, _file, _md, mock_run, _which
+        self, _exists, _write, _md, mock_run, _which
     ):
         harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
         mock_run.assert_not_called()

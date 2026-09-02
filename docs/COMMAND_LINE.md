@@ -129,7 +129,7 @@ tools, not for an LXC container.
 | `-p, --password PASS` | SSH password |
 | `--nopasswd` | Retain the VM setup user's unrestricted passwordless sudo compatibility rule; disabled by default |
 | `--harden-agent` / `--no-harden-agent` | Apply or remove administrator/root-equivalent group restrictions and the hardened coding-agent policy; mutually exclusive with `--nopasswd` when enabled |
-| `--harden-user` / `--no-harden-user` | Also apply or remove password locking, mode-`0700` home, sensitive-log-group restrictions, and disabled systemd lingering; enabling implies `--harden-agent` and rejects RDP |
+| `--harden-user` / `--no-harden-user` | Also apply or remove password locking, mode-`0700` home, sensitive system-data/device-group restrictions, SSH forwarding/user-rc restrictions, and disabled systemd lingering; enabling implies `--harden-agent` and rejects RDP |
 | `-t, --timezone TZ` | Timezone |
 | `--hostname NAME` | Set the target system hostname; distinct from the saved `--name` label |
 | `--mdns` / `--no-mdns` | Enable or disable Avahi/mDNS advertisement of the target hostname as `NAME.local` |
@@ -369,9 +369,10 @@ The coding identity remains in the `sudo` group by default, but its sudo use
 requires the account password. `--nopasswd` restores the former VM-wide
 `NOPASSWD:ALL` policy for convenience. `--harden-agent` instead removes
 administrator and root-equivalent supplementary groups. `--harden-user` adds
-a private home, password lock, sensitive-group removal, and disabled systemd
-lingering, making it suitable for headless CI/CD and disposable evaluation;
-it cannot be combined with RDP. Codex sessions use auto-reviewed workspace permissions by default;
+a private home, password lock, sensitive system-data/device-group removal,
+disabled SSH forwarding and user rc, and disabled systemd lingering, making it
+suitable for headless CI/CD and disposable evaluation; it cannot be combined
+with RDP. Codex sessions use auto-reviewed workspace permissions by default;
 standard sessions still allow an explicit user or client selection of full
 access and YOLO-like modes. Hardened sessions stay in the workspace boundary
 with no approval escalation and also disable live web search, common
@@ -452,7 +453,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--t3code-ready` | Add the headless T3 Code-ready profile: GitHub CLI, Codex, read-write Git, T3 web service, and protected pairing |
 | `--nopasswd` | Retain unrestricted passwordless sudo for the VM setup identity; compatibility opt-in |
 | `--harden-agent` / `--no-harden-agent` | Apply or remove administrator/root-equivalent supplementary-group restrictions and the stricter agent policy |
-| `--harden-user` / `--no-harden-user` | Apply or remove the password lock, private home, sensitive-group restrictions, and disabled lingering; enabling implies agent hardening and is incompatible with RDP |
+| `--harden-user` / `--no-harden-user` | Apply or remove the password lock, private home, sensitive system-data/device-group restrictions, SSH forwarding/user-rc restrictions, and disabled lingering; enabling implies agent hardening and is incompatible with RDP |
 | `--agent-tool TOOL[,TOOL...]` | Add one or more provider tools (`gh`, `codex`, `claude`, or `opencode`) to profile defaults |
 | `--no-agent-tool TOOL[,TOOL...]` | Disable one or more profile-default provider tools |
 | `--web-interface INTERFACE` | Install an explicit headless web interface; currently `t3code` |
