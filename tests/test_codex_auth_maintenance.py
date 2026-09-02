@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -168,9 +169,11 @@ class TestCodexAuthMaintenance(unittest.TestCase):
         self.assertEqual(result, 1)
 
     def test_app_server_protocol_requests_managed_refresh(self) -> None:
-        fake_source = textwrap.dedent(
+        # The maintenance process intentionally uses a restricted PATH. Use the
+        # active test interpreter directly so this fixture also works when CI's
+        # Python lives outside the standard system binary directories.
+        fake_source = f"#!{sys.executable}\n" + textwrap.dedent(
             """\
-            #!/usr/bin/env python3
             import json
             import sys
 
