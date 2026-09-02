@@ -1,9 +1,10 @@
 # Test suite audit and coverage plan (2026-09-02)
 
-Status: audit complete and improvement plan finalized; the first implementation
-slice is implemented and verified. The suite now has 175 tracked test modules,
-3,261 class-based test methods, and 3,250 tests in the default runner. One live
-Proxmox test is intentionally skipped unless explicitly enabled.
+Status: audit complete and improvement plan finalized; the first two
+implementation slices are implemented and verified. The suite now has 176
+tracked test modules, 3,294 class-based test methods, and 3,283 tests in the
+default runner. One live Proxmox test is intentionally skipped unless
+explicitly enabled.
 
 ## Review method
 
@@ -104,12 +105,13 @@ test methods:
 
 | Area | Approximate coverage | Evidence and meaningful next test |
 | --- | ---: | --- |
-| `lib/recall.py` | 17/132 (12.9%) | Interactive-shell tests patch the recall command; add focused tests for stored-config success, missing/invalid data, SSH timeout, reconstruction, and extra-feature rendering. |
-| `lib/mount_utils.py` | 16/114 (14.0%) | Storage tests cover the `/mnt` predicate but not mountpoint ancestry, SMB probing, accessibility, callback failure, or multi-path results; add mocked-command tests with temporary directories. |
-| `web/service_tools/webhook_manager.py` | 39/186 (21.0%) | Current coverage reaches the “default new repositories to main” behavior; exercise config absence, list/add/remove/test commands, duplicate handling, and script validation. |
-| `web/service_tools/deploy_admin.py` | 40/176 (22.7%) | Existing tests focus on three validators; add temporary-directory tests for regular-file/size/owner checks, atomic replacement, symlink handling, rollback, and command failures. |
-| `lib/remote_deploy.py` | 48/184 (26.1%) | Orchestration tests mostly patch the deployment helpers; cover rsync/SCP/SSH success, failure, timeout, cleanup, and safe-path branches directly with mocked subprocesses. |
-| `lib/user_rename.py` and `common/service_tools/infra_web.py` | 36.2% and 44.4% | These are large, security-sensitive workflows. Add decision-table tests for rollback, idempotency, ownership, and failure transitions rather than shallow tests for every helper. |
+| `lib/recall.py` | 125/132 statements (94.7%; 40 branches; 90% branch-aware) | The first slice covers stored-config success, empty/invalid data, SSH timeout/missing command, reconstruction, and extra-feature rendering. Remaining branches are concentrated in reconstruction fallbacks. |
+| `lib/mount_utils.py` | 95/112 statements (84.8%; 34 branches; 83% branch-aware) | The first slice covers `/mnt` ancestry, SMB probing and cleanup, findmnt failure, accessibility, callbacks, and multi-path results. Remaining branches are lower-level mount/accessibility exceptions. |
+| `web/service_tools/webhook_manager.py` | 177/179 statements (98.9%; 58 branches; 97% branch-aware) | The second slice covers config absence and malformed data, list/add/remove/test commands, duplicate and missing paths, script validation, secret/log/status commands, and CLI privilege/dispatch behavior. |
+| `web/service_tools/setup_cloudflare_tunnel.py` | 195/388 statements (50.3%; 140 branches; 50% branch-aware) | The second slice covers state-shape validation, origin validation, atomic config replacement/rollback, existing-config validation, service activation outcomes, UFW installation, no-site refreshes, no-op refreshes, and update error conversion. Interactive authentication and tunnel creation remain lower-priority workflow coverage. |
+| `web/service_tools/deploy_admin.py` | 150/171 statements (87.7%; 58 branches; 80% branch-aware) | The first slice covers regular-file and size checks, atomic install/remove, symlink handling, ownership refusal, rollback, and privileged command construction. Remaining branches are owner/mode and privileged entry-point edges. |
+| `lib/remote_deploy.py` | 167/181 statements (92.3%; 42 branches; 91% branch-aware) | The first slice covers target loading, rsync/SCP/SSH success, failure, timeout, temporary-file cleanup, and safe-path rejection. Remaining branches are concentrated in lower-level command-construction transitions. |
+| `lib/user_rename.py` and `common/service_tools/infra_web.py` | 348/995 statements (35.0%; 436 branches; 32% branch-aware) and 534/1,219 statements (43.8%; 502 branches; 38% branch-aware) | These are large, security-sensitive workflows. Add decision tables for rollback, idempotency, ownership, and failure transitions rather than shallow tests for every helper. |
 
 The eight lazy sysadmin handlers (`sysadmin_fan`, `sysadmin_health`,
 `sysadmin_keys`, `sysadmin_mount`, `sysadmin_reachable`, `sysadmin_ssh`,
@@ -177,11 +179,11 @@ performs rollback.
 | 1. Establish coverage and ownership gates | Test infrastructure and module owners | Add a repeatable CI/local coverage command, preferably with `coverage.py` as a development-only dependency, using branch measurement. Until that is available, retain the documented `trace` plus AST measurement. Publish per-file and branch-oriented results without enforcing a global threshold on the current baseline. At this gate, decide whether `lib/service_manager.py` and `lib/concurrent_sync_scrub.py` are supported before writing tests for them. |
 | 2. Close command-line blind spots | Sysadmin/CLI maintainers | Add parser and dispatcher contract tests for every sysadmin command, then focused mocked tests for the eight untraced handlers. Cover credential fallback, success, refusal, subprocess failure, timeout, and `os.execvp`/parallel-output behavior without opening real SSH or rsync connections. |
 | 3. Cover remote and filesystem boundaries | Deployment/storage maintainers | Add `tests/test_recall.py` and `tests/test_mount_utils.py`; expand `test_deploy_admin.py` and add direct `remote_deploy` cases. Use temporary directories and mocked subprocesses to cover atomic writes, modes/ownership, symlink and path rejection, mount ancestry, SMB checks, cleanup, timeout, and rollback. |
-| 4. Exercise service-tool failure matrices | Web/security maintainers | Expand webhook-manager and Cloudflare-tunnel tests around missing state, malformed input, duplicate/remove paths, validation failures, and command failures. Preserve the existing security-monitor and notification cases because their event sources differ. |
+| 4. Exercise service-tool failure matrices | Web/security maintainers | Implemented in the second slice: webhook-manager and Cloudflare-tunnel tests cover missing state, malformed input, duplicate/remove paths, validation failures, atomic rollback, and command/service failures. Preserve the existing security-monitor and notification cases because their event sources differ. |
 | 5. Harden large workflows | Workflow owners | Add decision tables for `user_rename`, internal web forwarding, Proxmox helpers, Godot updates, swap/scrub, and network transitions. Prioritize failure transitions, idempotency, ownership, and rollback; do not add import-only tests just to raise the number. |
 | 6. Simplify and regroup during feature work | Test maintainers | Convert only same-contract scalar cases to `subTest` tables, extract repeated mock builders, and split large modules at existing behavior-class boundaries. Keep the pattern-driven domain suites as the primary grouping mechanism and avoid mechanical file moves. |
 
-The first implementation slice should be phases 1–3. A slice is complete when
+The original first implementation slice covered phases 1–3. A slice is complete when
 the new tests pass through the default runner and the relevant domain suites,
 all external commands remain mocked, and each listed failure/success branch has
 an assertion on its return value or externally visible effect. Phases 4–6 can
@@ -258,6 +260,34 @@ settle; changed-file and domain-suite trends are the next useful gates.
 For a local report, install the optional tooling with
 `python3 -m pip install -e '.[dev]'` and run `make coverage`.
 
+## Second-slice implementation update
+
+The second test implementation addresses phase 4 of the plan without changing
+production behavior:
+
+- Added `tests/service_tools/test_webhook_manager.py` with focused coverage for
+  configuration storage, repository CRUD, script-state reporting, secret
+  handling, journal commands, health reporting, and command dispatch. Related
+  scalar outcomes use `subTest` cases; each externally visible result remains
+  asserted.
+- Expanded `tests/test_cloudflare_tunnel.py` around malformed state shapes,
+  unsupported origins, atomic config validation and preservation, existing
+  config validation, service start/activation transitions, UFW installation,
+  no-site refreshes, no-op refreshes, and non-interactive error handling.
+- The second slice adds 33 default-runner tests. All subprocess, service,
+  health-check, and privilege boundaries are mocked; filesystem assertions use
+  temporary directories. No tests open a network connection or mutate the
+  host.
+- The service-tool grouping remains pattern-driven: the new webhook module is
+  automatically included by the existing `services` suite, while the expanded
+  Cloudflare module remains in the intentional `network`/`web` overlap.
+
+The webhook manager now has 97% statement coverage in the branch-aware report.
+The Cloudflare setup helper is at 50% statement coverage because its
+interactive authentication, tunnel creation, and full install workflow remain
+large user-facing paths; these are the next meaningful cases only when an
+owner is prepared to maintain their mocked workflow contract.
+
 ### Simplification rules
 
 - Do not remove a test solely because its normalized body matches another test.
@@ -291,12 +321,14 @@ For a local report, install the optional tooling with
 
 ## Verification
 
-- `python3 run_tests.py` — 3,250 passed, 1 skipped.
+- `python3 run_tests.py` — 3,283 passed, 1 skipped.
+- `python3 run_tests.py --suite services --suite network --suite web` — 649 passed.
 - `python3 run_tests.py test_progress_utils test_run_tests` — 48 passing.
 - `python3 run_tests.py --suite core --suite storage --suite deployment` —
   1,561 passing.
-- `make coverage` — 43,455 statements, 16,856 branches, 68% total coverage;
-  no global threshold enforced.
+- Branch-aware coverage in an isolated `coverage.py` environment — 43,455
+  statements, 16,856 branches, 68% total coverage; no global threshold
+  enforced.
 - `make check` — compilation, documentation, packaging, artifact, and test checks passed.
 - One-off `trace` plus AST review — approximately 68.5% of tracked production statement lines; 15 files untraced.
 - `python3 -m py_compile run_tests.py tests/test_progress_utils.py tests/test_run_tests.py` — passing.
