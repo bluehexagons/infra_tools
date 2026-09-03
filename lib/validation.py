@@ -778,7 +778,9 @@ def validate_web_panel_settings(config: Any) -> None:
     payload = bool(getattr(config, "web_panel_payload", False))
     notification_ingest = getattr(config, "web_panel_notification_ingest", None)
     disabled = bool(getattr(config, "disable_web_panel", False))
-    if notification_ingest not in (None, True, False):
+    if notification_ingest is not None and not isinstance(
+        notification_ingest, bool
+    ):
         raise ValueError("web_panel_notification_ingest must be a boolean")
     if port is None:
         if password is not None or payload:

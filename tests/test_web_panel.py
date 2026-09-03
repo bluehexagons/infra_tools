@@ -40,7 +40,10 @@ from common.service_tools.web_panel_service import (
     discover_infra_web_services,
     render_page,
 )
-from common.web_panel_events import WEB_PANEL_NOTIFICATION_ENDPOINT
+from common.web_panel_events import (
+    WEB_PANEL_NOTIFICATION_ENDPOINT,
+    validate_notification_payload,
+)
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.display import print_service_access_summary
@@ -168,6 +171,10 @@ class WebPanelConfigTest(unittest.TestCase):
     def test_notification_ingest_rejects_plaintext_panel(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires --ssl"):
             _config(web_panel_notification_ingest=True)
+
+    def test_notification_ingest_requires_a_boolean(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be a boolean"):
+            _config(web_panel_notification_ingest=1, enable_ssl=True)
 
     def test_agent_readiness_payload_facts_are_forwarded_but_not_saved(self) -> None:
         config = _config(
@@ -791,6 +798,13 @@ class WebPanelEventTest(unittest.TestCase):
                 events[0]["notification"]["operator"]["subject"],
                 "Backup needs attention",
             )
+
+    def test_notification_schema_version_must_be_an_integer(self) -> None:
+        payload = self._notification()
+        payload["schema_version"] = 2.0
+
+        with self.assertRaisesRegex(ValueError, "schema_version 2"):
+            validate_notification_payload(payload)
 
     def test_ingest_rejects_bad_token_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

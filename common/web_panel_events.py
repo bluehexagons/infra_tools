@@ -83,7 +83,15 @@ def _validated_json(value: object, *, depth: int = 0) -> JSON:
 def validate_notification_payload(value: object) -> JSONDict:
     """Return a canonical schema-v2 notification suitable for local storage."""
 
-    if not isinstance(value, dict) or value.get("schema_version") != 2:
+    schema_version = (
+        value.get("schema_version") if isinstance(value, dict) else None
+    )
+    if (
+        not isinstance(value, dict)
+        or not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version != 2
+    ):
         raise ValueError("notification must use schema_version 2")
     event = value.get("event")
     operator = value.get("operator")
