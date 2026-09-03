@@ -49,6 +49,77 @@ def _limit_output_file_size() -> None:
     )
 
 
+def _run_bounded(command: list[str], *, timeout: int) -> tuple[int, str] | None:
+    """Run a local audit command without allowing unbounded captured output."""
+
+    try:
+        with tempfile.TemporaryFile() as output_file:
+            result = subprocess.run(
+                command,
+                check=False,
+                stdout=output_file,
+                stderr=subprocess.DEVNULL,
+                timeout=timeout,
+                preexec_fn=_limit_output_file_size,
+            )
+            output_size = output_file.tell()
+            output_file.seek(0)
+            output = output_file.read(_MAX_COMMAND_OUTPUT_BYTES + 1).decode(
+                "utf-8", errors="replace"
+            )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if output_size > _MAX_COMMAND_OUTPUT_BYTES:
+        return None
+    return result.returncode, output
+
+
+def _audit_health() -> tuple[str, list[str]]:
+    """Verify that auditd and every rule used by the panel are active."""
+
+    if not shutil.which("auditctl"):
+        return (
+            "unavailable",
+            ["auditctl is unavailable, so kernel audit coverage cannot be verified."],
+        )
+    status_result = _run_bounded(["auditctl", "-s"], timeout=10)
+    if status_result is None or status_result[0] != 0:
+        return (
+            "unavailable",
+            ["The kernel audit status could not be read."],
+        )
+    status_values = {
+        match.group(1): match.group(2)
+        for line in status_result[1].splitlines()
+        if (match := re.match(r"^([a-z_]+)\s+(\S+)$", line.strip()))
+    }
+    if status_values.get("enabled") not in {"1", "2"}:
+        return "unavailable", ["Kernel auditing is disabled."]
+    try:
+        daemon_pid = int(status_values.get("pid", "0"))
+    except ValueError:
+        daemon_pid = 0
+    if daemon_pid <= 0:
+        return "unavailable", ["auditd is not running."]
+
+    rules_result = _run_bounded(["auditctl", "-l"], timeout=10)
+    if rules_result is None or rules_result[0] != 0:
+        return "degraded", ["The loaded audit rules could not be verified."]
+    loaded_keys = set(
+        re.findall(
+            r"(?:^|\s)(?:-k\s+|-F\s+key=)([A-Za-z0-9_.:-]+)",
+            rules_result[1],
+        )
+    )
+    missing_keys = [key for key in _AUDIT_KEYS if key not in loaded_keys]
+    if missing_keys:
+        return (
+            "degraded",
+            ["Expected audit rules are not loaded: " + ", ".join(missing_keys) + "."],
+        )
+    return "ok", []
+
+
 def _safe_values(record: str, field_name: str) -> list[str]:
     pattern = re.compile(rf'\b{re.escape(field_name)}=(?:"([^"]*)"|(\S+))')
     values: list[str] = []
@@ -126,47 +197,46 @@ def collect_audit_snapshot(*, now: datetime | None = None) -> dict[str, Any]:
         "version": 1,
         "generated_at": generated.isoformat(timespec="seconds"),
         "status": "ok",
+        "issues": [],
         "events": [],
     }
     if not shutil.which("ausearch"):
         snapshot["status"] = "unavailable"
+        snapshot["issues"] = [
+            "ausearch is unavailable, so audit events cannot be queried."
+        ]
+        return snapshot
+
+    health_status, issues = _audit_health()
+    snapshot["status"] = health_status
+    snapshot["issues"] = issues
+    if health_status == "unavailable":
         return snapshot
 
     since = generated.astimezone() - timedelta(hours=24)
     events: list[JSONDict] = []
-    had_error = False
     for key in _AUDIT_KEYS:
-        try:
-            with tempfile.TemporaryFile() as output_file:
-                result = subprocess.run(
-                    [
-                        "ausearch",
-                        "--start",
-                        since.strftime("%m/%d/%Y"),
-                        since.strftime("%H:%M:%S"),
-                        "-k",
-                        key,
-                        "-i",
-                    ],
-                    check=False,
-                    stdout=output_file,
-                    stderr=subprocess.DEVNULL,
-                    timeout=20,
-                    preexec_fn=_limit_output_file_size,
-                )
-                output_size = output_file.tell()
-                output_file.seek(0)
-                output = output_file.read(_MAX_COMMAND_OUTPUT_BYTES + 1).decode(
-                    "utf-8", errors="replace"
-                )
-        except (OSError, subprocess.SubprocessError):
-            had_error = True
+        query_result = _run_bounded(
+            [
+                "ausearch",
+                "--start",
+                since.strftime("%m/%d/%Y"),
+                since.strftime("%H:%M:%S"),
+                "-k",
+                key,
+                "-i",
+            ],
+            timeout=20,
+        )
+        if query_result is not None and query_result[0] == 1:
             continue
-        if result.returncode == 1:
+        if query_result is None or query_result[0] != 0:
+            snapshot["status"] = "degraded"
+            snapshot["issues"].append(
+                f'The "{_KEY_LABELS[key]}" event query failed.'
+            )
             continue
-        if result.returncode != 0 or output_size > _MAX_COMMAND_OUTPUT_BYTES:
-            had_error = True
-            continue
+        output = query_result[1]
         for record in output.split("----"):
             if "type=" not in record:
                 continue
@@ -184,8 +254,6 @@ def collect_audit_snapshot(*, now: datetime | None = None) -> dict[str, Any]:
         key=lambda event: str(event.get("timestamp", "")), reverse=True
     )
     snapshot["events"] = retained_events[:_MAX_EVENTS]
-    if had_error:
-        snapshot["status"] = "degraded"
     return snapshot
 
 

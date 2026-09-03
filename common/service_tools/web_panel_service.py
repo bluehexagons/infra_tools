@@ -133,7 +133,7 @@ def _load_manifest(path: str) -> dict[str, Any]:
         "notification_ingest",
     ):
         if not isinstance(value["features"].get(name, False), bool):
-            raise RuntimeError("Web panel manifest has invalid T3 readiness settings")
+            raise RuntimeError("Web panel manifest has invalid feature settings")
     return value
 
 
@@ -946,6 +946,16 @@ h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.015em; }
 }
 .badge.warning, .badge.error { color: var(--bad); }
 .endpoint { margin: 0 0 12px; color: var(--muted); }
+.audit-issues {
+  margin: 0 0 12px;
+  padding: 13px 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--bad);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.audit-issues strong { display: block; margin-bottom: 4px; }
+.audit-issues ul { margin: 0; padding-left: 20px; color: var(--muted); }
 code { overflow-wrap: anywhere; }
 .empty {
   margin: 0;
@@ -1212,6 +1222,17 @@ def _render_audit_section(state: WebPanelState) -> str:
     events = snapshot.get("events", [])
     status = str(snapshot.get("status", "unavailable"))
     generated_at = str(snapshot.get("generated_at", ""))
+    issues = snapshot.get("issues", [])
+    issue_html = ""
+    if isinstance(issues, list) and issues:
+        issue_rows = "".join(
+            f"<li>{html.escape(str(issue))}</li>" for issue in issues
+        )
+        issue_html = (
+            '<aside class="audit-issues" role="status">'
+            "<strong>Audit coverage needs attention</strong>"
+            f"<ul>{issue_rows}</ul></aside>"
+        )
     if events:
         rows = []
         for event in events:
@@ -1246,19 +1267,27 @@ def _render_audit_section(state: WebPanelState) -> str:
         content = f'<ol class="event-list">{"".join(rows)}</ol>'
     elif status == "unavailable":
         content = (
-            '<p class="empty">Audit data is unavailable. auditd may not be installed '
-            'or the first snapshot may still be pending.</p>'
+            '<p class="empty">Audit data is unavailable. This is not a clean '
+            'result; review the coverage warning and audit service status.</p>'
+        )
+    elif status == "degraded":
+        content = (
+            '<p class="empty">No matching audit events were returned, but '
+            'collection is incomplete. This is not a clean result.</p>'
         )
     else:
         content = '<p class="empty">No matching audit events were recorded in the last 24 hours.</p>'
-    status_label = "Collection partially unavailable" if status == "degraded" else (
-        f"Snapshot {generated_at}" if generated_at else "Latest 24 hours"
-    )
+    if status == "unavailable":
+        status_label = "Collection unavailable"
+    elif status == "degraded":
+        status_label = "Collection incomplete"
+    else:
+        status_label = f"Snapshot {generated_at}" if generated_at else "Latest 24 hours"
     count = len(events) if isinstance(events, list) else 0
     return f'''<section aria-labelledby="audit-heading"><div class="section-heading"><div>
 <p class="section-kicker">Security activity</p><h2 id="audit-heading">System audit log</h2></div>
 <span class="count">{count} event{"" if count == 1 else "s"} · {html.escape(status_label)}</span>
-</div>{content}</section>'''
+</div>{issue_html}{content}</section>'''
 
 
 def _render_notification_section(state: WebPanelState) -> str:
@@ -1288,14 +1317,18 @@ def _render_notification_section(state: WebPanelState) -> str:
                     html.escape(" · ".join(str(action) for action in actions))
                 )
             status = str(event.get("status", "info"))
+            state_label = str(event.get("state", "unknown"))
             rows.append(
                 '<li class="event"><div class="event-head"><strong>{}</strong>'
                 '<span class="badge {}">{}</span></div>'
-                '<p class="event-meta">{} · {} · received from {}</p>'
+                '<p class="event-meta">{} · {} · reported system {} · received {} '
+                'from {}</p>'
                 '<p class="event-detail">{}</p>{}{}</li>'.format(
                     html.escape(str(operator.get("subject", "Notification"))),
                     html.escape(status, quote=True),
                     html.escape(status),
+                    html.escape(str(operator.get("job", "unknown job"))),
+                    html.escape(state_label),
                     html.escape(str(operator.get("system", "Unknown system"))),
                     html.escape(str(record.get("received_at", "Unknown time"))),
                     html.escape(str(record.get("source_ip", "unknown"))),
@@ -1309,7 +1342,7 @@ def _render_notification_section(state: WebPanelState) -> str:
     return f'''<section aria-labelledby="notifications-heading"><div class="section-heading"><div>
 <p class="section-kicker">From managed machines</p><h2 id="notifications-heading">Notifications</h2></div>
 <span class="count">{count} received</span></div>
-<p class="endpoint">Ingest endpoint: <code>{WEB_PANEL_NOTIFICATION_ENDPOINT}</code></p>
+<p class="endpoint">Ingest endpoint: <code>{WEB_PANEL_NOTIFICATION_ENDPOINT}</code>. Sender names are self-reported; use the receipt address when investigating.</p>
 {content}</section>'''
 
 
@@ -1588,6 +1621,7 @@ def _parser() -> argparse.ArgumentParser:
     listener.add_argument("--socket")
     listener.add_argument("--listen", choices=("127.0.0.1", "::1"))
     parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--socket-group", type=int)
     return parser
 
 
@@ -1596,15 +1630,33 @@ def main() -> int:
     state = WebPanelState(_load_manifest(args.config))
     WebPanelHandler.state = state
     if args.socket:
+        if args.socket_group is not None and args.socket_group < 0:
+            raise ValueError("--socket-group must be a non-negative group ID")
         if os.path.lexists(args.socket):
             if os.path.islink(args.socket) or not os.path.exists(args.socket):
                 raise RuntimeError(f"Refusing unsafe web panel socket: {args.socket}")
             os.unlink(args.socket)
-        server: socketserver.BaseServer = _ThreadingUnixHTTPServer(
-            args.socket, WebPanelHandler
-        )
-        os.chmod(args.socket, 0o660)
+        previous_umask = os.umask(0o177)
+        try:
+            server: socketserver.BaseServer = _ThreadingUnixHTTPServer(
+                args.socket, WebPanelHandler
+            )
+        finally:
+            os.umask(previous_umask)
+        try:
+            if args.socket_group is not None:
+                os.chown(args.socket, -1, args.socket_group)
+            os.chmod(args.socket, 0o660)
+        except OSError:
+            server.server_close()
+            try:
+                os.unlink(args.socket)
+            except FileNotFoundError:
+                pass
+            raise
     else:
+        if args.socket_group is not None:
+            raise ValueError("--socket-group requires --socket")
         if not 1 <= args.port <= 65535:
             raise ValueError("--port must be between 1 and 65535")
         server = _ThreadingTCPHTTPServer((args.listen, args.port), WebPanelHandler)

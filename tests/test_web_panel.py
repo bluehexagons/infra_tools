@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import http.client
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ from unittest.mock import patch
 from common.web_panel_steps import (
     _configure_audit_exporter,
     _configure_service,
+    _ensure_event_storage,
     _install_auth_file,
     _install_ingest_token,
     _write_nginx_site,
@@ -38,6 +40,7 @@ from common.service_tools.web_panel_service import (
     collect_system_overview,
     discover_certificate_trust,
     discover_infra_web_services,
+    main as web_panel_main,
     render_page,
 )
 from common.web_panel_events import (
@@ -298,6 +301,49 @@ class WebPanelLifecycleTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Serve the infra-tools web panel", result.stdout)
 
+    def test_unix_socket_is_shared_only_with_the_web_server_group(self) -> None:
+        args = SimpleNamespace(
+            config="/config.json",
+            socket="/run/panel/http.sock",
+            listen=None,
+            port=0,
+            socket_group=33,
+        )
+        parser = SimpleNamespace(parse_args=lambda: args)
+        with (
+            patch(
+                "common.service_tools.web_panel_service._parser",
+                return_value=parser,
+            ),
+            patch(
+                "common.service_tools.web_panel_service._load_manifest",
+                return_value={},
+            ),
+            patch("common.service_tools.web_panel_service.WebPanelState"),
+            patch(
+                "common.service_tools.web_panel_service._ThreadingUnixHTTPServer"
+            ),
+            patch(
+                "common.service_tools.web_panel_service.os.path.lexists",
+                return_value=False,
+            ),
+            patch("common.service_tools.web_panel_service.os.chown") as mock_chown,
+            patch("common.service_tools.web_panel_service.os.chmod") as mock_chmod,
+            patch(
+                "common.service_tools.web_panel_service.os.umask",
+                side_effect=(0o22, 0o22),
+            ) as mock_umask,
+            patch("common.service_tools.web_panel_service.os.unlink"),
+        ):
+            self.assertEqual(web_panel_main(), 0)
+
+        self.assertEqual(
+            [call.args[0] for call in mock_umask.call_args_list],
+            [0o177, 0o22],
+        )
+        mock_chown.assert_called_once_with("/run/panel/http.sock", -1, 33)
+        mock_chmod.assert_called_once_with("/run/panel/http.sock", 0o660)
+
     def test_preserved_auth_must_match_the_setup_username(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config_dir = os.path.join(temporary, "config")
@@ -318,28 +364,59 @@ class WebPanelLifecycleTest(unittest.TestCase):
     def test_ingest_token_is_generated_once_and_removed_when_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             token_path = os.path.join(temporary, "ingest.token")
-            account = SimpleNamespace(pw_gid=os.getgid())
             with (
                 patch(
                     "common.web_panel_steps.WEB_PANEL_INGEST_TOKEN",
                     token_path,
                 ),
+                patch("common.web_panel_steps.os.chown"),
+            ):
+                self.assertTrue(_install_ingest_token(True, 1002))
+                with open(token_path, encoding="utf-8") as file_obj:
+                    first = file_obj.read()
+                self.assertFalse(_install_ingest_token(True, 1002))
+                with open(token_path, encoding="utf-8") as file_obj:
+                    second = file_obj.read()
+                self.assertEqual(first, second)
+                self.assertTrue(_install_ingest_token(False, 1002))
+
+            self.assertFalse(os.path.exists(token_path))
+
+    def test_event_storage_is_private_to_the_panel_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = os.path.join(temporary, "data")
+            audit_dir = os.path.join(data_dir, "audit")
+            notification_dir = os.path.join(data_dir, "notifications")
+            account = SimpleNamespace(pw_uid=1001, pw_gid=1002)
+            with (
+                patch.multiple(
+                    "common.web_panel_steps",
+                    WEB_PANEL_DATA_DIR=data_dir,
+                    WEB_PANEL_AUDIT_DIR=audit_dir,
+                    WEB_PANEL_NOTIFICATION_DIR=notification_dir,
+                    WEB_PANEL_AUDIT_SNAPSHOT=os.path.join(
+                        audit_dir, "events.json"
+                    ),
+                    WEB_PANEL_NOTIFICATION_LOG=os.path.join(
+                        notification_dir, "events.jsonl"
+                    ),
+                ),
                 patch(
                     "common.web_panel_steps.pwd.getpwnam",
                     return_value=account,
                 ),
-                patch("common.web_panel_steps.os.chown"),
+                patch("common.web_panel_steps.os.chown") as mock_chown,
             ):
-                self.assertTrue(_install_ingest_token(True))
-                with open(token_path, encoding="utf-8") as file_obj:
-                    first = file_obj.read()
-                self.assertFalse(_install_ingest_token(True))
-                with open(token_path, encoding="utf-8") as file_obj:
-                    second = file_obj.read()
-                self.assertEqual(first, second)
-                self.assertTrue(_install_ingest_token(False))
+                _ensure_event_storage("agent")
 
-            self.assertFalse(os.path.exists(token_path))
+            self.assertEqual(stat.S_IMODE(os.stat(data_dir).st_mode), 0o750)
+            self.assertEqual(stat.S_IMODE(os.stat(audit_dir).st_mode), 0o2750)
+            self.assertEqual(
+                stat.S_IMODE(os.stat(notification_dir).st_mode), 0o700
+            )
+            mock_chown.assert_any_call(data_dir, 0, 1002)
+            mock_chown.assert_any_call(audit_dir, 0, 1002)
+            mock_chown.assert_any_call(notification_dir, 1001, 1002)
 
     def test_new_payload_replaces_auth_for_a_renamed_setup_user(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -412,7 +489,7 @@ class WebPanelLifecycleTest(unittest.TestCase):
     def test_service_activation_failure_removes_new_unit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             service_file = os.path.join(temporary, "web-panel.service")
-            account = SimpleNamespace(pw_uid=os.getuid())
+            account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
 
             def run_command(command: str, **_kwargs: object) -> SimpleNamespace:
                 if command == "systemctl restart infra-tools-web-panel.service":
@@ -444,7 +521,8 @@ class WebPanelLifecycleTest(unittest.TestCase):
             socket_path = os.path.join(temporary, "http.sock")
             with open(socket_path, "w", encoding="utf-8"):
                 pass
-            account = SimpleNamespace(pw_uid=os.getuid())
+            service_account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=1002)
+            web_account = SimpleNamespace(pw_uid=33, pw_gid=33)
 
             with (
                 patch.multiple(
@@ -454,7 +532,9 @@ class WebPanelLifecycleTest(unittest.TestCase):
                 ),
                 patch(
                     "common.web_panel_steps.pwd.getpwnam",
-                    return_value=account,
+                    side_effect=lambda name: (
+                        web_account if name == "www-data" else service_account
+                    ),
                 ),
                 patch(
                     "common.web_panel_steps.run",
@@ -470,6 +550,10 @@ class WebPanelLifecycleTest(unittest.TestCase):
             with open(service_file, encoding="utf-8") as file_obj:
                 content = file_obj.read()
             self.assertIn('Environment="HOME=/home/agent workspace"', content)
+            self.assertIn("Group=1002", content)
+            self.assertIn("SupplementaryGroups=www-data", content)
+            self.assertIn("RuntimeDirectoryMode=0711", content)
+            self.assertIn("--socket-group 33", content)
             self.assertIn("ProtectControlGroups=true", content)
             self.assertIn("LockPersonality=true", content)
 
@@ -494,24 +578,62 @@ class WebPanelLifecycleTest(unittest.TestCase):
                     ),
                 ),
             ):
-                self.assertTrue(_configure_audit_exporter())
+                self.assertTrue(_configure_audit_exporter(1002))
 
             with open(service_file, encoding="utf-8") as file_obj:
                 service = file_obj.read()
             with open(timer_file, encoding="utf-8") as file_obj:
                 timer = file_obj.read()
             self.assertIn("User=root", service)
+            self.assertIn("Group=1002", service)
             self.assertIn("ProtectSystem=strict", service)
             self.assertIn(
                 "ReadWritePaths=/var/lib/infra_tools/web-panel/audit",
                 service,
             )
+            self.assertIn("RestrictAddressFamilies=AF_UNIX AF_NETLINK", service)
             self.assertIn("OnUnitActiveSec=5min", timer)
+
+    def test_audit_exporter_failure_disables_a_new_timer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            service_file = os.path.join(temporary, "audit.service")
+            timer_file = os.path.join(temporary, "audit.timer")
+
+            def run_command(command: str, **_kwargs: object) -> SimpleNamespace:
+                if command == "systemctl start infra-tools-web-panel-audit.service":
+                    raise RuntimeError("snapshot failed")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with (
+                patch.multiple(
+                    "common.web_panel_steps",
+                    WEB_PANEL_AUDIT_SERVICE_FILE=service_file,
+                    WEB_PANEL_AUDIT_TIMER_FILE=timer_file,
+                ),
+                patch(
+                    "common.web_panel_steps.run",
+                    side_effect=run_command,
+                ) as mock_run,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "snapshot failed"):
+                    _configure_audit_exporter(1002)
+
+            commands = [call.args[0] for call in mock_run.call_args_list]
+            self.assertIn(
+                "systemctl disable --now infra-tools-web-panel-audit.timer",
+                commands,
+            )
+            self.assertIn(
+                "systemctl stop infra-tools-web-panel-audit.service",
+                commands,
+            )
+            self.assertFalse(os.path.exists(service_file))
+            self.assertFalse(os.path.exists(timer_file))
 
     def test_service_socket_timeout_includes_systemd_status(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             service_file = os.path.join(temporary, "web-panel.service")
-            account = SimpleNamespace(pw_uid=os.getuid())
+            account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
 
             def run_command(command: str, **_kwargs: object) -> SimpleNamespace:
                 if command.startswith("systemctl status "):
@@ -635,6 +757,55 @@ class WebPanelLifecycleTest(unittest.TestCase):
             self.assertFalse(os.path.lexists(site))
             self.assertFalse(os.path.lexists(link))
             mock_run.assert_not_called()
+
+    def test_removal_stops_a_running_audit_export_before_deleting_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            service_file = os.path.join(temporary, "audit.service")
+            timer_file = os.path.join(temporary, "audit.timer")
+            for path in (service_file, timer_file):
+                with open(path, "w", encoding="utf-8") as file_obj:
+                    file_obj.write("# Managed by infra_tools web panel\n")
+
+            with (
+                patch.multiple(
+                    "common.web_panel_steps",
+                    WEB_PANEL_SERVICE_FILE=os.path.join(temporary, "service"),
+                    WEB_PANEL_CONFIG_DIR=os.path.join(temporary, "config"),
+                    WEB_PANEL_MANIFEST=os.path.join(temporary, "manifest"),
+                    WEB_PANEL_AUTH_FILE=os.path.join(temporary, "auth"),
+                    WEB_PANEL_INGEST_TOKEN=os.path.join(temporary, "token"),
+                    WEB_PANEL_DATA_DIR=os.path.join(temporary, "data"),
+                    WEB_PANEL_AUDIT_DIR=os.path.join(temporary, "audit"),
+                    WEB_PANEL_NOTIFICATION_DIR=os.path.join(
+                        temporary, "notifications"
+                    ),
+                    WEB_PANEL_AUDIT_SNAPSHOT=os.path.join(
+                        temporary, "audit.json"
+                    ),
+                    WEB_PANEL_NOTIFICATION_LOG=os.path.join(
+                        temporary, "notifications.jsonl"
+                    ),
+                    WEB_PANEL_AUDIT_SERVICE_FILE=service_file,
+                    WEB_PANEL_AUDIT_TIMER_FILE=timer_file,
+                    WEB_PANEL_NGINX_SITE=os.path.join(temporary, "site"),
+                    WEB_PANEL_NGINX_LINK=os.path.join(temporary, "link"),
+                ),
+                patch("common.web_panel_steps.run") as mock_run,
+                patch("common.web_panel_steps.remove_nginx_auth_failure_ban"),
+            ):
+                remove_web_panel()
+
+            commands = [call.args[0] for call in mock_run.call_args_list]
+            self.assertLess(
+                commands.index(
+                    "systemctl disable --now infra-tools-web-panel-audit.timer"
+                ),
+                commands.index(
+                    "systemctl stop infra-tools-web-panel-audit.service"
+                ),
+            )
+            self.assertFalse(os.path.exists(service_file))
+            self.assertFalse(os.path.exists(timer_file))
 
 
 class WebPanelRenderingTest(unittest.TestCase):
@@ -853,15 +1024,30 @@ class WebPanelEventTest(unittest.TestCase):
     def test_audit_export_is_sanitized_and_bounded(
         self, mock_run: unittest.mock.MagicMock, mock_which: unittest.mock.MagicMock
     ) -> None:
-        mock_which.return_value = "/usr/sbin/ausearch"
+        mock_which.side_effect = lambda name: f"/usr/sbin/{name}"
         record = (
             "type=SYSCALL msg=audit(1788361200.0:42): "
             'syscall=openat auid=agent exe="/usr/bin/sudo" proctitle=SECRET\n'
             'type=PATH msg=audit(1788361200.0:42): name="/etc/sudoers"\n----\n'
         )
 
-        def run_audit(*_args: object, **kwargs: object) -> SimpleNamespace:
-            kwargs["stdout"].write(record.encode("utf-8"))
+        def run_audit(command: list[str], **kwargs: object) -> SimpleNamespace:
+            if command == ["auditctl", "-s"]:
+                output = "enabled 1\npid 123\n"
+            elif command == ["auditctl", "-l"]:
+                output = "\n".join(
+                    f"-w /example/{key} -p wa -k {key}"
+                    for key in (
+                        "identity",
+                        "sudoers",
+                        "sshd_config",
+                        "modules",
+                        "privileged",
+                    )
+                )
+            else:
+                output = record
+            kwargs["stdout"].write(output.encode("utf-8"))
             return SimpleNamespace(returncode=0)
 
         mock_run.side_effect = run_audit
@@ -873,6 +1059,50 @@ class WebPanelEventTest(unittest.TestCase):
         serialized = json.dumps(snapshot)
         self.assertIn("/etc/sudoers", serialized)
         self.assertNotIn("SECRET", serialized)
+
+    @patch("common.service_tools.web_panel_audit_export.shutil.which")
+    @patch("common.service_tools.web_panel_audit_export.subprocess.run")
+    def test_audit_export_reports_disabled_kernel_auditing(
+        self, mock_run: unittest.mock.MagicMock, mock_which: unittest.mock.MagicMock
+    ) -> None:
+        mock_which.side_effect = lambda name: f"/usr/sbin/{name}"
+
+        def run_audit(command: list[str], **kwargs: object) -> SimpleNamespace:
+            self.assertEqual(command, ["auditctl", "-s"])
+            kwargs["stdout"].write(b"enabled 0\npid 0\n")
+            return SimpleNamespace(returncode=0)
+
+        mock_run.side_effect = run_audit
+
+        snapshot = collect_audit_snapshot()
+
+        self.assertEqual(snapshot["status"], "unavailable")
+        self.assertEqual(snapshot["events"], [])
+        self.assertIn("disabled", snapshot["issues"][0].lower())
+
+    @patch("common.service_tools.web_panel_audit_export.shutil.which")
+    @patch("common.service_tools.web_panel_audit_export.subprocess.run")
+    def test_audit_export_reports_missing_managed_rules(
+        self, mock_run: unittest.mock.MagicMock, mock_which: unittest.mock.MagicMock
+    ) -> None:
+        mock_which.side_effect = lambda name: f"/usr/sbin/{name}"
+
+        def run_audit(command: list[str], **kwargs: object) -> SimpleNamespace:
+            if command == ["auditctl", "-s"]:
+                kwargs["stdout"].write(b"enabled 1\npid 123\n")
+                return SimpleNamespace(returncode=0)
+            if command == ["auditctl", "-l"]:
+                kwargs["stdout"].write(b"-w /etc/passwd -p wa -k identity\n")
+                return SimpleNamespace(returncode=0)
+            return SimpleNamespace(returncode=1)
+
+        mock_run.side_effect = run_audit
+
+        snapshot = collect_audit_snapshot()
+
+        self.assertEqual(snapshot["status"], "degraded")
+        self.assertIn("sudoers", snapshot["issues"][0])
+        self.assertNotIn("identity,", snapshot["issues"][0])
 
     def test_page_renders_audit_and_remote_notification_history(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -886,7 +1116,8 @@ class WebPanelEventTest(unittest.TestCase):
                     {
                         "version": 1,
                         "generated_at": "2026-09-02T12:00:00+00:00",
-                        "status": "ok",
+                        "status": "degraded",
+                        "issues": ["Expected audit rule is not loaded: modules."],
                         "events": [
                             {
                                 "key": "sudoers",
@@ -935,9 +1166,14 @@ class WebPanelEventTest(unittest.TestCase):
 
         self.assertIn("System audit log", rendered)
         self.assertIn("Administrator access policy changed", rendered)
+        self.assertIn("Audit coverage needs attention", rendered)
+        self.assertIn("Expected audit rule is not loaded: modules.", rendered)
+        self.assertIn("Collection incomplete", rendered)
         self.assertIn("Notifications", rendered)
         self.assertIn(WEB_PANEL_NOTIFICATION_ENDPOINT, rendered)
         self.assertIn("Backup &lt;failed&gt;", rendered)
+        self.assertIn("reported system agent-2", rendered)
+        self.assertIn("receipt address when investigating", rendered)
         self.assertNotIn("Backup <failed>", rendered)
 
     def test_page_escapes_content_and_only_shows_available_action(self) -> None:

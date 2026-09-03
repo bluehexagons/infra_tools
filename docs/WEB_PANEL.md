@@ -51,8 +51,10 @@ infra-tools patch 192.168.1.50 agent \
 The fixed endpoint is `https://HOST/api/v1/notifications`. Enabling it creates
 a random bearer token at
 `/etc/infra-tools/web-panel/notification-ingest.token`; repeated setup runs
-preserve that token. Read it on the panel host with `sudo` and configure a
-sending machine with a webhook target whose URL fragment contains the token:
+preserve that token. The file is readable only by root and the panel service
+account's primary group, not by the shared web-server group. Read it on the
+panel host with `sudo` and configure a sending machine with a webhook target
+whose URL fragment contains the token:
 
 ```bash
 infra-tools patch sender.example agent \
@@ -113,14 +115,18 @@ The configured machine determines the contents:
   snapshot includes
   time, audit category, paths, actors, operations, and executables when auditd
   supplies them; it deliberately excludes raw records, command arguments, and
-  `proctitle` data. If auditd is absent or one query fails, the page says that
-  collection is unavailable or degraded instead of presenting a false clean
-  result;
+  `proctitle` data. Before reporting a clean result, the exporter verifies that
+  kernel auditing is enabled, auditd is running, and every expected managed
+  audit key is loaded. Missing coverage and failed queries appear as specific
+  warnings instead of a false clean result. Setup also reloads the managed
+  rules on a rerun even when their on-disk file has not changed;
 - when notification ingest is enabled, the latest 100 accepted notifications
   appear with their source system, status, explanation, suggested action, and
   receipt address/time. Input must be a bounded schema-version-2 notification;
   unknown fields are discarded and malformed or deeply nested input is
-  rejected;
+  rejected. A sender-provided system name is descriptive rather than a
+  cryptographic identity, so investigations should correlate it with the
+  server-recorded source address;
 - when the shared gateway uses the machine-local CA, a certificate-trust section
   provides its public download, SHA-256 fingerprint, compact GUI guidance, and
   copy/paste scripts for Debian/Ubuntu, Arch, Fedora/RHEL, macOS, and Windows.
@@ -143,7 +149,9 @@ The page contains no general command runner, terminal, package form, or
 arbitrary service controls. Maintenance actions are fixed server-side
 operations. Nginx applies Basic Auth, request throttling with headroom for the
 update-status refresh, and a fail2ban jail; the application listens only on a
-Unix socket and uses a per-process CSRF token for state-changing forms.
+Unix socket and uses a per-process CSRF token for state-changing forms. The
+socket alone is shared with Nginx; the bearer token, audit snapshot, and
+notification history are isolated to the panel process's primary group.
 
 The ingest route is the sole Basic Auth exception. It exists only when the flag
 is enabled, accepts only `POST`, has a separate lower rate limit and 64 KiB body

@@ -398,41 +398,42 @@ def _restore_auth_file(previous: bytes | None) -> None:
 def _ensure_event_storage(service_user: str) -> None:
     """Create separate least-privilege audit and notification data stores."""
 
-    web_account = pwd.getpwnam("www-data")
     service_account = pwd.getpwnam(service_user)
-    for path in (
-        WEB_PANEL_DATA_DIR,
-        WEB_PANEL_AUDIT_DIR,
-        WEB_PANEL_NOTIFICATION_DIR,
-    ):
+    for path in (WEB_PANEL_DATA_DIR, WEB_PANEL_AUDIT_DIR, WEB_PANEL_NOTIFICATION_DIR):
         validate_filesystem_path(path, must_exist=False)
         if os.path.lexists(path) and (
             os.path.islink(path) or not os.path.isdir(path)
         ):
             raise RuntimeError(f"Refusing unsafe web panel data path: {path}")
         os.makedirs(path, mode=0o750, exist_ok=True)
-        os.chown(path, 0, web_account.pw_gid)
+    os.chown(WEB_PANEL_DATA_DIR, 0, service_account.pw_gid)
+    os.chown(WEB_PANEL_AUDIT_DIR, 0, service_account.pw_gid)
+    os.chown(
+        WEB_PANEL_NOTIFICATION_DIR,
+        service_account.pw_uid,
+        service_account.pw_gid,
+    )
     os.chmod(WEB_PANEL_DATA_DIR, 0o750)
     os.chmod(WEB_PANEL_AUDIT_DIR, 0o2750)
-    os.chmod(WEB_PANEL_NOTIFICATION_DIR, 0o2770)
+    os.chmod(WEB_PANEL_NOTIFICATION_DIR, 0o700)
     for path in (WEB_PANEL_AUDIT_SNAPSHOT, WEB_PANEL_NOTIFICATION_LOG):
         if os.path.lexists(path) and (
             os.path.islink(path) or not os.path.isfile(path)
         ):
             raise RuntimeError(f"Refusing unsafe web panel event file: {path}")
     if os.path.exists(WEB_PANEL_AUDIT_SNAPSHOT):
-        os.chown(WEB_PANEL_AUDIT_SNAPSHOT, 0, web_account.pw_gid)
+        os.chown(WEB_PANEL_AUDIT_SNAPSHOT, 0, service_account.pw_gid)
         os.chmod(WEB_PANEL_AUDIT_SNAPSHOT, 0o640)
     if os.path.exists(WEB_PANEL_NOTIFICATION_LOG):
         os.chown(
             WEB_PANEL_NOTIFICATION_LOG,
             service_account.pw_uid,
-            web_account.pw_gid,
+            service_account.pw_gid,
         )
         os.chmod(WEB_PANEL_NOTIFICATION_LOG, 0o600)
 
 
-def _install_ingest_token(enabled: bool) -> bool:
+def _install_ingest_token(enabled: bool, service_gid: int) -> bool:
     """Create or remove the notification API token without rotating it on setup."""
 
     validate_filesystem_path(WEB_PANEL_INGEST_TOKEN, must_exist=False)
@@ -459,8 +460,7 @@ def _install_ingest_token(enabled: bool) -> bool:
     changed = existing is None
     if changed:
         write_text_atomic(WEB_PANEL_INGEST_TOKEN, token + "\n", mode=0o640)
-    web_account = pwd.getpwnam("www-data")
-    os.chown(WEB_PANEL_INGEST_TOKEN, 0, web_account.pw_gid)
+    os.chown(WEB_PANEL_INGEST_TOKEN, 0, service_gid)
     os.chmod(WEB_PANEL_INGEST_TOKEN, 0o640)
     return changed
 
@@ -572,6 +572,8 @@ def _restore_service(previous: str | None) -> None:
 def _configure_service(config: SetupConfig, home: str) -> bool:
     service_user = config.username if config.username != "root" else "nobody"
     service_home = home if service_user == config.username else "/nonexistent"
+    service_account = pwd.getpwnam(service_user)
+    web_account = pwd.getpwnam("www-data")
     content = f"""{_SERVICE_MARKER}
 [Unit]
 Description=infra-tools web panel
@@ -581,14 +583,15 @@ Wants=network-online.target
 [Service]
 Type=simple
 User={service_user}
-Group=www-data
+Group={service_account.pw_gid}
+SupplementaryGroups=www-data
 RuntimeDirectory=infra-tools-web-panel
-RuntimeDirectoryMode=0750
+RuntimeDirectoryMode=0711
 UMask=0007
 Environment={_systemd_quote('HOME=' + service_home)}
-Environment=XDG_RUNTIME_DIR=/run/user/{pwd.getpwnam(service_user).pw_uid}
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{pwd.getpwnam(service_user).pw_uid}/bus
-ExecStart=/usr/bin/python3 {WEB_PANEL_SCRIPT} --config {WEB_PANEL_MANIFEST} --socket {WEB_PANEL_SOCKET}
+Environment=XDG_RUNTIME_DIR=/run/user/{service_account.pw_uid}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{service_account.pw_uid}/bus
+ExecStart=/usr/bin/python3 {WEB_PANEL_SCRIPT} --config {WEB_PANEL_MANIFEST} --socket {WEB_PANEL_SOCKET} --socket-group {web_account.pw_gid}
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
@@ -656,7 +659,7 @@ WantedBy=multi-user.target
         raise
 
 
-def _configure_audit_exporter() -> bool:
+def _configure_audit_exporter(service_gid: int) -> bool:
     """Install the root-only audit snapshot exporter and refresh timer."""
 
     service_content = f"""{_SERVICE_MARKER}
@@ -667,7 +670,7 @@ After=auditd.service
 [Service]
 Type=oneshot
 User=root
-Group=www-data
+Group={service_gid}
 UMask=0027
 ExecStart=/usr/bin/python3 {WEB_PANEL_AUDIT_SCRIPT} --output {WEB_PANEL_AUDIT_SNAPSHOT}
 NoNewPrivileges=true
@@ -680,7 +683,7 @@ ProtectControlGroups=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
 LockPersonality=true
-RestrictAddressFamilies=AF_UNIX
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
 RestrictSUIDSGID=true
 StandardOutput=null
 StandardError=journal
@@ -731,6 +734,15 @@ WantedBy=timers.target
         )
         run(f"systemctl start {WEB_PANEL_AUDIT_SERVICE_NAME}.service", check=True)
     except Exception:
+        if previous[WEB_PANEL_AUDIT_TIMER_FILE] is None:
+            run(
+                f"systemctl disable --now {WEB_PANEL_AUDIT_SERVICE_NAME}.timer",
+                check=False,
+            )
+        run(
+            f"systemctl stop {WEB_PANEL_AUDIT_SERVICE_NAME}.service",
+            check=False,
+        )
         for path, content in previous.items():
             if content is None:
                 try:
@@ -874,6 +886,10 @@ def remove_web_panel() -> None:
             f"systemctl disable --now {WEB_PANEL_AUDIT_SERVICE_NAME}.timer",
             check=False,
         )
+        run(
+            f"systemctl stop {WEB_PANEL_AUDIT_SERVICE_NAME}.service",
+            check=False,
+        )
     for path in (WEB_PANEL_AUDIT_SERVICE_FILE, WEB_PANEL_AUDIT_TIMER_FILE):
         try:
             os.remove(path)
@@ -951,17 +967,16 @@ def configure_web_panel(config: SetupConfig) -> None:
     auth_changed, previous_auth = _install_auth_file(config.username)
     try:
         service_user = config.username if config.username != "root" else "nobody"
+        account = pwd.getpwnam(service_user)
         _ensure_event_storage(service_user)
-        _install_ingest_token(config.web_panel_notification_ingest is True)
+        _install_ingest_token(
+            config.web_panel_notification_ingest is True,
+            account.pw_gid,
+        )
         manifest = build_web_panel_manifest(config, identities)
         os.makedirs(WEB_PANEL_CONFIG_DIR, mode=0o750, exist_ok=True)
         write_json_atomic(WEB_PANEL_MANIFEST, manifest, mode=0o644, sort_keys=True)
-        account = (
-            pwd.getpwnam(config.username)
-            if config.username != "root"
-            else pwd.getpwnam("nobody")
-        )
-        _configure_audit_exporter()
+        _configure_audit_exporter(account.pw_gid)
         _configure_service(config, account.pw_dir)
         nginx_changed = _write_nginx_site(
             render_web_panel_nginx(

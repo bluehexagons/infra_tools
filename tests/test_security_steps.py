@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import mock_open, patch
@@ -18,6 +19,7 @@ from security.security_steps import (
     configure_auto_restart,
     configure_auto_updates,
     configure_apparmor,
+    configure_auditd,
     configure_cleanup_maintenance,
     configure_fail2ban,
     configure_firewall,
@@ -366,6 +368,32 @@ class TestConfigureFail2Ban(unittest.TestCase):
         with patch("builtins.print") as mock_print:
             configure_fail2ban(SetupConfig(username="u", host="h", system_type="server_lite"))
         mock_print.assert_any_call("  ✓ Skipping fail2ban configuration (limited functionality in containers)")
+
+
+class TestConfigureAuditd(unittest.TestCase):
+    @patch("security.security_steps.is_hardware", return_value=False)
+    @patch("security.security_steps.is_vm", return_value=True)
+    @patch("security.security_steps.os.makedirs")
+    @patch("security.security_steps.run")
+    def test_matching_rules_are_reloaded_to_reconcile_kernel_state(
+        self, mock_run, _makedirs, _vm, _hardware
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        config = SetupConfig(username="u", host="h", system_type="server_lite")
+        with tempfile.TemporaryDirectory() as temporary:
+            rules_file = os.path.join(temporary, "audit.rules")
+            with patch(
+                "security.security_steps._AUDIT_RULES_FILE", rules_file
+            ):
+                configure_auditd(config)
+                mock_run.reset_mock()
+                configure_auditd(config)
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn("systemctl enable auditd", commands)
+        self.assertIn("systemctl start auditd", commands)
+        self.assertIn("augenrules --load", commands)
+        self.assertNotIn("systemctl restart auditd", commands)
 
 
 class TestConfigureFirewall(unittest.TestCase):

@@ -25,6 +25,7 @@ _MAX_FILE_BYTES = 5 * 1024 * 1024
 _MAX_NOTIFICATION_BYTES = 32 * 1024
 _MAX_NOTIFICATION_EVENTS = 100
 _MAX_AUDIT_EVENTS = 100
+_MAX_AUDIT_ISSUES = 10
 _MAX_DATA_DEPTH = 6
 _MAX_DATA_ITEMS = 100
 
@@ -196,23 +197,40 @@ def load_audit_snapshot(
 ) -> dict[str, Any]:
     """Load the root-exported audit snapshot, failing closed on malformed data."""
 
+    unavailable = {
+        "status": "unavailable",
+        "issues": ["No valid audit snapshot is available."],
+        "events": [],
+    }
     content = _read_regular_text(path)
     if content is None:
-        return {"status": "unavailable", "events": []}
+        return unavailable
     try:
         payload = json.loads(content)
     except (RecursionError, ValueError):
-        return {"status": "unavailable", "events": []}
+        return unavailable
     if not isinstance(payload, dict) or payload.get("version") != 1:
-        return {"status": "unavailable", "events": []}
+        return unavailable
     status = payload.get("status")
     generated_at = payload.get("generated_at")
     events = payload.get("events")
     if status not in {"ok", "degraded", "unavailable"} or not isinstance(
         events, list
     ):
-        return {"status": "unavailable", "events": []}
+        return unavailable
 
+    issues = payload.get("issues", [])
+    safe_issues: list[str] = []
+    if isinstance(issues, list):
+        safe_issues = [
+            issue[:300]
+            for issue in issues[:_MAX_AUDIT_ISSUES]
+            if isinstance(issue, str)
+            and issue
+            and not any(ord(character) < 32 for character in issue)
+        ]
+    if status != "ok" and not safe_issues:
+        safe_issues = ["Audit collection did not complete successfully."]
     safe_events: list[JSONDict] = []
     for event in events[:_MAX_AUDIT_EVENTS]:
         if not isinstance(event, dict):
@@ -240,6 +258,7 @@ def load_audit_snapshot(
     return {
         "status": status,
         "generated_at": generated_at[:64] if isinstance(generated_at, str) else "",
+        "issues": safe_issues,
         "events": safe_events,
     }
 

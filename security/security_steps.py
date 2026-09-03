@@ -741,24 +741,32 @@ def configure_auditd(config: SetupConfig) -> None:
 
     os.makedirs("/etc/audit/rules.d", exist_ok=True)
 
+    existing = None
     if os.path.exists(_AUDIT_RULES_FILE):
         try:
             with open(_AUDIT_RULES_FILE) as f:
                 existing = f.read()
         except OSError:
-            existing = None
-        if existing == audit_rules:
-            print("  ✓ auditd already configured")
-            return
+            pass
 
-    with open(_AUDIT_RULES_FILE, "w") as f:
-        f.write(audit_rules)
+    rules_changed = existing != audit_rules
+    if rules_changed:
+        write_text_atomic(_AUDIT_RULES_FILE, audit_rules, mode=0o640)
 
     run("systemctl enable auditd")
-    run("systemctl restart auditd", check=False)
-    run("augenrules --load", check=False)
+    service_command = "restart" if rules_changed else "start"
+    service_result = run(f"systemctl {service_command} auditd", check=False)
+    load_result = run("augenrules --load", check=False)
 
-    print("  ✓ auditd configured (monitoring identity, sudoers, SSH config, modules)")
+    if service_result.returncode != 0 or load_result.returncode != 0:
+        print(
+            "  ⚠ auditd configuration is present but its service or loaded "
+            "rules could not be verified"
+        )
+    elif rules_changed:
+        print("  ✓ auditd configured (monitoring identity, sudoers, SSH config, modules)")
+    else:
+        print("  ✓ auditd already configured; service and rules reconciled")
 
 
 def configure_pam_lockout(config: SetupConfig) -> None:
