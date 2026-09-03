@@ -7,9 +7,13 @@ import json
 import logging
 import os
 import socket
+import ssl
 import subprocess
 import sys
 import unittest
+import urllib.request
+from email.message import Message
+from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -18,7 +22,10 @@ from lib.notifications import (
     NotificationConfig,
     Notification,
     NotificationSender,
+    _RejectWebhookRedirects,
+    _open_webhook_request,
     load_notification_configs_from_state,
+    notification_target_summary,
     parse_notification_args,
     send_notification_safe,
     send_setup_notification,
@@ -45,9 +52,44 @@ class TestNotificationConfig(unittest.TestCase):
         with self.assertRaises(ValueError):
             NotificationConfig.from_string('invalid')
 
-    def test_str(self):
-        config = NotificationConfig(type='webhook', target='https://url')
-        self.assertEqual(str(config), 'webhook:https://url')
+    def test_string_and_repr_redact_sensitive_webhook_components(self):
+        token = "a" * 43
+        config = NotificationConfig(
+            type='webhook',
+            target=f'https://hooks.example.com/private/token?secret=yes#{token}',
+        )
+
+        self.assertEqual(str(config), 'webhook:https://hooks.example.com')
+        self.assertNotIn('private', repr(config))
+        self.assertNotIn('secret', repr(config))
+        self.assertNotIn(token, repr(config))
+
+    def test_target_summary_keeps_only_routing_safe_components(self):
+        self.assertEqual(
+            notification_target_summary(
+                "webhook",
+                "https://[2001:db8::20]:9443/private?token=secret",
+            ),
+            "https://[2001:db8::20]:9443",
+        )
+        self.assertEqual(
+            notification_target_summary("mailbox", "operator@example.com"),
+            "*@example.com",
+        )
+        self.assertEqual(
+            notification_target_summary(
+                "mailbox",
+                "operator@example.com\nInjected: value",
+            ),
+            "unknown mailbox",
+        )
+        self.assertEqual(
+            notification_target_summary(
+                "webhook",
+                "https://operator:secret@hooks.example.com/ingest",
+            ),
+            "unknown webhook",
+        )
 
 
 class TestNotification(unittest.TestCase):
@@ -56,6 +98,8 @@ class TestNotification(unittest.TestCase):
         d = n.to_dict()
         self.assertEqual(d['schema_version'], 2)
         self.assertEqual(d['event']['type'], 'sync')
+        self.assertRegex(d['event']['id'], r'^[a-f0-9]{32}$')
+        self.assertTrue(d['event']['occurred_at'].endswith('+00:00'))
         self.assertEqual(d['event']['state'], 'success')
         self.assertEqual(d['event']['status'], 'good')
         self.assertEqual(d['operator']['subject'], 'Test')
@@ -69,6 +113,24 @@ class TestNotification(unittest.TestCase):
         n = Notification(subject='Test', job='sync', status='good', message='ok', details=None)
         d = n.to_dict()
         self.assertEqual(d['operator']['details'], '')
+
+    def test_rejects_invalid_custom_event_identity_and_occurrence_time(self):
+        with self.assertRaisesRegex(ValueError, "event ID"):
+            Notification(
+                subject='Test',
+                job='sync',
+                status='good',
+                message='ok',
+                event_id='short',
+            )
+        with self.assertRaisesRegex(ValueError, "occurrence time"):
+            Notification(
+                subject='Test',
+                job='sync',
+                status='good',
+                message='ok',
+                occurred_at='2026-09-03T10:00:00',
+            )
 
     def test_to_dict_includes_details(self):
         n = Notification(subject='Test', job='sync', status='error', message='fail', details='traceback')
@@ -125,6 +187,17 @@ class TestNotification(unittest.TestCase):
             ['No action is required'],
         )
         self.assertNotIn('delivery_policy', payload)
+
+    def test_event_identity_is_stable_across_serialization(self):
+        notification = Notification(
+            subject='Test', job='sync', status='good', message='ok'
+        )
+
+        first = notification.to_dict()['event']
+        second = notification.to_dict()['event']
+
+        self.assertEqual(first['id'], second['id'])
+        self.assertEqual(first['occurred_at'], second['occurred_at'])
 
     def test_hostname_can_be_overridden(self):
         n = Notification(subject='Test', job='sync', status='good', message='ok', hostname='custom-host')
@@ -247,8 +320,8 @@ class TestNotificationSender(unittest.TestCase):
         self.assertIn("target='*@example.com'", output)
         self.assertNotIn('admin@example.com', output)
 
-    @patch('urllib.request.urlopen')
-    def test_webhook_success_logs_redacted_target(self, mock_urlopen):
+    @patch('lib.notifications._open_webhook_request')
+    def test_webhook_success_logs_redacted_target(self, mock_open):
         log_stream = io.StringIO()
         logger = logging.getLogger('test.notifications.sender.webhook')
         logger.handlers = []
@@ -260,7 +333,7 @@ class TestNotificationSender(unittest.TestCase):
         response = unittest.mock.MagicMock()
         response.__enter__.return_value.status = 204
         response.__exit__.return_value = False
-        mock_urlopen.return_value = response
+        mock_open.return_value = response
 
         sender = NotificationSender(
             [NotificationConfig(type='webhook', target='https://hooks.example.com/path?token=secret')],
@@ -272,24 +345,28 @@ class TestNotificationSender(unittest.TestCase):
 
         output = log_stream.getvalue()
         self.assertIn('Webhook notification sent', output)
-        self.assertIn("target='hooks.example.com'", output)
+        self.assertIn("target='https://hooks.example.com'", output)
         self.assertNotIn('token=secret', output)
         self.assertNotIn('/path', output)
 
-        request = mock_urlopen.call_args.args[0]
+        request = mock_open.call_args.args[0]
         payload = json.loads(request.data.decode('utf-8'))
         self.assertEqual(payload['schema_version'], 2)
         self.assertEqual(payload['operator']['subject'], 'Test')
         self.assertEqual(payload['operator']['what_happened'], 'ok')
         self.assertEqual(payload['operator']['suggested_actions'], [])
         self.assertEqual(payload['operator']['details'], '')
+        self.assertEqual(
+            request.get_header('X-infra-tools-event-id'),
+            payload['event']['id'],
+        )
 
-    @patch('urllib.request.urlopen')
-    def test_webhook_fragment_is_sent_as_bearer_token_not_in_url(self, mock_urlopen):
+    @patch('lib.notifications._open_webhook_request')
+    def test_webhook_fragment_is_sent_as_bearer_token_not_in_url(self, mock_open):
         response = unittest.mock.MagicMock()
         response.__enter__.return_value.status = 202
         response.__exit__.return_value = False
-        mock_urlopen.return_value = response
+        mock_open.return_value = response
         token = "a" * 43
         sender = NotificationSender(
             [
@@ -311,13 +388,132 @@ class TestNotificationSender(unittest.TestCase):
             )
         )
 
-        request = mock_urlopen.call_args.args[0]
+        request = mock_open.call_args.args[0]
         self.assertEqual(
             request.full_url,
             'https://panel.example/api/v1/notifications',
         )
         self.assertEqual(request.get_header('Authorization'), f'Bearer {token}')
         self.assertNotIn(token, request.full_url)
+
+    @patch('lib.notifications.time.sleep')
+    @patch('lib.notifications._open_webhook_request')
+    def test_webhook_retries_transient_failures_with_the_same_event_id(
+        self, mock_open, mock_sleep
+    ):
+        headers = Message()
+        headers['Retry-After'] = '2'
+        unavailable = HTTPError(
+            'https://hooks.example.com/secret',
+            503,
+            'Unavailable',
+            headers,
+            None,
+        )
+        response = unittest.mock.MagicMock()
+        response.__enter__.return_value.status = 205
+        response.__exit__.return_value = False
+        mock_open.side_effect = [unavailable, response]
+        notification = Notification(
+            subject='Test', job='sync', status='warning', message='retry me'
+        )
+        sender = NotificationSender(
+            [NotificationConfig(type='webhook', target='https://hooks.example.com/secret')]
+        )
+
+        self.assertTrue(sender.send(notification))
+
+        self.assertEqual(mock_open.call_count, 2)
+        mock_sleep.assert_called_once_with(2.0)
+        event_ids = [
+            call.args[0].get_header('X-infra-tools-event-id')
+            for call in mock_open.call_args_list
+        ]
+        self.assertEqual(event_ids, [notification.event_id, notification.event_id])
+
+    @patch('lib.notifications.time.sleep')
+    @patch('lib.notifications._open_webhook_request')
+    def test_webhook_does_not_retry_permanent_http_failure(
+        self, mock_open, mock_sleep
+    ):
+        mock_open.side_effect = HTTPError(
+            'https://hooks.example.com/secret',
+            401,
+            'Unauthorized',
+            Message(),
+            None,
+        )
+        sender = NotificationSender(
+            [NotificationConfig(type='webhook', target='https://hooks.example.com/secret')]
+        )
+
+        self.assertFalse(
+            sender.send(
+                Notification(
+                    subject='Test', job='sync', status='error', message='failed'
+                )
+            )
+        )
+
+        mock_open.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    @patch('lib.notifications.time.sleep')
+    @patch('lib.notifications._open_webhook_request')
+    def test_webhook_does_not_retry_tls_failure(self, mock_open, mock_sleep):
+        mock_open.side_effect = URLError(ssl.SSLError("TLS negotiation failed"))
+        sender = NotificationSender(
+            [NotificationConfig(type='webhook', target='https://hooks.example.com/secret')]
+        )
+
+        self.assertFalse(
+            sender.send(
+                Notification(
+                    subject='Test', job='sync', status='error', message='failed'
+                )
+            )
+        )
+
+        mock_open.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    def test_redirect_handler_refuses_to_construct_a_followup_request(self):
+        handler = _RejectWebhookRedirects()
+
+        redirected = handler.redirect_request(
+            urllib.request.Request(
+                'https://hooks.example.com/private',
+                data=b'{}',
+                headers={'Authorization': 'Bearer secret'},
+                method='POST',
+            ),
+            None,
+            302,
+            'Found',
+            Message(),
+            'https://attacker.example/collect',
+        )
+
+        self.assertIsNone(redirected)
+
+    @patch('urllib.request.build_opener')
+    def test_webhook_requests_install_the_no_redirect_handler(self, mock_build):
+        response = unittest.mock.MagicMock()
+        mock_build.return_value.open.return_value = response
+        request = urllib.request.Request(
+            'https://hooks.example.com/private',
+            data=b'{}',
+            method='POST',
+        )
+
+        self.assertIs(_open_webhook_request(request), response)
+
+        handler = mock_build.call_args.args[0]
+        self.assertIsInstance(handler, _RejectWebhookRedirects)
+        mock_build.return_value.open.assert_called_once_with(
+            request,
+            timeout=30,
+        )
 
 
 class TestParseNotificationArgs(unittest.TestCase):
@@ -344,6 +540,17 @@ class TestParseNotificationArgs(unittest.TestCase):
         ])
         self.assertEqual(len(configs), 2)
 
+    def test_duplicate_targets_are_normalized_and_sent_once(self):
+        configs = parse_notification_args(
+            [
+                ['webhook', ' https://example.com/hook '],
+                ['webhook', 'https://example.com/hook'],
+            ]
+        )
+
+        self.assertEqual(len(configs), 1)
+        self.assertEqual(configs[0].target, 'https://example.com/hook')
+
     def test_invalid_type_skipped(self):
         configs = parse_notification_args([['sms', '+1234']])
         self.assertEqual(len(configs), 0)
@@ -363,6 +570,15 @@ class TestValidateNotificationArgs(unittest.TestCase):
     def test_invalid_webhook_url_raises(self):
         with self.assertRaisesRegex(ValueError, "Invalid webhook URL"):
             validate_notification_args([['webhook', 'ftp://example.com/hook']])
+
+    def test_invalid_webhook_error_does_not_reflect_credentials(self):
+        target = "https://operator:supersecret@hooks.example.com/ingest"
+
+        with self.assertRaises(ValueError) as raised:
+            validate_notification_args([["webhook", target]])
+
+        self.assertEqual(str(raised.exception), "Invalid webhook URL")
+        self.assertNotIn("supersecret", str(raised.exception))
 
     def test_invalid_mailbox_raises(self):
         with self.assertRaisesRegex(ValueError, "Invalid mailbox address"):
@@ -384,6 +600,16 @@ class TestValidateNotificationArgs(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid webhook URL"):
             validate_notification_args(
                 [['webhook', 'https://panel.example/api/v1/notifications#short']]
+            )
+
+    def test_mailbox_target_cannot_be_interpreted_as_a_command_option(self):
+        with self.assertRaisesRegex(ValueError, "Invalid mailbox address"):
+            validate_notification_args([['mailbox', '-f@example.com']])
+
+    def test_webhook_target_rejects_control_characters(self):
+        with self.assertRaisesRegex(ValueError, "Invalid webhook URL"):
+            validate_notification_args(
+                [['webhook', 'https://example.com/hook\nInjected: value']]
             )
 
 
@@ -630,6 +856,49 @@ class TestLoadNotificationConfigsFromState(unittest.TestCase):
         output = log_stream.getvalue()
         self.assertIn('Failed to load notification configs from machine state', output)
         self.assertIn("error='bad state'", output)
+
+    @patch(
+        'lib.machine_state.load_setup_config',
+        return_value={'notify_specs': [['webhook', 'ftp://invalid.example/hook']]},
+    )
+    def test_rejects_corrupt_saved_notification_targets(self, _mock_load):
+        log_stream = io.StringIO()
+        logger = logging.getLogger('test.notifications.state.invalid-target')
+        logger.handlers = []
+        logger.propagate = False
+        logger.addHandler(logging.StreamHandler(log_stream))
+        logger.setLevel(logging.INFO)
+
+        self.assertEqual(load_notification_configs_from_state(logger=logger), [])
+        self.assertIn(
+            'Failed to load notification configs from machine state',
+            log_stream.getvalue(),
+        )
+
+    @patch(
+        'lib.machine_state.load_setup_config',
+        return_value={
+            'notify_specs': [
+                ['webhook', 'ftp://invalid.example/hook'],
+                ['mailbox', 'ops@example.com'],
+            ]
+        },
+    )
+    def test_keeps_valid_saved_targets_when_another_target_is_corrupt(
+        self, _mock_load
+    ):
+        log_stream = io.StringIO()
+        logger = logging.getLogger('test.notifications.state.partial-targets')
+        logger.handlers = []
+        logger.propagate = False
+        logger.addHandler(logging.StreamHandler(log_stream))
+        logger.setLevel(logging.INFO)
+
+        configs = load_notification_configs_from_state(logger=logger)
+
+        self.assertEqual(len(configs), 1)
+        self.assertEqual(configs[0].target, 'ops@example.com')
+        self.assertIn('Ignored 1 invalid target(s)', log_stream.getvalue())
 
 
 if __name__ == '__main__':

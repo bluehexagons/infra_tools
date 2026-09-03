@@ -25,6 +25,8 @@ operator-facing content, and producer-specific facts:
 {
   "schema_version": 2,
   "event": {
+    "id": "629ae4a98e8b4e55aec19fd969666a0e",
+    "occurred_at": "2026-09-03T10:00:00+00:00",
     "type": "security.source_health",
     "state": "resolved",
     "status": "info",
@@ -44,18 +46,29 @@ operator-facing content, and producer-specific facts:
 
 Together, the `event` and `operator` objects mirror the mailbox's subject, job,
 status context, system, event state, explanation, suggested actions, and details
-in stable fields. Empty actions and details are represented consistently, so
-consumers can render the REST notification directly without parsing prose.
-Route and deduplicate using the typed `event` fields. Security-monitor `data`
-includes the collection `window`, event counts, source-health state, SSH
-source/user/method summaries, and audit evidence.
-Successful HTTP responses are 200, 201, 202, or 204. Requests time out after
-30 seconds.
+in stable fields. Each generated notification has a random stable event ID and
+UTC occurrence time. Retries reuse the same ID, which is also sent in the
+`X-Infra-Tools-Event-ID` header, so receivers can make delivery idempotent.
+Empty actions and details are represented consistently, so consumers can render
+the REST notification directly without parsing prose. Route and deduplicate
+using the typed `event` fields. Security-monitor `data` includes the collection
+`window`, event counts, source-health state, SSH source/user/method summaries,
+and audit evidence.
+
+Any 2xx HTTP response is successful. Transient connection failures and HTTP
+408, 425, 429, 500, 502, 503, and 504 responses receive two bounded retries;
+numeric `Retry-After` values are honored up to 30 seconds. Requests time out
+after 30 seconds per attempt. Redirects are never followed, because forwarding
+an authenticated notification to a different URL could disclose credentials.
 
 Treat webhook URLs as credentials if they contain tokens or query-string
 secrets. Keep them out of shell history and shared command output, and prefer a
 dedicated endpoint with narrowly scoped access. Notification targets are setup
-configuration, not workspace passwords.
+configuration, not workspace passwords. Setup summaries show only the webhook
+scheme, host, and port (or only a mailbox domain); endpoint paths, queries,
+fragments, and mailbox local parts are redacted. Reconstructed setup commands
+still contain the configured target because they must remain executable.
+Identical repeated targets are normalized and notified only once.
 
 For the optional infra-tools web-panel ingest API, put its URL-safe bearer
 token in the webhook URL fragment:
@@ -69,8 +82,10 @@ infra-tools patch sender.example agent \
 Fragments are never sent as part of an HTTP URL. infra-tools validates this
 form as HTTPS-only, removes the fragment, and places the token in the
 `Authorization: Bearer ...` header. Other webhook URLs continue to work as
-before. See [Minimal web panel](WEB_PANEL.md#notification-ingest-api) for API
-enablement, token storage, rotation, limits, and retention.
+before. The panel retains one record for repeated delivery attempts carrying
+the same event ID and reports duplicate retries as already accepted. See
+[Minimal web panel](WEB_PANEL.md#notification-ingest-api) for API enablement,
+token storage, rotation, limits, and retention.
 
 ## What sends notifications
 
@@ -112,11 +127,16 @@ are not silently skipped. A missing optional security component remains quiet.
 
 ## Delivery failures
 
-Notification delivery is best effort. `send_notification_safe` returns whether
-all configured targets accepted the event and logs incomplete delivery; the
-underlying maintenance, sync, scrub, or deployment operation keeps its own
-success or failure result. A missing `mail` command affects mailbox delivery
-only; install and configure a local MTA before relying on mailbox alerts.
+Notification delivery is best effort. After the bounded webhook retries,
+`send_notification_safe` returns whether all configured targets accepted the
+event and logs incomplete delivery; the underlying maintenance, sync, scrub,
+or deployment operation keeps its own success or failure result. Permanent HTTP
+failures, TLS failures, and mailbox failures are not retried. A
+missing `mail` command affects mailbox delivery only; install and configure a
+local MTA before relying on mailbox alerts.
+
+Saved targets are revalidated by scheduled jobs. A corrupt target is ignored
+and logged without disabling other valid targets from the same saved setup.
 
 Targets are validated before setup or patch runs. Invalid schemes, malformed
 mailbox addresses, empty targets, and unknown types fail early:

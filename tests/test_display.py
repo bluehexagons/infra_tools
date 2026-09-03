@@ -15,6 +15,49 @@ from lib.display import (
 
 
 class TestRdpDisplay(unittest.TestCase):
+    def test_setup_summary_redacts_notification_credentials(self) -> None:
+        token = "a" * 43
+        config = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="server_dev",
+            notify_specs=[
+                [
+                    "webhook",
+                    "https://panel.example/private/path?secret=yes#" + token,
+                ],
+                ["mailbox", "operator@example.com"],
+            ],
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_setup_summary(config)
+
+        rendered = output.getvalue()
+        self.assertIn("webhook: https://panel.example", rendered)
+        self.assertIn("mailbox: *@example.com", rendered)
+        self.assertNotIn("private/path", rendered)
+        self.assertNotIn("secret=yes", rendered)
+        self.assertNotIn(token, rendered)
+
+    def test_setup_summary_counts_duplicate_notification_target_once(self) -> None:
+        config = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="server_dev",
+            notify_specs=[
+                ["webhook", "https://hooks.example.com/event"],
+                ["webhook", " https://hooks.example.com/event "],
+            ],
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_setup_summary(config)
+
+        self.assertIn("Notifications: 1 target(s)", output.getvalue())
+
     def test_setup_summary_makes_global_exposure_visible(self) -> None:
         config = SetupConfig(
             host="agent-vm",

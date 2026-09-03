@@ -526,10 +526,10 @@ class WebPanelState:
         supplied = authorization[len(prefix):]
         return bool(supplied) and secrets.compare_digest(supplied, self._ingest_token)
 
-    def accept_notification(self, value: object, source_ip: str) -> None:
+    def accept_notification(self, value: object, source_ip: str) -> bool:
         notification = validate_notification_payload(value)
         with self._lock:
-            append_notification_event(
+            return append_notification_event(
                 notification,
                 source_ip,
                 path=self._notification_log_path,
@@ -1318,10 +1318,16 @@ def _render_notification_section(state: WebPanelState) -> str:
                 )
             status = str(event.get("status", "info"))
             state_label = str(event.get("state", "unknown"))
+            occurred_at = event.get("occurred_at")
+            timing = (
+                f"reported occurrence {occurred_at} · received "
+                if isinstance(occurred_at, str)
+                else "received "
+            )
             rows.append(
                 '<li class="event"><div class="event-head"><strong>{}</strong>'
                 '<span class="badge {}">{}</span></div>'
-                '<p class="event-meta">{} · {} · reported system {} · received {} '
+                '<p class="event-meta">{} · {} · reported system {} · {}{} '
                 'from {}</p>'
                 '<p class="event-detail">{}</p>{}{}</li>'.format(
                     html.escape(str(operator.get("subject", "Notification"))),
@@ -1330,6 +1336,7 @@ def _render_notification_section(state: WebPanelState) -> str:
                     html.escape(str(operator.get("job", "unknown job"))),
                     html.escape(state_label),
                     html.escape(str(operator.get("system", "Unknown system"))),
+                    html.escape(timing),
                     html.escape(str(record.get("received_at", "Unknown time"))),
                     html.escape(str(record.get("source_ip", "unknown"))),
                     html.escape(str(operator.get("what_happened", ""))),
@@ -1590,7 +1597,7 @@ class WebPanelHandler(BaseHTTPRequestHandler):
                 source_ip = str(ipaddress.ip_address(source_ip))
             except ValueError:
                 source_ip = "unknown"
-            self.state.accept_notification(payload, source_ip)
+            stored = self.state.accept_notification(payload, source_ip)
         except (RecursionError, UnicodeDecodeError, ValueError):
             self._send_json(HTTPStatus.BAD_REQUEST, {"accepted": False})
             return
@@ -1600,7 +1607,10 @@ class WebPanelHandler(BaseHTTPRequestHandler):
                 {"accepted": False},
             )
             return
-        self._send_json(HTTPStatus.ACCEPTED, {"accepted": True})
+        self._send_json(
+            HTTPStatus.ACCEPTED if stored else HTTPStatus.OK,
+            {"accepted": True, "duplicate": not stored},
+        )
 
     def log_message(self, format_string: str, *args: object) -> None:
         return

@@ -79,6 +79,10 @@ ingest and removes the public Nginx route, then deletes the bearer token. This
 ordering keeps an interrupted setup from breaking an endpoint that is still
 running with its previous configuration.
 
+A newly stored event returns HTTP 202 with `duplicate: false`. A repeated event
+ID returns HTTP 200 with `duplicate: true`; this acknowledges a delivery retry
+without adding another history entry.
+
 Remove the web panel, its htpasswd and ingest-token data, and its bounded event
 history with:
 
@@ -132,9 +136,12 @@ The configured machine determines the contents:
   cannot leave an old clean result on the dashboard indefinitely;
 - when notification ingest is enabled, the latest 100 accepted notifications
   appear with their source system, status, explanation, suggested action, and
-  receipt address/time. Input must be a bounded schema-version-2 notification;
-  unknown fields are discarded and malformed or deeply nested input is
-  rejected. A sender-provided system name is descriptive rather than a
+  reported occurrence time plus server-recorded receipt address/time. Input
+  must be a bounded schema-version-2 notification; unknown fields are
+  discarded and malformed or deeply nested input is rejected. New senders
+  include a stable event ID, and
+  repeated attempts with that ID are acknowledged without adding duplicate
+  history entries. A sender-provided system name is descriptive rather than a
   cryptographic identity, so investigations should correlate it with the
   server-recorded source address;
 - when the shared gateway uses the machine-local CA, a certificate-trust section

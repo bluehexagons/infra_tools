@@ -8,10 +8,14 @@ from __future__ import annotations
 import json
 import re
 import socket
+import ssl
 import subprocess
-from typing import Optional, Literal, cast
+import time
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from logging import ERROR, INFO, Logger, WARNING
+from typing import Any, Literal, Optional, cast
+from uuid import uuid4
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -27,6 +31,10 @@ NETWORK_TIMEOUT_SECONDS = 30
 NOTIFICATION_SCHEMA_VERSION = 2
 _MAILBOX_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _BEARER_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
+_EVENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+_WEBHOOK_RETRY_DELAYS_SECONDS = (1.0, 3.0)
+_WEBHOOK_RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+_MAX_RETRY_AFTER_SECONDS = 30
 
 
 @dataclass
@@ -34,23 +42,30 @@ class NotificationConfig:
     """Configuration for a notification target."""
     
     type: Literal["webhook", "mailbox"]
-    target: str
+    target: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if isinstance(self.target, str):
+            self.target = self.target.strip()
     
     def __str__(self) -> str:
-        return f"{self.type}:{self.target}"
+        return f"{self.type}:{notification_target_summary(self.type, self.target)}"
     
     @classmethod
     def from_string(cls, config_str: str) -> NotificationConfig:
         """Parse notification config from string format."""
         parts = config_str.split(":", 1)
         if len(parts) != 2:
-            raise ValueError(f"Invalid notification config format: {config_str}")
+            raise ValueError("Invalid notification config format")
         
         notif_type, target = parts
         if notif_type not in ["webhook", "mailbox"]:
             raise ValueError(f"Invalid notification type: {notif_type}")
 
-        config = cls(type=cast(Literal["webhook", "mailbox"], notif_type), target=target)
+        config = cls(
+            type=cast(Literal["webhook", "mailbox"], notif_type),
+            target=target.strip(),
+        )
         validate_notification_config(config)
         return config
 
@@ -71,6 +86,12 @@ class Notification:
     dedup_key: Optional[str] = None
     actions: Optional[list[str]] = None
     delivery_policy: NotificationDeliveryPolicy = "always"
+    event_id: str = field(default_factory=lambda: uuid4().hex)
+    occurred_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(
+            timespec="seconds"
+        )
+    )
 
     def __post_init__(self) -> None:
         """Fill the common event fields used by every notification target."""
@@ -78,12 +99,26 @@ class Notification:
             self.event_type = self.job
         if self.state is None:
             self.state = "success" if self.status in ("good", "info") else "firing"
+        if not isinstance(self.event_id, str) or not _EVENT_ID_PATTERN.fullmatch(
+            self.event_id
+        ):
+            raise ValueError("Notification event ID is invalid")
+        if not isinstance(self.occurred_at, str) or len(self.occurred_at) > 64:
+            raise ValueError("Notification occurrence time is invalid")
+        try:
+            occurred_time = datetime.fromisoformat(self.occurred_at)
+        except ValueError as exc:
+            raise ValueError("Notification occurrence time is invalid") from exc
+        if occurred_time.tzinfo is None or occurred_time.utcoffset() is None:
+            raise ValueError("Notification occurrence time is invalid")
 
     def to_dict(self) -> JSONDict:
         """Return a descriptive REST payload with separate event and operator data."""
         return {
             "schema_version": NOTIFICATION_SCHEMA_VERSION,
             "event": {
+                "id": self.event_id,
+                "occurred_at": self.occurred_at,
                 "type": self.event_type,
                 "state": self.state,
                 "status": self.status,
@@ -139,6 +174,7 @@ class NotificationSender:
         all_succeeded = True
         for config in self.configs:
             try:
+                validate_notification_config(config)
                 if config.type == "webhook":
                     self._send_webhook(config.target, notification)
                 elif config.type == "mailbox":
@@ -164,23 +200,31 @@ class NotificationSender:
         data = json.dumps(notification.to_dict()).encode('utf-8')
         headers = {
             'Content-Type': 'application/json',
-            'User-Agent': 'infra_tools-notification/1.0'
+            'User-Agent': 'infra_tools-notification/1.0',
+            'X-Infra-Tools-Event-ID': notification.event_id,
         }
         if bearer_token is not None:
             headers['Authorization'] = f'Bearer {bearer_token}'
-        
-        request = urllib.request.Request(
-            request_url,
-            data=data,
-            headers=headers,
-            method='POST',
-        )
-        
-        try:
-            with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
-                if response.status not in (200, 201, 202, 204):
-                    raise Exception(f"Webhook returned status {response.status}")
-                
+
+        attempts = len(_WEBHOOK_RETRY_DELAYS_SECONDS) + 1
+        for attempt in range(attempts):
+            request = urllib.request.Request(
+                request_url,
+                data=data,
+                headers=headers,
+                method='POST',
+            )
+            try:
+                with _open_webhook_request(request) as response:
+                    status = int(response.status)
+                    if not 200 <= status < 300:
+                        raise urllib.error.HTTPError(
+                            request_url,
+                            status,
+                            f"HTTP {status}",
+                            getattr(response, "headers", None),
+                            response,
+                        )
                 if self.logger:
                     log_event(
                         self.logger,
@@ -191,9 +235,47 @@ class NotificationSender:
                         target=_redact_notification_target(
                             NotificationConfig(type="webhook", target=url)
                         ),
+                        attempts=attempt + 1,
                     )
-        except urllib.error.URLError as e:
-            raise Exception(f"Webhook request failed: {e}")
+                return
+            except urllib.error.HTTPError as exc:
+                exc.close()
+                if (
+                    exc.code not in _WEBHOOK_RETRYABLE_STATUS_CODES
+                    or attempt == attempts - 1
+                ):
+                    raise RuntimeError(
+                        f"Webhook returned HTTP {exc.code}"
+                    ) from exc
+                failure = f"HTTP {exc.code}"
+                delay = _webhook_retry_delay(exc, attempt)
+            except (urllib.error.URLError, TimeoutError) as exc:
+                reason = getattr(exc, "reason", exc)
+                if (
+                    isinstance(reason, ssl.SSLError)
+                    or attempt == attempts - 1
+                ):
+                    raise RuntimeError(
+                        "Webhook connection failed: "
+                        + _webhook_connection_error(reason)
+                    ) from exc
+                failure = _webhook_connection_error(reason)
+                delay = _WEBHOOK_RETRY_DELAYS_SECONDS[attempt]
+
+            if self.logger:
+                log_event(
+                    self.logger,
+                    "Webhook notification retry scheduled",
+                    level=WARNING,
+                    job=notification.job,
+                    target=_redact_notification_target(
+                        NotificationConfig(type="webhook", target=url)
+                    ),
+                    failed_attempt=attempt + 1,
+                    reason=failure,
+                    delay_seconds=delay,
+                )
+            time.sleep(delay)
     
     def _send_mailbox(self, email: str, notification: Notification) -> None:
         """Send email notification."""
@@ -204,6 +286,8 @@ class NotificationSender:
             f"System: {notification.hostname}",
             f"Event: {notification.event_type}",
             f"State: {notification.state}",
+            f"Event ID: {notification.event_id}",
+            f"Occurred: {notification.occurred_at}",
             "",
             "What happened:",
             notification.message,
@@ -351,16 +435,28 @@ def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[Noti
     if not notify_args:
         return []
     
-    configs = []
+    configs: list[NotificationConfig] = []
+    seen: set[tuple[str, str]] = set()
     for notify_arg in notify_args:
-        if len(notify_arg) != 2:
+        if not isinstance(notify_arg, (list, tuple)) or len(notify_arg) != 2:
             continue
         
         notif_type, target = notify_arg
-        if notif_type not in ["webhook", "mailbox"]:
+        if notif_type not in ["webhook", "mailbox"] or not isinstance(target, str):
             continue
-        
-        configs.append(NotificationConfig(type=cast(Literal["webhook", "mailbox"], notif_type), target=target))
+        config = NotificationConfig(
+            type=cast(Literal["webhook", "mailbox"], notif_type),
+            target=target.strip(),
+        )
+        try:
+            validate_notification_config(config)
+        except ValueError:
+            continue
+        identity = (config.type, config.target)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        configs.append(config)
     
     return configs
 
@@ -368,6 +464,12 @@ def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[Noti
 def validate_notification_config(config: NotificationConfig) -> None:
     """Validate a parsed notification target."""
 
+    if (
+        not isinstance(config.type, str)
+        or config.type not in {"webhook", "mailbox"}
+        or not isinstance(config.target, str)
+    ):
+        raise ValueError("Invalid notification configuration")
     target = config.target.strip()
     if not target:
         raise ValueError(f"Notification target for {config.type} must not be empty")
@@ -376,12 +478,12 @@ def validate_notification_config(config: NotificationConfig) -> None:
         try:
             _webhook_request_target(target)
         except ValueError:
-            raise ValueError(f"Invalid webhook URL: {target}")
+            raise ValueError("Invalid webhook URL")
         return
 
     if config.type == "mailbox":
-        if not _MAILBOX_PATTERN.match(target):
-            raise ValueError(f"Invalid mailbox address: {target}")
+        if target.startswith("-") or not _MAILBOX_PATTERN.fullmatch(target):
+            raise ValueError("Invalid mailbox address")
         return
 
     raise ValueError(f"Invalid notification type: {config.type}")
@@ -390,7 +492,11 @@ def validate_notification_config(config: NotificationConfig) -> None:
 def _webhook_request_target(target: str) -> tuple[str, str | None]:
     """Return the request URL and optional fragment-carried bearer token."""
 
-    if len(target) > 4096:
+    if (
+        not isinstance(target, str)
+        or len(target) > 4096
+        or any(ord(character) <= 32 or ord(character) == 127 for character in target)
+    ):
         raise ValueError("Webhook URL is too long")
     try:
         parsed = urllib.parse.urlsplit(target)
@@ -419,15 +525,22 @@ def validate_notification_args(notify_args: Optional[list[list[str]]]) -> None:
 
     if not notify_args:
         return
+    if not isinstance(notify_args, list):
+        raise ValueError("--notify configuration must be a list")
 
     for notify_arg in notify_args:
-        if len(notify_arg) != 2:
+        if not isinstance(notify_arg, (list, tuple)) or len(notify_arg) != 2:
             raise ValueError(
                 "--notify requires TYPE and TARGET"
             )
         notif_type, target = notify_arg
-        if notif_type not in ["webhook", "mailbox"]:
+        if (
+            not isinstance(notif_type, str)
+            or notif_type not in ["webhook", "mailbox"]
+        ):
             raise ValueError(f"Invalid notification type: {notif_type}")
+        if not isinstance(target, str):
+            raise ValueError(f"Notification target for {notif_type} must be text")
         validate_notification_config(
             NotificationConfig(type=cast(Literal["webhook", "mailbox"], notif_type), target=target)
         )
@@ -455,7 +568,30 @@ def load_notification_configs_from_state(logger: Optional[Logger] = None) -> lis
         from lib.machine_state import load_setup_config
         setup_config = load_setup_config()
         if setup_config and 'notify_specs' in setup_config:
-            return parse_notification_args(setup_config['notify_specs'])
+            notify_specs = setup_config['notify_specs']
+            if not isinstance(notify_specs, list):
+                raise ValueError("Saved notification targets must be a list")
+            configs: list[NotificationConfig] = []
+            seen: set[tuple[str, str]] = set()
+            invalid_count = 0
+            for notify_spec in notify_specs:
+                parsed = parse_notification_args([notify_spec])
+                if not parsed:
+                    invalid_count += 1
+                    continue
+                config = parsed[0]
+                identity = (config.type, config.target)
+                if identity not in seen:
+                    seen.add(identity)
+                    configs.append(config)
+            if invalid_count and logger:
+                log_event(
+                    logger,
+                    "Failed to load notification configs from machine state",
+                    level=WARNING,
+                    error=f"Ignored {invalid_count} invalid target(s)",
+                )
+            return configs
     except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
         if logger:
             log_event(
@@ -543,12 +679,71 @@ def _should_deliver(notification: Notification) -> bool:
 def _redact_notification_target(config: NotificationConfig) -> str:
     """Return a log-safe summary of a notification target."""
 
-    if config.type == "webhook":
-        parsed = urllib.parse.urlparse(config.target)
-        return parsed.hostname or "unknown-host"
+    return notification_target_summary(config.type, config.target)
 
-    if config.type == "mailbox" and "@" in config.target:
-        _local_part, domain = config.target.rsplit("@", 1)
+
+def notification_target_summary(notification_type: str, target: str) -> str:
+    """Return a display-safe target without endpoint paths or credentials."""
+
+    if notification_type == "webhook":
+        try:
+            request_url, _bearer_token = _webhook_request_target(target)
+            parsed = urllib.parse.urlsplit(request_url)
+            port = parsed.port
+        except (TypeError, ValueError):
+            return "unknown webhook"
+        if not parsed.hostname:
+            return "unknown webhook"
+        host = (
+            f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+        )
+        port_suffix = f":{port}" if port is not None else ""
+        scheme = parsed.scheme if parsed.scheme in {"http", "https"} else "webhook"
+        return f"{scheme}://{host}{port_suffix}"
+
+    if (
+        notification_type == "mailbox"
+        and isinstance(target, str)
+        and not target.startswith("-")
+        and _MAILBOX_PATTERN.fullmatch(target)
+    ):
+        _local_part, domain = target.rsplit("@", 1)
         return f"*@{domain}"
 
-    return config.type
+    if notification_type == "mailbox":
+        return "unknown mailbox"
+    return "unknown notification target"
+
+
+class _RejectWebhookRedirects(urllib.request.HTTPRedirectHandler):
+    """Prevent POST redirects from forwarding notification credentials."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        del req, fp, code, msg, headers, newurl
+        return None
+
+
+def _open_webhook_request(request: urllib.request.Request) -> Any:
+    opener = urllib.request.build_opener(_RejectWebhookRedirects())
+    return opener.open(request, timeout=NETWORK_TIMEOUT_SECONDS)
+
+
+def _webhook_retry_delay(exc: urllib.error.HTTPError, attempt: int) -> float:
+    retry_after = exc.headers.get("Retry-After") if exc.headers else None
+    if isinstance(retry_after, str) and retry_after.isdigit():
+        return float(min(int(retry_after), _MAX_RETRY_AFTER_SECONDS))
+    return _WEBHOOK_RETRY_DELAYS_SECONDS[attempt]
+
+
+def _webhook_connection_error(reason: object) -> str:
+    if isinstance(reason, OSError) and reason.strerror:
+        return f"{type(reason).__name__}: {reason.strerror}"
+    return type(reason).__name__

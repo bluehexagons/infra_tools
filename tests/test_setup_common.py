@@ -854,7 +854,7 @@ class TestSetupMainValidation(unittest.TestCase):
 
         self.assertEqual(result, 1)
         mock_run_remote.assert_not_called()
-        mock_print.assert_called_with("Error: Invalid webhook URL: not-a-url")
+        mock_print.assert_called_with("Error: Invalid webhook URL")
 
     @patch("builtins.print")
     def test_invalid_deploy_targets_return_error_before_remote_setup(self, mock_print):

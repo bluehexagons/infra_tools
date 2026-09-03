@@ -313,7 +313,7 @@ class TestWorkspaceCli(unittest.TestCase):
 
         self.assertEqual(result, 1)
         mock_run_remote.assert_not_called()
-        mock_print.assert_called_with("Error: Invalid webhook URL: not-a-url")
+        mock_print.assert_called_with("Error: Invalid webhook URL")
 
     @patch("builtins.print")
     @patch("infra_tools.validate_samba_share_credentials")
@@ -603,7 +603,7 @@ class TestWorkspaceCli(unittest.TestCase):
 
         self.assertEqual(result, 1)
         mock_run_remote.assert_not_called()
-        mock_print.assert_called_with("Error: Invalid mailbox address: bad-email")
+        mock_print.assert_called_with("Error: Invalid mailbox address")
 
     @patch("builtins.print")
     @patch("infra_tools.validate_samba_share_credentials")

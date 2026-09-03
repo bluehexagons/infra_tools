@@ -30,6 +30,9 @@ _MAX_DATA_DEPTH = 6
 _MAX_DATA_ITEMS = 100
 _MAX_AUDIT_SNAPSHOT_AGE = timedelta(minutes=15)
 _MAX_AUDIT_CLOCK_SKEW = timedelta(minutes=5)
+_EVENT_ID_CHARACTERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+)
 
 
 def _bounded_string(
@@ -118,6 +121,26 @@ def validate_notification_payload(value: object) -> JSONDict:
             "event.deduplication_key",
             maximum=256,
         )
+    event_id = event.get("id")
+    if event_id is not None:
+        event_id = _bounded_string(event_id, "event.id", maximum=64)
+        if len(event_id) < 16 or any(
+            character not in _EVENT_ID_CHARACTERS for character in event_id
+        ):
+            raise ValueError("event.id is invalid")
+    occurred_at = event.get("occurred_at")
+    if occurred_at is not None:
+        occurred_at = _bounded_string(
+            occurred_at,
+            "event.occurred_at",
+            maximum=64,
+        )
+        try:
+            occurred_time = datetime.fromisoformat(occurred_at)
+        except ValueError as exc:
+            raise ValueError("event.occurred_at is invalid") from exc
+        if occurred_time.tzinfo is None or occurred_time.utcoffset() is None:
+            raise ValueError("event.occurred_at is invalid")
 
     actions = operator.get("suggested_actions", [])
     if not isinstance(actions, list) or len(actions) > 10:
@@ -126,14 +149,19 @@ def validate_notification_payload(value: object) -> JSONDict:
         _bounded_string(action, "suggested action", maximum=500)
         for action in actions
     ]
+    safe_event: JSONDict = {
+        "type": event_type,
+        "state": state,
+        "status": status,
+        "deduplication_key": deduplication_key,
+    }
+    if event_id is not None:
+        safe_event["id"] = event_id
+    if occurred_at is not None:
+        safe_event["occurred_at"] = occurred_at
     canonical: JSONDict = {
         "schema_version": 2,
-        "event": {
-            "type": event_type,
-            "state": state,
-            "status": status,
-            "deduplication_key": deduplication_key,
-        },
+        "event": safe_event,
         "operator": {
             "subject": _bounded_string(
                 operator.get("subject"), "operator.subject", maximum=200
@@ -333,8 +361,8 @@ def append_notification_event(
     source_ip: str,
     *,
     path: str = WEB_PANEL_NOTIFICATION_LOG,
-) -> None:
-    """Append one notification while retaining only the latest bounded history."""
+) -> bool:
+    """Append one new notification, returning false for a duplicate event ID."""
 
     notification = validate_notification_payload(notification)
     source_ip = _bounded_string(
@@ -354,6 +382,21 @@ def append_notification_event(
         "notification": notification,
     }
     events = load_notification_events(path)
+    event = notification.get("event")
+    event_id = event.get("id") if isinstance(event, dict) else None
+    if isinstance(event_id, str):
+        for existing in events:
+            existing_notification = existing.get("notification")
+            existing_event = (
+                existing_notification.get("event")
+                if isinstance(existing_notification, dict)
+                else None
+            )
+            if (
+                isinstance(existing_event, dict)
+                and existing_event.get("id") == event_id
+            ):
+                return False
     events.append(record)
     events = events[-_MAX_NOTIFICATION_EVENTS:]
     content = "".join(
@@ -361,3 +404,4 @@ def append_notification_event(
         for event in events
     )
     write_text_atomic(path, content, mode=0o600)
+    return True
