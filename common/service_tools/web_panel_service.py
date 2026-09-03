@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import ipaddress
 import json
 import os
 import secrets
@@ -28,10 +29,22 @@ if SOURCE_ROOT not in sys.path:
     sys.path.insert(0, SOURCE_ROOT)
 
 from common.t3code_steps import _temporary_t3_loginctl_shim
+from common.web_panel_events import (
+    WEB_PANEL_AUDIT_SNAPSHOT,
+    WEB_PANEL_INGEST_TOKEN,
+    WEB_PANEL_NOTIFICATION_ENDPOINT,
+    WEB_PANEL_NOTIFICATION_LOG,
+    append_notification_event,
+    load_audit_snapshot,
+    load_ingest_token,
+    load_notification_events,
+    validate_notification_payload,
+)
 
 
 _MAX_CONFIG_BYTES = 256 * 1024
 _MAX_REQUEST_BYTES = 16 * 1024
+_MAX_INGEST_REQUEST_BYTES = 64 * 1024
 _MAX_OUTPUT_BYTES = 24 * 1024
 _SYSTEM_OVERVIEW_CACHE_SECONDS = 30
 _INTERNAL_WEB_URL_FILE = "/etc/infra-tools/internal-web/base-url"
@@ -93,6 +106,10 @@ def _subprocess_text(value: str | bytes | None) -> str:
     return value or ""
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Invalid JSON number: {value}")
+
+
 def _load_manifest(path: str) -> dict[str, Any]:
     if os.path.islink(path) or not os.path.isfile(path):
         raise RuntimeError(f"Web panel manifest must be a regular file: {path}")
@@ -110,7 +127,11 @@ def _load_manifest(path: str) -> dict[str, Any]:
             raise RuntimeError(f"Web panel manifest has no valid {name}")
     if not isinstance(value.get("features"), dict):
         raise RuntimeError("Web panel manifest has no valid features")
-    for name in ("t3_github_readiness", "t3_git_identity_readiness"):
+    for name in (
+        "t3_github_readiness",
+        "t3_git_identity_readiness",
+        "notification_ingest",
+    ):
         if not isinstance(value["features"].get(name, False), bool):
             raise RuntimeError("Web panel manifest has invalid T3 readiness settings")
     return value
@@ -465,15 +486,54 @@ def _evaluate_t3_readiness(
 class WebPanelState:
     """In-memory state for bounded maintenance actions."""
 
-    def __init__(self, manifest: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        manifest: dict[str, Any],
+        *,
+        audit_snapshot_path: str = WEB_PANEL_AUDIT_SNAPSHOT,
+        notification_log_path: str = WEB_PANEL_NOTIFICATION_LOG,
+        ingest_token_path: str = WEB_PANEL_INGEST_TOKEN,
+    ) -> None:
         self.manifest = manifest
         self.csrf_token = secrets.token_urlsafe(32)
         self._lock = threading.Lock()
+        self._audit_snapshot_path = audit_snapshot_path
+        self._notification_log_path = notification_log_path
+        self._ingest_token = (
+            load_ingest_token(ingest_token_path)
+            if self.notification_ingest_enabled()
+            else None
+        )
         self.action_status = "idle"
         self.action_message = ""
         self.action_output = ""
         self._overview: list[dict[str, str]] = []
         self._overview_at = 0.0
+
+    def notification_ingest_enabled(self) -> bool:
+        return self.manifest["features"].get("notification_ingest") is True
+
+    def audit_snapshot(self) -> dict[str, Any]:
+        return load_audit_snapshot(self._audit_snapshot_path)
+
+    def notification_events(self) -> list[dict[str, Any]]:
+        return list(reversed(load_notification_events(self._notification_log_path)))
+
+    def authorized_for_ingest(self, authorization: str) -> bool:
+        prefix = "Bearer "
+        if self._ingest_token is None or not authorization.startswith(prefix):
+            return False
+        supplied = authorization[len(prefix):]
+        return bool(supplied) and secrets.compare_digest(supplied, self._ingest_token)
+
+    def accept_notification(self, value: object, source_ip: str) -> None:
+        notification = validate_notification_payload(value)
+        with self._lock:
+            append_notification_event(
+                notification,
+                source_ip,
+                path=self._notification_log_path,
+            )
 
     def system_overview(self) -> list[dict[str, str]]:
         """Return a briefly cached host report to keep refreshes inexpensive."""
@@ -851,6 +911,41 @@ h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.015em; }
 }
 .access-list li:last-child { border: 0; }
 .access-list span { grid-column: 2; color: var(--muted); font-size: .88rem; }
+.event-list {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.event {
+  padding: 15px 17px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.event-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.event-meta { margin: 3px 0 0; color: var(--muted); font-size: .82rem; }
+.event-detail { margin: 8px 0 0; }
+.event-values { margin: 8px 0 0; color: var(--muted); font-size: .85rem; }
+.badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: .72rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+.badge.warning, .badge.error { color: var(--bad); }
+.endpoint { margin: 0 0 12px; color: var(--muted); }
 code { overflow-wrap: anywhere; }
 .empty {
   margin: 0;
@@ -1112,6 +1207,112 @@ Write-Host "Certificate downloaded, verified, and installed. Fully restart your 
 </div></details></section>'''
 
 
+def _render_audit_section(state: WebPanelState) -> str:
+    snapshot = state.audit_snapshot()
+    events = snapshot.get("events", [])
+    status = str(snapshot.get("status", "unavailable"))
+    generated_at = str(snapshot.get("generated_at", ""))
+    if events:
+        rows = []
+        for event in events:
+            values: list[str] = []
+            for label, name in (
+                ("Path", "paths"),
+                ("Operation", "operations"),
+                ("Actor", "actors"),
+                ("Executable", "executables"),
+            ):
+                entries = event.get(name)
+                if isinstance(entries, list) and entries:
+                    values.append(f"{label}: {', '.join(str(item) for item in entries)}")
+            value_html = (
+                f'<p class="event-values">{html.escape(" · ".join(values))}</p>'
+                if values
+                else ""
+            )
+            severity = str(event.get("severity", "info"))
+            rows.append(
+                '<li class="event"><div class="event-head"><strong>{}</strong>'
+                '<span class="badge {}">{}</span></div>'
+                '<p class="event-meta">{} · audit key <code>{}</code></p>{}</li>'.format(
+                    html.escape(str(event.get("meaning", "Audit event"))),
+                    html.escape(severity, quote=True),
+                    html.escape(severity),
+                    html.escape(str(event.get("timestamp", "Unknown time"))),
+                    html.escape(str(event.get("key", "unknown"))),
+                    value_html,
+                )
+            )
+        content = f'<ol class="event-list">{"".join(rows)}</ol>'
+    elif status == "unavailable":
+        content = (
+            '<p class="empty">Audit data is unavailable. auditd may not be installed '
+            'or the first snapshot may still be pending.</p>'
+        )
+    else:
+        content = '<p class="empty">No matching audit events were recorded in the last 24 hours.</p>'
+    status_label = "Collection partially unavailable" if status == "degraded" else (
+        f"Snapshot {generated_at}" if generated_at else "Latest 24 hours"
+    )
+    count = len(events) if isinstance(events, list) else 0
+    return f'''<section aria-labelledby="audit-heading"><div class="section-heading"><div>
+<p class="section-kicker">Security activity</p><h2 id="audit-heading">System audit log</h2></div>
+<span class="count">{count} event{"" if count == 1 else "s"} · {html.escape(status_label)}</span>
+</div>{content}</section>'''
+
+
+def _render_notification_section(state: WebPanelState) -> str:
+    if not state.notification_ingest_enabled():
+        return ""
+    events = state.notification_events()
+    if not events:
+        content = '<p class="empty">No remote notifications have been received.</p>'
+    else:
+        rows = []
+        for record in events:
+            notification = record["notification"]
+            event = notification["event"]
+            operator = notification["operator"]
+            details = str(operator.get("details", ""))
+            detail_html = (
+                '<details><summary>Details</summary><pre>{}</pre></details>'.format(
+                    html.escape(details)
+                )
+                if details
+                else ""
+            )
+            actions = operator.get("suggested_actions", [])
+            action_html = ""
+            if isinstance(actions, list) and actions:
+                action_html = '<p class="event-values">Suggested: {}</p>'.format(
+                    html.escape(" · ".join(str(action) for action in actions))
+                )
+            status = str(event.get("status", "info"))
+            rows.append(
+                '<li class="event"><div class="event-head"><strong>{}</strong>'
+                '<span class="badge {}">{}</span></div>'
+                '<p class="event-meta">{} · {} · received from {}</p>'
+                '<p class="event-detail">{}</p>{}{}</li>'.format(
+                    html.escape(str(operator.get("subject", "Notification"))),
+                    html.escape(status, quote=True),
+                    html.escape(status),
+                    html.escape(str(operator.get("system", "Unknown system"))),
+                    html.escape(str(record.get("received_at", "Unknown time"))),
+                    html.escape(str(record.get("source_ip", "unknown"))),
+                    html.escape(str(operator.get("what_happened", ""))),
+                    action_html,
+                    detail_html,
+                )
+            )
+        content = f'<ol class="event-list">{"".join(rows)}</ol>'
+    count = len(events)
+    return f'''<section aria-labelledby="notifications-heading"><div class="section-heading"><div>
+<p class="section-kicker">From managed machines</p><h2 id="notifications-heading">Notifications</h2></div>
+<span class="count">{count} received</span></div>
+<p class="endpoint">Ingest endpoint: <code>{WEB_PANEL_NOTIFICATION_ENDPOINT}</code></p>
+{content}</section>'''
+
+
 def render_page(state: WebPanelState) -> str:
     """Render a small no-JavaScript dashboard from current capability state."""
 
@@ -1160,6 +1361,8 @@ def render_page(state: WebPanelState) -> str:
     )
 
     trust_section = _render_certificate_trust(discover_certificate_trust())
+    audit_section = _render_audit_section(state)
+    notification_section = _render_notification_section(state)
 
     action = ""
     if state.t3_update_available():
@@ -1212,7 +1415,7 @@ def render_page(state: WebPanelState) -> str:
 <title>Web panel · {title}</title>
 <style>{_PAGE_STYLE}</style></head><body><main>
 <header><p class="eyebrow">infra-tools web panel</p><h1>{title}</h1>
-<p class="lede">Services, connection details, and available maintenance for <code>{host}</code>.</p>
+<p class="lede">Services, system health, security activity, and available maintenance for <code>{host}</code>.</p>
 <dl class="meta"><div><dt>System</dt><dd>{system_type}</dd></div>
 <div><dt>User</dt><dd>{username}</dd></div></dl></header>
 {status}<section aria-labelledby="services-heading"><div class="section-heading"><div>
@@ -1221,7 +1424,7 @@ def render_page(state: WebPanelState) -> str:
 <section aria-labelledby="overview-heading"><div class="section-heading"><div>
 <p class="section-kicker">Live snapshot</p><h2 id="overview-heading">System overview</h2></div>
 <span class="count">Refreshed periodically</span></div>
-<dl class="overview-grid">{overview_cards}</dl></section>
+<dl class="overview-grid">{overview_cards}</dl></section>{audit_section}{notification_section}
 <section aria-labelledby="access-heading"><div class="section-heading"><div>
 <p class="section-kicker">Connect directly</p><h2 id="access-heading">Access</h2></div>
 <span class="count">{access_label}</span></div>{access_content}</section>{trust_section}{action}
@@ -1234,7 +1437,14 @@ class WebPanelHandler(BaseHTTPRequestHandler):
     sys_version = ""
     state: WebPanelState
 
-    def _send(self, status: HTTPStatus, body: str, content_type: str) -> None:
+    def _send(
+        self,
+        status: HTTPStatus,
+        body: str,
+        content_type: str,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         payload = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", f"{content_type}; charset=utf-8")
@@ -1244,8 +1454,17 @@ class WebPanelHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(payload)
+
+    def _send_json(self, status: HTTPStatus, value: dict[str, object]) -> None:
+        self._send(
+            status,
+            json.dumps(value, separators=(",", ":")) + "\n",
+            "application/json",
+        )
 
     def do_GET(self) -> None:
         path = urllib.parse.urlsplit(self.path).path
@@ -1258,7 +1477,11 @@ class WebPanelHandler(BaseHTTPRequestHandler):
         self._send(HTTPStatus.OK, render_page(self.state), "text/html")
 
     def do_POST(self) -> None:
-        if urllib.parse.urlsplit(self.path).path != "/actions/t3-update":
+        path = urllib.parse.urlsplit(self.path).path
+        if path == WEB_PANEL_NOTIFICATION_ENDPOINT:
+            self._handle_notification_ingest()
+            return
+        if path != "/actions/t3-update":
             self._send(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
             return
         try:
@@ -1287,6 +1510,64 @@ class WebPanelHandler(BaseHTTPRequestHandler):
         self.send_header("Location", "/")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
+
+    def _handle_notification_ingest(self) -> None:
+        if not self.state.notification_ingest_enabled():
+            self._send(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
+            return
+        if self.headers.get("X-Forwarded-Proto", "").lower() != "https":
+            self._send(HTTPStatus.FORBIDDEN, "Secure transport required\n", "text/plain")
+            return
+        if not self.state.authorized_for_ingest(
+            self.headers.get("Authorization", "")
+        ):
+            self._send(
+                HTTPStatus.UNAUTHORIZED,
+                "Unauthorized\n",
+                "text/plain",
+                headers={"WWW-Authenticate": 'Bearer realm="infra-tools"'},
+            )
+            return
+        content_type = self.headers.get("Content-Type", "").partition(";")[0].strip()
+        if content_type.lower() != "application/json":
+            self._send(
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                "Expected application/json\n",
+                "text/plain",
+            )
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = -1
+        if not 0 < length <= _MAX_INGEST_REQUEST_BYTES:
+            self._send(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                "Invalid request\n",
+                "text/plain",
+            )
+            return
+        try:
+            payload = json.loads(
+                self.rfile.read(length).decode("utf-8", errors="strict"),
+                parse_constant=_reject_json_constant,
+            )
+            source_ip = self.headers.get("X-Real-IP", "")
+            try:
+                source_ip = str(ipaddress.ip_address(source_ip))
+            except ValueError:
+                source_ip = "unknown"
+            self.state.accept_notification(payload, source_ip)
+        except (RecursionError, UnicodeDecodeError, ValueError):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"accepted": False})
+            return
+        except (OSError, RuntimeError):
+            self._send_json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"accepted": False},
+            )
+            return
+        self._send_json(HTTPStatus.ACCEPTED, {"accepted": True})
 
     def log_message(self, format_string: str, *args: object) -> None:
         return

@@ -57,6 +57,21 @@ secrets. Keep them out of shell history and shared command output, and prefer a
 dedicated endpoint with narrowly scoped access. Notification targets are setup
 configuration, not workspace passwords.
 
+For the optional infra-tools web-panel ingest API, put its URL-safe bearer
+token in the webhook URL fragment:
+
+```bash
+infra-tools patch sender.example agent \
+  --notify webhook \
+  'https://panel.example/api/v1/notifications#TOKEN_FROM_PANEL_HOST'
+```
+
+Fragments are never sent as part of an HTTP URL. infra-tools validates this
+form as HTTPS-only, removes the fragment, and places the token in the
+`Authorization: Bearer ...` header. Other webhook URLs continue to work as
+before. See [Minimal web panel](WEB_PANEL.md#notification-ingest-api) for API
+enablement, token storage, rotation, limits, and retention.
+
 ## What sends notifications
 
 Configured targets are reused by:

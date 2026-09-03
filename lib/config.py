@@ -415,6 +415,7 @@ class SetupConfig:
     web_panel_port: Optional[int] = None
     web_panel_auth_password: MaybeStr = None
     web_panel_payload: bool = False
+    web_panel_notification_ingest: Optional[bool] = None
     disable_web_panel: bool = False
     browser_automation: MaybeStr = None
     disable_browser_automation: bool = False
@@ -674,6 +675,7 @@ class SetupConfig:
         if self.disable_web_panel:
             self.web_panel_port = None
             self.web_panel_payload = False
+            self.web_panel_notification_ingest = False
         if (
             self.device_pairing_providers
             and self.device_pairing_auth_password is not None
@@ -1045,6 +1047,8 @@ class SetupConfig:
             args.append(f"--web-panel {self.web_panel_port}")
             if self.web_panel_payload:
                 args.append("--web-panel-payload")
+            if self.web_panel_notification_ingest is True:
+                args.append("--web-panel-notification-ingest")
 
         if self.browser_automation:
             args.append(
@@ -1535,6 +1539,8 @@ class SetupConfig:
                 cmd_parts.append("--web-panel")
             else:
                 cmd_parts.append(f"--web-panel {self.web_panel_port}")
+            if self.web_panel_notification_ingest is True:
+                cmd_parts.append("--web-panel-notification-ingest")
 
         if self.disable_browser_automation:
             cmd_parts.append("--no-browser-automation")
@@ -1816,6 +1822,9 @@ class SetupConfig:
         data['harden_agent'] = bool(self.harden_agent)
         data['harden_user'] = bool(self.harden_user)
         data['enable_syncthing'] = bool(self.enable_syncthing)
+        data['web_panel_notification_ingest'] = bool(
+            self.web_panel_notification_ingest
+        )
         if self.enable_syncthing and not self.syncthing_root:
             data['syncthing_root'] = DEFAULT_SYNCTHING_ROOT
         # Live activation is a one-shot controller operation. Persisting it
@@ -2330,6 +2339,9 @@ class SetupConfig:
             ),
             web_panel_payload=(
                 _optional_bool_arg(args, 'web_panel_payload') is True
+            ),
+            web_panel_notification_ingest=_optional_bool_arg(
+                args, 'web_panel_notification_ingest'
             ),
             disable_web_panel=disable_web_panel,
             browser_automation=browser_automation,

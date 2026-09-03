@@ -284,6 +284,41 @@ class TestNotificationSender(unittest.TestCase):
         self.assertEqual(payload['operator']['suggested_actions'], [])
         self.assertEqual(payload['operator']['details'], '')
 
+    @patch('urllib.request.urlopen')
+    def test_webhook_fragment_is_sent_as_bearer_token_not_in_url(self, mock_urlopen):
+        response = unittest.mock.MagicMock()
+        response.__enter__.return_value.status = 202
+        response.__exit__.return_value = False
+        mock_urlopen.return_value = response
+        token = "a" * 43
+        sender = NotificationSender(
+            [
+                NotificationConfig(
+                    type='webhook',
+                    target=f'https://panel.example/api/v1/notifications#{token}',
+                )
+            ]
+        )
+
+        self.assertTrue(
+            sender.send(
+                Notification(
+                    subject='Test',
+                    job='sync',
+                    status='good',
+                    message='ok',
+                )
+            )
+        )
+
+        request = mock_urlopen.call_args.args[0]
+        self.assertEqual(
+            request.full_url,
+            'https://panel.example/api/v1/notifications',
+        )
+        self.assertEqual(request.get_header('Authorization'), f'Bearer {token}')
+        self.assertNotIn(token, request.full_url)
+
 
 class TestParseNotificationArgs(unittest.TestCase):
     def test_none_args(self):
@@ -336,6 +371,20 @@ class TestValidateNotificationArgs(unittest.TestCase):
     def test_wrong_arg_count_raises(self):
         with self.assertRaisesRegex(ValueError, "--notify requires TYPE and TARGET"):
             validate_notification_args([['webhook']])
+
+    def test_bearer_fragment_requires_https_and_urlsafe_token(self):
+        token = "a" * 43
+        validate_notification_args(
+            [['webhook', f'https://panel.example/api/v1/notifications#{token}']]
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid webhook URL"):
+            validate_notification_args(
+                [['webhook', f'http://panel.example/api/v1/notifications#{token}']]
+            )
+        with self.assertRaisesRegex(ValueError, "Invalid webhook URL"):
+            validate_notification_args(
+                [['webhook', 'https://panel.example/api/v1/notifications#short']]
+            )
 
 
 class TestSendSetupNotification(unittest.TestCase):

@@ -776,12 +776,15 @@ def validate_web_panel_settings(config: Any) -> None:
     port = getattr(config, "web_panel_port", None)
     password = getattr(config, "web_panel_auth_password", None)
     payload = bool(getattr(config, "web_panel_payload", False))
+    notification_ingest = getattr(config, "web_panel_notification_ingest", None)
     disabled = bool(getattr(config, "disable_web_panel", False))
+    if notification_ingest not in (None, True, False):
+        raise ValueError("web_panel_notification_ingest must be a boolean")
     if port is None:
         if password is not None or payload:
-            raise ValueError(
-                "--web-panel-password requires --web-panel"
-            )
+            raise ValueError("--web-panel-password requires --web-panel")
+        if notification_ingest is True:
+            raise ValueError("--web-panel-notification-ingest requires --web-panel")
         return
     if disabled:
         raise ValueError("--web-panel cannot be combined with --no-web-panel")
@@ -793,6 +796,8 @@ def validate_web_panel_settings(config: Any) -> None:
         )
     if getattr(config, "system_type", None) == "server_proxmox":
         raise ValueError("--web-panel is not supported on a Proxmox host")
+    if notification_ingest is True and getattr(config, "enable_ssl", None) is not True:
+        raise ValueError("--web-panel-notification-ingest requires --ssl")
     if password is not None:
         if not isinstance(password, str) or not password:
             raise ValueError("--web-panel-password must not be empty")

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import http.client
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from contextlib import contextmanager, nullcontext, redirect_stdout
 from io import StringIO
@@ -14,16 +16,21 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from common.web_panel_steps import (
+    _configure_audit_exporter,
     _configure_service,
     _install_auth_file,
+    _install_ingest_token,
     _write_nginx_site,
     build_web_panel_manifest,
     web_panel_url,
     remove_web_panel,
     render_web_panel_nginx,
 )
+from common.service_tools.web_panel_audit_export import collect_audit_snapshot
 from common.service_tools.web_panel_service import (
     WebPanelState,
+    WebPanelHandler,
+    _ThreadingTCPHTTPServer,
     _internal_web_landing_service,
     _linux_trust_script,
     _macos_trust_script,
@@ -33,6 +40,7 @@ from common.service_tools.web_panel_service import (
     discover_infra_web_services,
     render_page,
 )
+from common.web_panel_events import WEB_PANEL_NOTIFICATION_ENDPOINT
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.display import print_service_access_summary
@@ -136,6 +144,30 @@ class WebPanelConfigTest(unittest.TestCase):
         self.assertIn("--web-panel 80", remote)
         self.assertIn("--web-panel-payload", remote)
         self.assertNotIn("web_panel_payload", config.to_dict())
+
+    def test_notification_ingest_requires_https_and_is_forwarded(self) -> None:
+        parser = create_setup_argument_parser("test")
+        config = SetupConfig.from_args(
+            parser.parse_args(
+                [
+                    "agent-vm",
+                    "agent",
+                    "--web-panel",
+                    "--ssl",
+                    "--web-panel-notification-ingest",
+                ]
+            ),
+            "server_dev",
+        )
+
+        self.assertTrue(config.web_panel_notification_ingest)
+        self.assertIn("--web-panel-notification-ingest", config.to_remote_args())
+        self.assertIn("--web-panel-notification-ingest", config.to_setup_command())
+        self.assertTrue(config.to_dict()["web_panel_notification_ingest"])
+
+    def test_notification_ingest_rejects_plaintext_panel(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires --ssl"):
+            _config(web_panel_notification_ingest=True)
 
     def test_agent_readiness_payload_facts_are_forwarded_but_not_saved(self) -> None:
         config = _config(
@@ -276,6 +308,32 @@ class WebPanelLifecycleTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "setup username"):
                     _install_auth_file("agent")
 
+    def test_ingest_token_is_generated_once_and_removed_when_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            token_path = os.path.join(temporary, "ingest.token")
+            account = SimpleNamespace(pw_gid=os.getgid())
+            with (
+                patch(
+                    "common.web_panel_steps.WEB_PANEL_INGEST_TOKEN",
+                    token_path,
+                ),
+                patch(
+                    "common.web_panel_steps.pwd.getpwnam",
+                    return_value=account,
+                ),
+                patch("common.web_panel_steps.os.chown"),
+            ):
+                self.assertTrue(_install_ingest_token(True))
+                with open(token_path, encoding="utf-8") as file_obj:
+                    first = file_obj.read()
+                self.assertFalse(_install_ingest_token(True))
+                with open(token_path, encoding="utf-8") as file_obj:
+                    second = file_obj.read()
+                self.assertEqual(first, second)
+                self.assertTrue(_install_ingest_token(False))
+
+            self.assertFalse(os.path.exists(token_path))
+
     def test_new_payload_replaces_auth_for_a_renamed_setup_user(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config_dir = os.path.join(temporary, "config")
@@ -408,6 +466,41 @@ class WebPanelLifecycleTest(unittest.TestCase):
             self.assertIn("ProtectControlGroups=true", content)
             self.assertIn("LockPersonality=true", content)
 
+    def test_audit_exporter_is_root_only_with_one_writable_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            service_file = os.path.join(temporary, "audit.service")
+            timer_file = os.path.join(temporary, "audit.timer")
+            with (
+                patch.multiple(
+                    "common.web_panel_steps",
+                    WEB_PANEL_AUDIT_SERVICE_FILE=service_file,
+                    WEB_PANEL_AUDIT_TIMER_FILE=timer_file,
+                    WEB_PANEL_AUDIT_DIR="/var/lib/infra_tools/web-panel/audit",
+                    WEB_PANEL_AUDIT_SNAPSHOT=(
+                        "/var/lib/infra_tools/web-panel/audit/events.json"
+                    ),
+                ),
+                patch(
+                    "common.web_panel_steps.run",
+                    return_value=SimpleNamespace(
+                        returncode=0, stdout="", stderr=""
+                    ),
+                ),
+            ):
+                self.assertTrue(_configure_audit_exporter())
+
+            with open(service_file, encoding="utf-8") as file_obj:
+                service = file_obj.read()
+            with open(timer_file, encoding="utf-8") as file_obj:
+                timer = file_obj.read()
+            self.assertIn("User=root", service)
+            self.assertIn("ProtectSystem=strict", service)
+            self.assertIn(
+                "ReadWritePaths=/var/lib/infra_tools/web-panel/audit",
+                service,
+            )
+            self.assertIn("OnUnitActiveSec=5min", timer)
+
     def test_service_socket_timeout_includes_systemd_status(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             service_file = os.path.join(temporary, "web-panel.service")
@@ -458,6 +551,24 @@ class WebPanelLifecycleTest(unittest.TestCase):
                     WEB_PANEL_CONFIG_DIR=os.path.join(temporary, "config"),
                     WEB_PANEL_MANIFEST=os.path.join(temporary, "manifest"),
                     WEB_PANEL_AUTH_FILE=os.path.join(temporary, "auth"),
+                    WEB_PANEL_INGEST_TOKEN=os.path.join(temporary, "token"),
+                    WEB_PANEL_DATA_DIR=os.path.join(temporary, "data"),
+                    WEB_PANEL_AUDIT_DIR=os.path.join(temporary, "data", "audit"),
+                    WEB_PANEL_NOTIFICATION_DIR=os.path.join(
+                        temporary, "data", "notifications"
+                    ),
+                    WEB_PANEL_AUDIT_SNAPSHOT=os.path.join(
+                        temporary, "data", "audit", "events.json"
+                    ),
+                    WEB_PANEL_NOTIFICATION_LOG=os.path.join(
+                        temporary, "data", "notifications", "events.jsonl"
+                    ),
+                    WEB_PANEL_AUDIT_SERVICE_FILE=os.path.join(
+                        temporary, "audit.service"
+                    ),
+                    WEB_PANEL_AUDIT_TIMER_FILE=os.path.join(
+                        temporary, "audit.timer"
+                    ),
                     WEB_PANEL_NGINX_SITE=site,
                     WEB_PANEL_NGINX_LINK=os.path.join(temporary, "link"),
                 ),
@@ -484,6 +595,24 @@ class WebPanelLifecycleTest(unittest.TestCase):
                     WEB_PANEL_CONFIG_DIR=os.path.join(temporary, "config"),
                     WEB_PANEL_MANIFEST=os.path.join(temporary, "manifest"),
                     WEB_PANEL_AUTH_FILE=os.path.join(temporary, "auth"),
+                    WEB_PANEL_INGEST_TOKEN=os.path.join(temporary, "token"),
+                    WEB_PANEL_DATA_DIR=os.path.join(temporary, "data"),
+                    WEB_PANEL_AUDIT_DIR=os.path.join(temporary, "data", "audit"),
+                    WEB_PANEL_NOTIFICATION_DIR=os.path.join(
+                        temporary, "data", "notifications"
+                    ),
+                    WEB_PANEL_AUDIT_SNAPSHOT=os.path.join(
+                        temporary, "data", "audit", "events.json"
+                    ),
+                    WEB_PANEL_NOTIFICATION_LOG=os.path.join(
+                        temporary, "data", "notifications", "events.jsonl"
+                    ),
+                    WEB_PANEL_AUDIT_SERVICE_FILE=os.path.join(
+                        temporary, "audit.service"
+                    ),
+                    WEB_PANEL_AUDIT_TIMER_FILE=os.path.join(
+                        temporary, "audit.timer"
+                    ),
                     WEB_PANEL_NGINX_SITE=site,
                     WEB_PANEL_NGINX_LINK=link,
                 ),
@@ -572,6 +701,230 @@ class WebPanelRenderingTest(unittest.TestCase):
         self.assertIn("limit_req zone=infra_tools_web_panel_auth", rendered)
         self.assertIn("proxy_pass http://unix:/run/infra-tools-web-panel/http.sock:/", rendered)
         self.assertIn("ssl_certificate /etc/infra-web/tls/internal.crt", rendered)
+
+    def test_nginx_ingest_route_bypasses_basic_auth_but_has_its_own_limits(self) -> None:
+        rendered = render_web_panel_nginx(
+            ["agent-vm.local"],
+            443,
+            cert_path="/etc/infra-web/tls/internal.crt",
+            key_path="/etc/infra-web/tls/internal.key",
+            notification_ingest=True,
+        )
+
+        self.assertIn(f"location = {WEB_PANEL_NOTIFICATION_ENDPOINT}", rendered)
+        self.assertIn("auth_basic off", rendered)
+        self.assertIn("rate=30r/m", rendered)
+        self.assertIn("client_max_body_size 64k", rendered)
+
+
+class WebPanelEventTest(unittest.TestCase):
+    _t3_manifest = staticmethod(WebPanelRenderingTest._t3_manifest)
+
+    @staticmethod
+    def _notification() -> dict[str, object]:
+        return {
+            "schema_version": 2,
+            "event": {
+                "type": "backup",
+                "state": "firing",
+                "status": "warning",
+                "deduplication_key": "backup:agent-2",
+            },
+            "operator": {
+                "subject": "Backup needs attention",
+                "job": "backup",
+                "system": "agent-2",
+                "what_happened": "The latest backup did not complete.",
+                "suggested_actions": ["Check the backup service"],
+                "details": "Exit status 1",
+            },
+            "data": {"attempt": 3},
+        }
+
+    def test_ingest_accepts_valid_bearer_request_and_persists_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            token_path = os.path.join(temporary, "token")
+            notification_path = os.path.join(temporary, "events.jsonl")
+            with open(token_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("a" * 43 + "\n")
+            manifest = {
+                **WebPanelRenderingTest._t3_manifest(),
+                "features": {"t3_update": False, "notification_ingest": True},
+            }
+            state = WebPanelState(
+                manifest,
+                audit_snapshot_path=os.path.join(temporary, "audit.json"),
+                notification_log_path=notification_path,
+                ingest_token_path=token_path,
+            )
+            WebPanelHandler.state = state
+            server = _ThreadingTCPHTTPServer(("127.0.0.1", 0), WebPanelHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1", server.server_address[1], timeout=5
+                )
+                body = json.dumps(self._notification())
+                connection.request(
+                    "POST",
+                    WEB_PANEL_NOTIFICATION_ENDPOINT,
+                    body=body,
+                    headers={
+                        "Authorization": "Bearer " + "a" * 43,
+                        "Content-Type": "application/json",
+                        "X-Forwarded-Proto": "https",
+                        "X-Real-IP": "192.0.2.45",
+                    },
+                )
+                response = connection.getresponse()
+                response_body = response.read()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+            self.assertEqual(response.status, 202, response_body)
+            events = state.notification_events()
+            self.assertEqual(events[0]["source_ip"], "192.0.2.45")
+            self.assertEqual(
+                events[0]["notification"]["operator"]["subject"],
+                "Backup needs attention",
+            )
+
+    def test_ingest_rejects_bad_token_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            token_path = os.path.join(temporary, "token")
+            notification_path = os.path.join(temporary, "events.jsonl")
+            with open(token_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("a" * 43 + "\n")
+            state = WebPanelState(
+                {
+                    **WebPanelRenderingTest._t3_manifest(),
+                    "features": {"t3_update": False, "notification_ingest": True},
+                },
+                notification_log_path=notification_path,
+                ingest_token_path=token_path,
+            )
+            WebPanelHandler.state = state
+            server = _ThreadingTCPHTTPServer(("127.0.0.1", 0), WebPanelHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1", server.server_address[1], timeout=5
+                )
+                connection.request(
+                    "POST",
+                    WEB_PANEL_NOTIFICATION_ENDPOINT,
+                    body=json.dumps(self._notification()),
+                    headers={
+                        "Authorization": "Bearer " + "b" * 43,
+                        "Content-Type": "application/json",
+                        "X-Forwarded-Proto": "https",
+                    },
+                )
+                response = connection.getresponse()
+                response.read()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+            self.assertEqual(response.status, 401)
+            self.assertFalse(os.path.exists(notification_path))
+
+    @patch("common.service_tools.web_panel_audit_export.shutil.which")
+    @patch("common.service_tools.web_panel_audit_export.subprocess.run")
+    def test_audit_export_is_sanitized_and_bounded(
+        self, mock_run: unittest.mock.MagicMock, mock_which: unittest.mock.MagicMock
+    ) -> None:
+        mock_which.return_value = "/usr/sbin/ausearch"
+        record = (
+            "type=SYSCALL msg=audit(1788361200.0:42): "
+            'syscall=openat auid=agent exe="/usr/bin/sudo" proctitle=SECRET\n'
+            'type=PATH msg=audit(1788361200.0:42): name="/etc/sudoers"\n----\n'
+        )
+
+        def run_audit(*_args: object, **kwargs: object) -> SimpleNamespace:
+            kwargs["stdout"].write(record.encode("utf-8"))
+            return SimpleNamespace(returncode=0)
+
+        mock_run.side_effect = run_audit
+
+        snapshot = collect_audit_snapshot()
+
+        self.assertEqual(snapshot["status"], "ok")
+        self.assertLessEqual(len(snapshot["events"]), 100)
+        serialized = json.dumps(snapshot)
+        self.assertIn("/etc/sudoers", serialized)
+        self.assertNotIn("SECRET", serialized)
+
+    def test_page_renders_audit_and_remote_notification_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            token_path = os.path.join(temporary, "token")
+            audit_path = os.path.join(temporary, "audit.json")
+            notification_path = os.path.join(temporary, "events.jsonl")
+            with open(token_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("a" * 43 + "\n")
+            with open(audit_path, "w", encoding="utf-8") as file_obj:
+                json.dump(
+                    {
+                        "version": 1,
+                        "generated_at": "2026-09-02T12:00:00+00:00",
+                        "status": "ok",
+                        "events": [
+                            {
+                                "key": "sudoers",
+                                "meaning": "Administrator access policy changed",
+                                "severity": "warning",
+                                "timestamp": "2026-09-02T11:59:00+00:00",
+                                "paths": ["/etc/sudoers"],
+                            }
+                        ],
+                    },
+                    file_obj,
+                )
+            with open(notification_path, "w", encoding="utf-8") as file_obj:
+                json.dump(
+                    {
+                        "received_at": "2026-09-02T12:01:00+00:00",
+                        "source_ip": "192.0.2.45",
+                        "notification": {
+                            **self._notification(),
+                            "operator": {
+                                **self._notification()["operator"],
+                                "subject": "Backup <failed>",
+                            },
+                        },
+                    },
+                    file_obj,
+                )
+                file_obj.write("\n")
+            state = WebPanelState(
+                {
+                    **self._t3_manifest(),
+                    "features": {"t3_update": False, "notification_ingest": True},
+                },
+                audit_snapshot_path=audit_path,
+                notification_log_path=notification_path,
+                ingest_token_path=token_path,
+            )
+            with (
+                patch(
+                    "common.service_tools.web_panel_service.discover_infra_web_services",
+                    return_value=[],
+                ),
+                patch.object(state, "system_overview", return_value=[]),
+            ):
+                rendered = render_page(state)
+
+        self.assertIn("System audit log", rendered)
+        self.assertIn("Administrator access policy changed", rendered)
+        self.assertIn("Notifications", rendered)
+        self.assertIn(WEB_PANEL_NOTIFICATION_ENDPOINT, rendered)
+        self.assertIn("Backup &lt;failed&gt;", rendered)
+        self.assertNotIn("Backup <failed>", rendered)
 
     def test_page_escapes_content_and_only_shows_available_action(self) -> None:
         manifest = {

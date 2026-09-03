@@ -960,6 +960,15 @@ def add_setup_arguments(
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--web-panel-notification-ingest",
+        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+        default=None if not for_remote else False,
+        help=(
+            "Enable the HTTPS bearer-token notification ingest endpoint at "
+            "/api/v1/notifications"
+        ),
+    )
     if not for_remote:
         parser.add_argument(
             "--web-panel-password",

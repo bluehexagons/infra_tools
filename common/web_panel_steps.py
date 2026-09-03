@@ -4,11 +4,23 @@ from __future__ import annotations
 
 import os
 import pwd
+import re
+import secrets
 import shutil
 import tempfile
 import time
 from typing import Any
 
+from common.web_panel_events import (
+    WEB_PANEL_AUDIT_DIR,
+    WEB_PANEL_AUDIT_SNAPSHOT,
+    WEB_PANEL_DATA_DIR,
+    WEB_PANEL_INGEST_TOKEN,
+    WEB_PANEL_NOTIFICATION_DIR,
+    WEB_PANEL_NOTIFICATION_ENDPOINT,
+    WEB_PANEL_NOTIFICATION_LOG,
+    load_ingest_token,
+)
 from lib.atomic_io import write_json_atomic, write_text_atomic
 from lib.auth_failure_bans import (
     configure_nginx_auth_failure_ban,
@@ -22,17 +34,28 @@ from lib.validators import validate_username
 
 WEB_PANEL_SERVICE_NAME = "infra-tools-web-panel"
 WEB_PANEL_SERVICE_FILE = f"/etc/systemd/system/{WEB_PANEL_SERVICE_NAME}.service"
+WEB_PANEL_AUDIT_SERVICE_NAME = "infra-tools-web-panel-audit"
+WEB_PANEL_AUDIT_SERVICE_FILE = (
+    f"/etc/systemd/system/{WEB_PANEL_AUDIT_SERVICE_NAME}.service"
+)
+WEB_PANEL_AUDIT_TIMER_FILE = (
+    f"/etc/systemd/system/{WEB_PANEL_AUDIT_SERVICE_NAME}.timer"
+)
 WEB_PANEL_CONFIG_DIR = "/etc/infra-tools/web-panel"
 WEB_PANEL_MANIFEST = f"{WEB_PANEL_CONFIG_DIR}/config.json"
 WEB_PANEL_AUTH_FILE = f"{WEB_PANEL_CONFIG_DIR}/htpasswd"
 WEB_PANEL_PAYLOAD_FILE = "/opt/infra_tools/web_panel_payload/htpasswd"
 WEB_PANEL_SOCKET = "/run/infra-tools-web-panel/http.sock"
 WEB_PANEL_SCRIPT = "/opt/infra_tools/common/service_tools/web_panel_service.py"
+WEB_PANEL_AUDIT_SCRIPT = (
+    "/opt/infra_tools/common/service_tools/web_panel_audit_export.py"
+)
 WEB_PANEL_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-web-panel"
 WEB_PANEL_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-web-panel"
 WEB_PANEL_AUTH_FAILURE_LOG = "/var/log/nginx/infra-tools-web-panel-auth-failures.log"
 _NGINX_MARKER = "# Managed by infra_tools web panel"
 _SERVICE_MARKER = "# Managed by infra_tools web panel"
+_INGEST_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
 
 
 def _url_host(host: str) -> str:
@@ -182,6 +205,7 @@ def build_web_panel_manifest(
             "t3_update": "t3code" in (config.web_interfaces or []),
             "t3_github_readiness": config.github_auth_payload,
             "t3_git_identity_readiness": config.git_identity_payload,
+            "notification_ingest": config.web_panel_notification_ingest is True,
         },
     }
 
@@ -192,6 +216,7 @@ def render_web_panel_nginx(
     *,
     cert_path: str | None = None,
     key_path: str | None = None,
+    notification_ingest: bool = False,
 ) -> str:
     """Render the Basic-Auth reverse proxy for the Unix-socket app."""
 
@@ -207,8 +232,34 @@ def render_web_panel_nginx(
     ssl_session_timeout 1d;
 """
     server_names = " ".join(_url_host(identity) for identity in identities)
+    ingest_zone = (
+        "limit_req_zone $binary_remote_addr "
+        "zone=infra_tools_web_panel_ingest:10m rate=30r/m;\n"
+        if notification_ingest
+        else ""
+    )
+    ingest_location = ""
+    if notification_ingest:
+        ingest_location = f"""
+    location = {WEB_PANEL_NOTIFICATION_ENDPOINT} {{
+        auth_basic off;
+        limit_except POST {{ deny all; }}
+        limit_req zone=infra_tools_web_panel_ingest burst=10 nodelay;
+        limit_req_status 429;
+        client_max_body_size 64k;
+        proxy_pass http://unix:{WEB_PANEL_SOCKET}:{WEB_PANEL_NOTIFICATION_ENDPOINT};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 10s;
+        proxy_send_timeout 10s;
+    }}
+"""
     return f"""{_NGINX_MARKER}
 limit_req_zone $binary_remote_addr zone=infra_tools_web_panel_auth:10m rate=120r/m;
+{ingest_zone}
 
 map $status $infra_tools_web_panel_auth_failure {{
     default 0;
@@ -227,6 +278,7 @@ server {{
     auth_basic "infra-tools web panel";
     auth_basic_user_file {WEB_PANEL_AUTH_FILE};
     client_max_body_size 16k;
+{ingest_location}
 
     location / {{
         limit_req zone=infra_tools_web_panel_auth burst=5 nodelay;
@@ -341,6 +393,76 @@ def _restore_auth_file(previous: bytes | None) -> None:
         os.chmod(WEB_PANEL_AUTH_FILE, 0o640)
     if shutil.which("nginx"):
         run("systemctl reload nginx", check=False)
+
+
+def _ensure_event_storage(service_user: str) -> None:
+    """Create separate least-privilege audit and notification data stores."""
+
+    web_account = pwd.getpwnam("www-data")
+    service_account = pwd.getpwnam(service_user)
+    for path in (
+        WEB_PANEL_DATA_DIR,
+        WEB_PANEL_AUDIT_DIR,
+        WEB_PANEL_NOTIFICATION_DIR,
+    ):
+        validate_filesystem_path(path, must_exist=False)
+        if os.path.lexists(path) and (
+            os.path.islink(path) or not os.path.isdir(path)
+        ):
+            raise RuntimeError(f"Refusing unsafe web panel data path: {path}")
+        os.makedirs(path, mode=0o750, exist_ok=True)
+        os.chown(path, 0, web_account.pw_gid)
+    os.chmod(WEB_PANEL_DATA_DIR, 0o750)
+    os.chmod(WEB_PANEL_AUDIT_DIR, 0o2750)
+    os.chmod(WEB_PANEL_NOTIFICATION_DIR, 0o2770)
+    for path in (WEB_PANEL_AUDIT_SNAPSHOT, WEB_PANEL_NOTIFICATION_LOG):
+        if os.path.lexists(path) and (
+            os.path.islink(path) or not os.path.isfile(path)
+        ):
+            raise RuntimeError(f"Refusing unsafe web panel event file: {path}")
+    if os.path.exists(WEB_PANEL_AUDIT_SNAPSHOT):
+        os.chown(WEB_PANEL_AUDIT_SNAPSHOT, 0, web_account.pw_gid)
+        os.chmod(WEB_PANEL_AUDIT_SNAPSHOT, 0o640)
+    if os.path.exists(WEB_PANEL_NOTIFICATION_LOG):
+        os.chown(
+            WEB_PANEL_NOTIFICATION_LOG,
+            service_account.pw_uid,
+            web_account.pw_gid,
+        )
+        os.chmod(WEB_PANEL_NOTIFICATION_LOG, 0o600)
+
+
+def _install_ingest_token(enabled: bool) -> bool:
+    """Create or remove the notification API token without rotating it on setup."""
+
+    validate_filesystem_path(WEB_PANEL_INGEST_TOKEN, must_exist=False)
+    if os.path.lexists(WEB_PANEL_INGEST_TOKEN) and (
+        os.path.islink(WEB_PANEL_INGEST_TOKEN)
+        or not os.path.isfile(WEB_PANEL_INGEST_TOKEN)
+    ):
+        raise RuntimeError(
+            f"Refusing unsafe notification ingest token: {WEB_PANEL_INGEST_TOKEN}"
+        )
+    if not enabled:
+        try:
+            os.unlink(WEB_PANEL_INGEST_TOKEN)
+            return True
+        except FileNotFoundError:
+            return False
+
+    existing = None
+    if os.path.exists(WEB_PANEL_INGEST_TOKEN):
+        existing = load_ingest_token(WEB_PANEL_INGEST_TOKEN)
+    token = existing or secrets.token_urlsafe(32)
+    if not _INGEST_TOKEN_PATTERN.fullmatch(token):
+        raise RuntimeError("Generated an invalid notification ingest token")
+    changed = existing is None
+    if changed:
+        write_text_atomic(WEB_PANEL_INGEST_TOKEN, token + "\n", mode=0o640)
+    web_account = pwd.getpwnam("www-data")
+    os.chown(WEB_PANEL_INGEST_TOKEN, 0, web_account.pw_gid)
+    os.chmod(WEB_PANEL_INGEST_TOKEN, 0o640)
+    return changed
 
 
 def _ensure_nginx() -> None:
@@ -534,6 +656,94 @@ WantedBy=multi-user.target
         raise
 
 
+def _configure_audit_exporter() -> bool:
+    """Install the root-only audit snapshot exporter and refresh timer."""
+
+    service_content = f"""{_SERVICE_MARKER}
+[Unit]
+Description=infra-tools web panel audit snapshot
+After=auditd.service
+
+[Service]
+Type=oneshot
+User=root
+Group=www-data
+UMask=0027
+ExecStart=/usr/bin/python3 {WEB_PANEL_AUDIT_SCRIPT} --output {WEB_PANEL_AUDIT_SNAPSHOT}
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={WEB_PANEL_AUDIT_DIR}
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=true
+StandardOutput=null
+StandardError=journal
+"""
+    timer_content = f"""{_SERVICE_MARKER}
+[Unit]
+Description=Refresh the infra-tools web panel audit snapshot
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+RandomizedDelaySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+    desired = {
+        WEB_PANEL_AUDIT_SERVICE_FILE: service_content,
+        WEB_PANEL_AUDIT_TIMER_FILE: timer_content,
+    }
+    previous: dict[str, str | None] = {}
+    for path in desired:
+        validate_filesystem_path(path, must_exist=False)
+        if os.path.lexists(path) and (
+            os.path.islink(path) or not os.path.isfile(path)
+        ):
+            raise RuntimeError(f"Refusing unmanaged web panel audit unit: {path}")
+        try:
+            with open(path, encoding="utf-8") as file_obj:
+                previous[path] = file_obj.read()
+        except OSError:
+            previous[path] = None
+        if previous[path] is not None and _SERVICE_MARKER not in previous[path]:
+            raise RuntimeError(f"Refusing unmanaged web panel audit unit: {path}")
+
+    changed = any(previous[path] != content for path, content in desired.items())
+    try:
+        for path, content in desired.items():
+            if previous[path] != content:
+                write_text_atomic(path, content, mode=0o644)
+        if changed:
+            run("systemctl daemon-reload", check=True)
+        run(
+            f"systemctl enable --now {WEB_PANEL_AUDIT_SERVICE_NAME}.timer",
+            check=True,
+        )
+        run(f"systemctl start {WEB_PANEL_AUDIT_SERVICE_NAME}.service", check=True)
+    except Exception:
+        for path, content in previous.items():
+            if content is None:
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+            else:
+                write_text_atomic(path, content, mode=0o644)
+        run("systemctl daemon-reload", check=False)
+        raise
+    return changed
+
+
 def _preflight_web_panel_removal() -> tuple[str | None, bool]:
     if os.path.lexists(WEB_PANEL_SERVICE_FILE):
         if os.path.islink(WEB_PANEL_SERVICE_FILE) or not os.path.isfile(
@@ -586,6 +796,34 @@ def _preflight_web_panel_removal() -> tuple[str | None, bool]:
             os.path.islink(path) or not os.path.isfile(path)
         ):
             raise RuntimeError(f"Refusing unsafe web panel file: {path}")
+    for path in (
+        WEB_PANEL_AUDIT_SERVICE_FILE,
+        WEB_PANEL_AUDIT_TIMER_FILE,
+    ):
+        if os.path.lexists(path):
+            if os.path.islink(path) or not os.path.isfile(path):
+                raise RuntimeError(f"Refusing unmanaged web panel audit unit: {path}")
+            with open(path, encoding="utf-8") as file_obj:
+                if _SERVICE_MARKER not in file_obj.read():
+                    raise RuntimeError(f"Refusing unmanaged web panel audit unit: {path}")
+    for path in (
+        WEB_PANEL_DATA_DIR,
+        WEB_PANEL_AUDIT_DIR,
+        WEB_PANEL_NOTIFICATION_DIR,
+    ):
+        if os.path.lexists(path) and (
+            os.path.islink(path) or not os.path.isdir(path)
+        ):
+            raise RuntimeError(f"Refusing unsafe web panel data path: {path}")
+    for path in (
+        WEB_PANEL_INGEST_TOKEN,
+        WEB_PANEL_AUDIT_SNAPSHOT,
+        WEB_PANEL_NOTIFICATION_LOG,
+    ):
+        if os.path.lexists(path) and (
+            os.path.islink(path) or not os.path.isfile(path)
+        ):
+            raise RuntimeError(f"Refusing unsafe web panel event file: {path}")
     return nginx_content, link_exists
 
 
@@ -622,17 +860,52 @@ def remove_web_panel() -> None:
 
     nginx_content, link_exists = _preflight_web_panel_removal()
     _remove_nginx_site(nginx_content, link_exists)
+    units_changed = False
     if os.path.exists(WEB_PANEL_SERVICE_FILE):
         run(f"systemctl disable --now {WEB_PANEL_SERVICE_NAME}.service", check=False)
         os.remove(WEB_PANEL_SERVICE_FILE)
+        units_changed = True
+    audit_units_exist = any(
+        os.path.exists(path)
+        for path in (WEB_PANEL_AUDIT_SERVICE_FILE, WEB_PANEL_AUDIT_TIMER_FILE)
+    )
+    if audit_units_exist:
+        run(
+            f"systemctl disable --now {WEB_PANEL_AUDIT_SERVICE_NAME}.timer",
+            check=False,
+        )
+    for path in (WEB_PANEL_AUDIT_SERVICE_FILE, WEB_PANEL_AUDIT_TIMER_FILE):
+        try:
+            os.remove(path)
+            units_changed = True
+        except FileNotFoundError:
+            pass
+    if units_changed:
         run("systemctl daemon-reload", check=True)
+    for path in (
+        WEB_PANEL_MANIFEST,
+        WEB_PANEL_AUTH_FILE,
+        WEB_PANEL_INGEST_TOKEN,
+    ):
+        if os.path.lexists(path):
+            os.remove(path)
     if os.path.lexists(WEB_PANEL_CONFIG_DIR):
-        for name in ("config.json", "htpasswd"):
-            path = os.path.join(WEB_PANEL_CONFIG_DIR, name)
-            if os.path.lexists(path):
-                os.remove(path)
         try:
             os.rmdir(WEB_PANEL_CONFIG_DIR)
+        except OSError:
+            pass
+    for path in (WEB_PANEL_AUDIT_SNAPSHOT, WEB_PANEL_NOTIFICATION_LOG):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+    for path in (
+        WEB_PANEL_AUDIT_DIR,
+        WEB_PANEL_NOTIFICATION_DIR,
+        WEB_PANEL_DATA_DIR,
+    ):
+        try:
+            os.rmdir(path)
         except OSError:
             pass
     remove_nginx_auth_failure_ban("web-panel")
@@ -677,6 +950,9 @@ def configure_web_panel(config: SetupConfig) -> None:
 
     auth_changed, previous_auth = _install_auth_file(config.username)
     try:
+        service_user = config.username if config.username != "root" else "nobody"
+        _ensure_event_storage(service_user)
+        _install_ingest_token(config.web_panel_notification_ingest is True)
         manifest = build_web_panel_manifest(config, identities)
         os.makedirs(WEB_PANEL_CONFIG_DIR, mode=0o750, exist_ok=True)
         write_json_atomic(WEB_PANEL_MANIFEST, manifest, mode=0o644, sort_keys=True)
@@ -685,6 +961,7 @@ def configure_web_panel(config: SetupConfig) -> None:
             if config.username != "root"
             else pwd.getpwnam("nobody")
         )
+        _configure_audit_exporter()
         _configure_service(config, account.pw_dir)
         nginx_changed = _write_nginx_site(
             render_web_panel_nginx(
@@ -692,6 +969,7 @@ def configure_web_panel(config: SetupConfig) -> None:
                 config.web_panel_port,
                 cert_path=cert_path,
                 key_path=key_path,
+                notification_ingest=config.web_panel_notification_ingest is True,
             )
         )
     except Exception:
@@ -709,6 +987,11 @@ def configure_web_panel(config: SetupConfig) -> None:
     )
     if not config.enable_ssl:
         print("  ⚠ Web panel Basic Auth uses plaintext HTTP; add --ssl for encrypted login")
+    if config.web_panel_notification_ingest is True:
+        print(
+            "  ✓ Notification ingest: "
+            f"{WEB_PANEL_NOTIFICATION_ENDPOINT} (token: {WEB_PANEL_INGEST_TOKEN})"
+        )
 
 
 __all__ = [

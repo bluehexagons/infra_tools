@@ -26,6 +26,7 @@ NotificationDeliveryPolicy = Literal["always", "signal"]
 NETWORK_TIMEOUT_SECONDS = 30
 NOTIFICATION_SCHEMA_VERSION = 2
 _MAILBOX_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_BEARER_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
 
 
 @dataclass
@@ -159,13 +160,21 @@ class NotificationSender:
     
     def _send_webhook(self, url: str, notification: Notification) -> None:
         """Send webhook notification via HTTP POST."""
+        request_url, bearer_token = _webhook_request_target(url)
         data = json.dumps(notification.to_dict()).encode('utf-8')
         headers = {
             'Content-Type': 'application/json',
             'User-Agent': 'infra_tools-notification/1.0'
         }
+        if bearer_token is not None:
+            headers['Authorization'] = f'Bearer {bearer_token}'
         
-        request = urllib.request.Request(url, data=data, headers=headers, method='POST')
+        request = urllib.request.Request(
+            request_url,
+            data=data,
+            headers=headers,
+            method='POST',
+        )
         
         try:
             with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
@@ -364,8 +373,9 @@ def validate_notification_config(config: NotificationConfig) -> None:
         raise ValueError(f"Notification target for {config.type} must not be empty")
 
     if config.type == "webhook":
-        parsed = urllib.parse.urlparse(target)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        try:
+            _webhook_request_target(target)
+        except ValueError:
             raise ValueError(f"Invalid webhook URL: {target}")
         return
 
@@ -375,6 +385,33 @@ def validate_notification_config(config: NotificationConfig) -> None:
         return
 
     raise ValueError(f"Invalid notification type: {config.type}")
+
+
+def _webhook_request_target(target: str) -> tuple[str, str | None]:
+    """Return the request URL and optional fragment-carried bearer token."""
+
+    if len(target) > 4096:
+        raise ValueError("Webhook URL is too long")
+    try:
+        parsed = urllib.parse.urlsplit(target)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Webhook URL is malformed") from exc
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        raise ValueError("Webhook URL is malformed")
+    bearer_token = parsed.fragment or None
+    if bearer_token is not None:
+        if parsed.scheme != "https" or not _BEARER_TOKEN_PATTERN.fullmatch(
+            bearer_token
+        ):
+            raise ValueError("Webhook bearer token is invalid")
+    return parsed._replace(fragment="").geturl(), bearer_token
 
 
 def validate_notification_args(notify_args: Optional[list[list[str]]]) -> None:

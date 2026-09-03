@@ -30,7 +30,7 @@ references and may describe future work separately from this live contract.
 | [Godot Engine](GODOT.md) | Verified graphical/headless installation, web/publishing bundles, agent access, and updates |
 | [T3 Code server](T3_CODE.md) | Headless service, deliberate updates, pairing, remote clients, and security boundaries |
 | [Protected device pairing](DEVICE_PAIRING.md) | Basic-Auth enrollment portal, one-time provider links, rotation, removal, and security boundaries |
-| [Minimal web panel](WEB_PANEL.md) | Optional authenticated service links, access information, T3 updates, HTTPS trust, and removal |
+| [Minimal web panel](WEB_PANEL.md) | Optional authenticated service links, audit activity, notification ingest, T3 updates, HTTPS trust, and removal |
 | [Machine types](MACHINE_TYPES.md) | Debian bare metal, VM, LXC, OCI, and capability differences |
 | [Samba shares](SAMBA_SHARES.md) | Authenticated shares, credentials, access changes, removals, and SMB mounts |
 | [Managed Syncthing](SYNCTHING.md) | Private hub-and-spoke file exchange, HTTPS GUI administration, relays, and recovery |
@@ -60,7 +60,7 @@ references and may describe future work separately from this live contract.
 | [XRDP](XRDP.md) | Desktop RDP architecture, compatibility, and troubleshooting |
 | [Workstations and desktop applications](WORKSTATIONS.md) | Desktop profiles, human-operated browsers, Flatpak, office tools, and verification |
 | [Shell completion](SHELL_COMPLETION.md) | Bash, Zsh, Fish, and system-wide completion |
-| [Notifications](NOTIFICATIONS.md) | Webhook and mailbox targets shared by maintenance and operations |
+| [Notifications](NOTIFICATIONS.md) | Webhook and mailbox targets, including authenticated web-panel ingest, shared by maintenance and operations |
 
 ## Design notes
 

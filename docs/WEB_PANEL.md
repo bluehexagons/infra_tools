@@ -2,8 +2,9 @@
 
 The optional infra-tools web panel is a small, browser-based dashboard for one
 managed machine. It links to detected web services, shows configured SSH, RDP,
-and Samba access, and offers only maintenance actions supported by software on
-that machine. It is not installed unless `--web-panel` is selected.
+and Samba access, displays a sanitized view of current auditd activity, and
+offers only maintenance actions supported by software on that machine. It is
+not installed unless `--web-panel` is selected.
 
 ## Setup
 
@@ -35,7 +36,41 @@ changes, rerun with `--web-panel-password` so the single Basic Auth record
 can be replaced with the new username; infra-tools refuses to preserve a
 record for a different account.
 
-Remove the web panel and its htpasswd data with:
+### Notification ingest API
+
+An optional API lets other managed machines send their normal infra-tools
+notifications to this panel. It is off by default and requires HTTPS:
+
+```bash
+infra-tools patch 192.168.1.50 agent \
+  --web-panel \
+  --ssl \
+  --web-panel-notification-ingest
+```
+
+The fixed endpoint is `https://HOST/api/v1/notifications`. Enabling it creates
+a random bearer token at
+`/etc/infra-tools/web-panel/notification-ingest.token`; repeated setup runs
+preserve that token. Read it on the panel host with `sudo` and configure a
+sending machine with a webhook target whose URL fragment contains the token:
+
+```bash
+infra-tools patch sender.example agent \
+  --notify webhook \
+  'https://panel.example/api/v1/notifications#TOKEN_FROM_PANEL_HOST'
+```
+
+The notification sender removes the fragment from the request URL and sends it
+as an `Authorization: Bearer ...` header. The token therefore does not enter
+the HTTP request path or Nginx access logs. Treat the complete configured
+target as a credential: keep it out of shared command output, and limit access
+to the sending machine's saved setup state. To rotate it, remove the token file
+on the panel host and rerun setup with the ingest flag, then update every
+sender. Use `--no-web-panel-notification-ingest` to disable the endpoint while
+keeping the panel; disabling removes the bearer token.
+
+Remove the web panel, its htpasswd and ingest-token data, and its bounded event
+history with:
 
 ```bash
 infra-tools patch 192.168.1.50 agent --no-web-panel
@@ -71,6 +106,21 @@ The configured machine determines the contents:
   page loads;
 - a compact live overview reports uptime, memory and root-disk use, whether a
   reboot is pending, and the managed automatic-package-update timer state;
+- a root-only timer queries the last 24 hours of auditd events every five
+  minutes and exports at most 100 structured summaries, including no more than
+  25 routine privileged-command entries so integrity changes stay visible. The
+  unprivileged panel can read that snapshot but cannot read raw audit logs. The
+  snapshot includes
+  time, audit category, paths, actors, operations, and executables when auditd
+  supplies them; it deliberately excludes raw records, command arguments, and
+  `proctitle` data. If auditd is absent or one query fails, the page says that
+  collection is unavailable or degraded instead of presenting a false clean
+  result;
+- when notification ingest is enabled, the latest 100 accepted notifications
+  appear with their source system, status, explanation, suggested action, and
+  receipt address/time. Input must be a bounded schema-version-2 notification;
+  unknown fields are discarded and malformed or deeply nested input is
+  rejected;
 - when the shared gateway uses the machine-local CA, a certificate-trust section
   provides its public download, SHA-256 fingerprint, compact GUI guidance, and
   copy/paste scripts for Debian/Ubuntu, Arch, Fedora/RHEL, macOS, and Windows.
@@ -95,6 +145,13 @@ operations. Nginx applies Basic Auth, request throttling with headroom for the
 update-status refresh, and a fail2ban jail; the application listens only on a
 Unix socket and uses a per-process CSRF token for state-changing forms.
 
+The ingest route is the sole Basic Auth exception. It exists only when the flag
+is enabled, accepts only `POST`, has a separate lower rate limit and 64 KiB body
+limit, requires the generated bearer token using constant-time comparison, and
+fails closed unless Nginx reports HTTPS. Accepted records are schema-validated
+and retained in a bounded local file. The browser dashboard itself remains
+behind Basic Auth.
+
 The panel intentionally does not offer a general package-update button. APT
 updates are privileged, can hold package-manager locks for an extended period,
 and may require reboot coordination; configured systems already expose their
@@ -112,6 +169,8 @@ Target-side checks:
 ```bash
 sudo systemctl status infra-tools-web-panel.service
 sudo journalctl -u infra-tools-web-panel.service -n 100 --no-pager
+sudo systemctl status infra-tools-web-panel-audit.timer
+sudo journalctl -u infra-tools-web-panel-audit.service -n 100 --no-pager
 sudo nginx -t
 ```
 
