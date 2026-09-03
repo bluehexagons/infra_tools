@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from lib.atomic_io import write_text_atomic
@@ -28,6 +28,8 @@ _MAX_AUDIT_EVENTS = 100
 _MAX_AUDIT_ISSUES = 10
 _MAX_DATA_DEPTH = 6
 _MAX_DATA_ITEMS = 100
+_MAX_AUDIT_SNAPSHOT_AGE = timedelta(minutes=15)
+_MAX_AUDIT_CLOCK_SKEW = timedelta(minutes=5)
 
 
 def _bounded_string(
@@ -194,30 +196,52 @@ def load_ingest_token(path: str = WEB_PANEL_INGEST_TOKEN) -> str:
 
 def load_audit_snapshot(
     path: str = WEB_PANEL_AUDIT_SNAPSHOT,
+    *,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Load the root-exported audit snapshot, failing closed on malformed data."""
 
-    unavailable = {
-        "status": "unavailable",
-        "issues": ["No valid audit snapshot is available."],
-        "events": [],
-    }
+    def unavailable(
+        issue: str = "No valid audit snapshot is available.",
+    ) -> dict[str, Any]:
+        return {"status": "unavailable", "issues": [issue], "events": []}
+
     content = _read_regular_text(path)
     if content is None:
-        return unavailable
+        return unavailable()
     try:
         payload = json.loads(content)
     except (RecursionError, ValueError):
-        return unavailable
+        return unavailable()
     if not isinstance(payload, dict) or payload.get("version") != 1:
-        return unavailable
+        return unavailable()
     status = payload.get("status")
     generated_at = payload.get("generated_at")
     events = payload.get("events")
     if status not in {"ok", "degraded", "unavailable"} or not isinstance(
         events, list
     ):
-        return unavailable
+        return unavailable()
+    if (
+        not isinstance(generated_at, str)
+        or not generated_at
+        or len(generated_at) > 64
+        or any(ord(character) < 32 for character in generated_at)
+    ):
+        return unavailable("The audit snapshot has an invalid generation timestamp.")
+    try:
+        generated_time = datetime.fromisoformat(generated_at)
+    except ValueError:
+        return unavailable("The audit snapshot has an invalid generation timestamp.")
+    if generated_time.tzinfo is None or generated_time.utcoffset() is None:
+        return unavailable("The audit snapshot has an invalid generation timestamp.")
+    reference_time = now or datetime.now(timezone.utc)
+    if reference_time.tzinfo is None or reference_time.utcoffset() is None:
+        raise ValueError("Audit snapshot reference time must include a timezone")
+    generated_time = generated_time.astimezone(timezone.utc)
+    reference_time = reference_time.astimezone(timezone.utc)
+    if generated_time - reference_time > _MAX_AUDIT_CLOCK_SKEW:
+        return unavailable("The audit snapshot generation timestamp is in the future.")
 
     issues = payload.get("issues", [])
     safe_issues: list[str] = []
@@ -231,6 +255,13 @@ def load_audit_snapshot(
         ]
     if status != "ok" and not safe_issues:
         safe_issues = ["Audit collection did not complete successfully."]
+    if reference_time - generated_time > _MAX_AUDIT_SNAPSHOT_AGE:
+        status = "degraded" if status == "ok" else status
+        safe_issues = safe_issues[: _MAX_AUDIT_ISSUES - 1]
+        safe_issues.append(
+            "The audit snapshot is stale; it has not refreshed in more than "
+            "15 minutes."
+        )
     safe_events: list[JSONDict] = []
     for event in events[:_MAX_AUDIT_EVENTS]:
         if not isinstance(event, dict):
@@ -257,7 +288,7 @@ def load_audit_snapshot(
         safe_events.append(record)
     return {
         "status": status,
-        "generated_at": generated_at[:64] if isinstance(generated_at, str) else "",
+        "generated_at": generated_at,
         "issues": safe_issues,
         "events": safe_events,
     }

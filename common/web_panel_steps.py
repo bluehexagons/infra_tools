@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import grp
 import os
 import pwd
 import re
@@ -56,6 +57,7 @@ WEB_PANEL_AUTH_FAILURE_LOG = "/var/log/nginx/infra-tools-web-panel-auth-failures
 _NGINX_MARKER = "# Managed by infra_tools web panel"
 _SERVICE_MARKER = "# Managed by infra_tools web panel"
 _INGEST_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
+_WEB_PANEL_SYSTEM_USER = "infra-web-panel"
 
 
 def _url_host(host: str) -> str:
@@ -433,9 +435,66 @@ def _ensure_event_storage(service_user: str) -> None:
         os.chmod(WEB_PANEL_NOTIFICATION_LOG, 0o600)
 
 
-def _install_ingest_token(enabled: bool, service_gid: int) -> bool:
-    """Create or remove the notification API token without rotating it on setup."""
+def _validate_web_panel_service_account(account: pwd.struct_passwd) -> None:
+    try:
+        primary_group = grp.getgrgid(account.pw_gid)
+    except KeyError as exc:
+        raise RuntimeError(
+            f"Refusing incompatible {_WEB_PANEL_SYSTEM_USER} service account"
+        ) from exc
+    group_is_shared = bool(primary_group.gr_mem) or any(
+        other.pw_name != account.pw_name and other.pw_gid == account.pw_gid
+        for other in pwd.getpwall()
+    )
+    if (
+        account.pw_name != _WEB_PANEL_SYSTEM_USER
+        or account.pw_uid == 0
+        or account.pw_gid == 0
+        or account.pw_dir != "/nonexistent"
+        or account.pw_shell not in {"/usr/sbin/nologin", "/sbin/nologin"}
+        or primary_group.gr_name != _WEB_PANEL_SYSTEM_USER
+        or group_is_shared
+    ):
+        raise RuntimeError(
+            f"Refusing incompatible {_WEB_PANEL_SYSTEM_USER} service account"
+        )
 
+
+def _ensure_web_panel_service_account(config: SetupConfig) -> pwd.struct_passwd:
+    """Return the panel identity, creating a dedicated one for root setups."""
+
+    if config.username != "root":
+        return pwd.getpwnam(config.username)
+    if not validate_username(_WEB_PANEL_SYSTEM_USER):
+        raise RuntimeError("The managed web panel service username is invalid")
+    try:
+        account = pwd.getpwnam(_WEB_PANEL_SYSTEM_USER)
+    except KeyError:
+        run(
+            [
+                "useradd",
+                "--system",
+                "--user-group",
+                "--home-dir",
+                "/nonexistent",
+                "--no-create-home",
+                "--shell",
+                "/usr/sbin/nologin",
+                _WEB_PANEL_SYSTEM_USER,
+            ],
+            check=True,
+        )
+        try:
+            account = pwd.getpwnam(_WEB_PANEL_SYSTEM_USER)
+        except KeyError as exc:
+            raise RuntimeError(
+                "The web panel service account was not available after creation"
+            ) from exc
+    _validate_web_panel_service_account(account)
+    return account
+
+
+def _validate_ingest_token_path() -> None:
     validate_filesystem_path(WEB_PANEL_INGEST_TOKEN, must_exist=False)
     if os.path.lexists(WEB_PANEL_INGEST_TOKEN) and (
         os.path.islink(WEB_PANEL_INGEST_TOKEN)
@@ -444,6 +503,12 @@ def _install_ingest_token(enabled: bool, service_gid: int) -> bool:
         raise RuntimeError(
             f"Refusing unsafe notification ingest token: {WEB_PANEL_INGEST_TOKEN}"
         )
+
+
+def _install_ingest_token(enabled: bool, service_gid: int) -> bool:
+    """Create or remove the notification API token without rotating it on setup."""
+
+    _validate_ingest_token_path()
     if not enabled:
         try:
             os.unlink(WEB_PANEL_INGEST_TOKEN)
@@ -570,7 +635,9 @@ def _restore_service(previous: str | None) -> None:
 
 
 def _configure_service(config: SetupConfig, home: str) -> bool:
-    service_user = config.username if config.username != "root" else "nobody"
+    service_user = (
+        config.username if config.username != "root" else _WEB_PANEL_SYSTEM_USER
+    )
     service_home = home if service_user == config.username else "/nonexistent"
     service_account = pwd.getpwnam(service_user)
     web_account = pwd.getpwnam("www-data")
@@ -966,13 +1033,12 @@ def configure_web_panel(config: SetupConfig) -> None:
 
     auth_changed, previous_auth = _install_auth_file(config.username)
     try:
-        service_user = config.username if config.username != "root" else "nobody"
-        account = pwd.getpwnam(service_user)
-        _ensure_event_storage(service_user)
-        _install_ingest_token(
-            config.web_panel_notification_ingest is True,
-            account.pw_gid,
-        )
+        account = _ensure_web_panel_service_account(config)
+        ingest_enabled = config.web_panel_notification_ingest is True
+        _ensure_event_storage(account.pw_name)
+        _validate_ingest_token_path()
+        if ingest_enabled:
+            _install_ingest_token(True, account.pw_gid)
         manifest = build_web_panel_manifest(config, identities)
         os.makedirs(WEB_PANEL_CONFIG_DIR, mode=0o750, exist_ok=True)
         write_json_atomic(WEB_PANEL_MANIFEST, manifest, mode=0o644, sort_keys=True)
@@ -984,9 +1050,14 @@ def configure_web_panel(config: SetupConfig) -> None:
                 config.web_panel_port,
                 cert_path=cert_path,
                 key_path=key_path,
-                notification_ingest=config.web_panel_notification_ingest is True,
+                notification_ingest=ingest_enabled,
             )
         )
+        if not ingest_enabled:
+            # Retain an existing token until both the application and its public
+            # route have stopped accepting it, so an interrupted setup does not
+            # break a still-running endpoint.
+            _install_ingest_token(False, account.pw_gid)
     except Exception:
         if auth_changed:
             _restore_auth_file(previous_auth)

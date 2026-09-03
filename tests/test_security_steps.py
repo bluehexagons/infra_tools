@@ -375,7 +375,7 @@ class TestConfigureAuditd(unittest.TestCase):
     @patch("security.security_steps.is_vm", return_value=True)
     @patch("security.security_steps.os.makedirs")
     @patch("security.security_steps.run")
-    def test_matching_rules_are_reloaded_to_reconcile_kernel_state(
+    def test_rules_are_loaded_without_restarting_the_debian_service(
         self, mock_run, _makedirs, _vm, _hardware
     ):
         mock_run.return_value = SimpleNamespace(returncode=0)
@@ -386,14 +386,18 @@ class TestConfigureAuditd(unittest.TestCase):
                 "security.security_steps._AUDIT_RULES_FILE", rules_file
             ):
                 configure_auditd(config)
+                changed_commands = [
+                    call.args[0] for call in mock_run.call_args_list
+                ]
                 mock_run.reset_mock()
                 configure_auditd(config)
 
-        commands = [call.args[0] for call in mock_run.call_args_list]
-        self.assertIn("systemctl enable auditd", commands)
-        self.assertIn("systemctl start auditd", commands)
-        self.assertIn("augenrules --load", commands)
-        self.assertNotIn("systemctl restart auditd", commands)
+        matching_commands = [call.args[0] for call in mock_run.call_args_list]
+        for commands in (changed_commands, matching_commands):
+            self.assertIn("systemctl enable auditd", commands)
+            self.assertIn("systemctl start auditd", commands)
+            self.assertIn("augenrules --load", commands)
+            self.assertNotIn("systemctl restart auditd", commands)
 
 
 class TestConfigureFirewall(unittest.TestCase):

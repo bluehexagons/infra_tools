@@ -36,6 +36,11 @@ changes, rerun with `--web-panel-password` so the single Basic Auth record
 can be replaced with the new username; infra-tools refuses to preserve a
 record for a different account.
 
+The panel normally runs as the setup user so its supported per-user maintenance
+action has the intended identity. For a root-managed setup, infra-tools instead
+creates a locked `infra-web-panel` system account with a dedicated primary
+group; the browser service never runs as root or as the shared `nobody` account.
+
 ### Notification ingest API
 
 An optional API lets other managed machines send their normal infra-tools
@@ -69,7 +74,10 @@ target as a credential: keep it out of shared command output, and limit access
 to the sending machine's saved setup state. To rotate it, remove the token file
 on the panel host and rerun setup with the ingest flag, then update every
 sender. Use `--no-web-panel-notification-ingest` to disable the endpoint while
-keeping the panel; disabling removes the bearer token.
+keeping the panel. A successful disable first restarts the application without
+ingest and removes the public Nginx route, then deletes the bearer token. This
+ordering keeps an interrupted setup from breaking an endpoint that is still
+running with its previous configuration.
 
 Remove the web panel, its htpasswd and ingest-token data, and its bounded event
 history with:
@@ -119,7 +127,9 @@ The configured machine determines the contents:
   kernel auditing is enabled, auditd is running, and every expected managed
   audit key is loaded. Missing coverage and failed queries appear as specific
   warnings instead of a false clean result. Setup also reloads the managed
-  rules on a rerun even when their on-disk file has not changed;
+  rules on a rerun even when their on-disk file has not changed. A snapshot
+  older than 15 minutes is shown as stale and degraded, so a stopped exporter
+  cannot leave an old clean result on the dashboard indefinitely;
 - when notification ingest is enabled, the latest 100 accepted notifications
   appear with their source system, status, explanation, suggested action, and
   receipt address/time. Input must be a bounded schema-version-2 notification;

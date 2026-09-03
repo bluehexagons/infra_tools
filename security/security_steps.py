@@ -754,8 +754,10 @@ def configure_auditd(config: SetupConfig) -> None:
         write_text_atomic(_AUDIT_RULES_FILE, audit_rules, mode=0o640)
 
     run("systemctl enable auditd")
-    service_command = "restart" if rules_changed else "start"
-    service_result = run(f"systemctl {service_command} auditd", check=False)
+    # Debian's auditd unit deliberately refuses manual stop/restart. Starting
+    # reconciles an inactive service; augenrules performs the supported live
+    # rule reload below whether or not the on-disk rules changed.
+    service_result = run("systemctl start auditd", check=False)
     load_result = run("augenrules --load", check=False)
 
     if service_result.returncode != 0 or load_result.returncode != 0:

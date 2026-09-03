@@ -12,6 +12,7 @@ import tempfile
 import threading
 import unittest
 from contextlib import contextmanager, nullcontext, redirect_stdout
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -20,10 +21,12 @@ from common.web_panel_steps import (
     _configure_audit_exporter,
     _configure_service,
     _ensure_event_storage,
+    _ensure_web_panel_service_account,
     _install_auth_file,
     _install_ingest_token,
     _write_nginx_site,
     build_web_panel_manifest,
+    configure_web_panel,
     web_panel_url,
     remove_web_panel,
     render_web_panel_nginx,
@@ -45,6 +48,7 @@ from common.service_tools.web_panel_service import (
 )
 from common.web_panel_events import (
     WEB_PANEL_NOTIFICATION_ENDPOINT,
+    load_audit_snapshot,
     validate_notification_payload,
 )
 from lib.arg_parser import create_setup_argument_parser
@@ -418,6 +422,76 @@ class WebPanelLifecycleTest(unittest.TestCase):
             mock_chown.assert_any_call(audit_dir, 0, 1002)
             mock_chown.assert_any_call(notification_dir, 1001, 1002)
 
+    def test_root_setup_creates_a_locked_dedicated_service_account(self) -> None:
+        account = SimpleNamespace(
+            pw_name="infra-web-panel",
+            pw_uid=990,
+            pw_gid=990,
+            pw_dir="/nonexistent",
+            pw_shell="/usr/sbin/nologin",
+        )
+        group = SimpleNamespace(gr_name="infra-web-panel", gr_mem=[])
+        with (
+            patch(
+                "common.web_panel_steps.pwd.getpwnam",
+                side_effect=[KeyError("infra-web-panel"), account],
+            ),
+            patch(
+                "common.web_panel_steps.pwd.getpwall",
+                return_value=[account],
+            ),
+            patch(
+                "common.web_panel_steps.grp.getgrgid",
+                return_value=group,
+            ),
+            patch("common.web_panel_steps.run") as mock_run,
+        ):
+            resolved = _ensure_web_panel_service_account(
+                _config(username="root")
+            )
+
+        self.assertIs(resolved, account)
+        mock_run.assert_called_once_with(
+            [
+                "useradd",
+                "--system",
+                "--user-group",
+                "--home-dir",
+                "/nonexistent",
+                "--no-create-home",
+                "--shell",
+                "/usr/sbin/nologin",
+                "infra-web-panel",
+            ],
+            check=True,
+        )
+
+    def test_root_setup_rejects_a_shared_service_group(self) -> None:
+        account = SimpleNamespace(
+            pw_name="infra-web-panel",
+            pw_uid=990,
+            pw_gid=990,
+            pw_dir="/nonexistent",
+            pw_shell="/usr/sbin/nologin",
+        )
+        group = SimpleNamespace(gr_name="infra-web-panel", gr_mem=["other"])
+        with (
+            patch(
+                "common.web_panel_steps.pwd.getpwnam",
+                return_value=account,
+            ),
+            patch(
+                "common.web_panel_steps.pwd.getpwall",
+                return_value=[account],
+            ),
+            patch(
+                "common.web_panel_steps.grp.getgrgid",
+                return_value=group,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "incompatible"):
+                _ensure_web_panel_service_account(_config(username="root"))
+
     def test_new_payload_replaces_auth_for_a_renamed_setup_user(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config_dir = os.path.join(temporary, "config")
@@ -556,6 +630,108 @@ class WebPanelLifecycleTest(unittest.TestCase):
             self.assertIn("--socket-group 33", content)
             self.assertIn("ProtectControlGroups=true", content)
             self.assertIn("LockPersonality=true", content)
+
+    def test_root_setup_service_does_not_run_as_the_shared_nobody_user(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            service_file = os.path.join(temporary, "web-panel.service")
+            socket_path = os.path.join(temporary, "http.sock")
+            with open(socket_path, "w", encoding="utf-8"):
+                pass
+            service_account = SimpleNamespace(pw_uid=990, pw_gid=990)
+            web_account = SimpleNamespace(pw_uid=33, pw_gid=33)
+
+            with (
+                patch.multiple(
+                    "common.web_panel_steps",
+                    WEB_PANEL_SERVICE_FILE=service_file,
+                    WEB_PANEL_SOCKET=socket_path,
+                ),
+                patch(
+                    "common.web_panel_steps.pwd.getpwnam",
+                    side_effect=lambda name: (
+                        web_account if name == "www-data" else service_account
+                    ),
+                ),
+                patch(
+                    "common.web_panel_steps.run",
+                    return_value=SimpleNamespace(
+                        returncode=0, stdout="", stderr=""
+                    ),
+                ),
+                patch(
+                    "common.web_panel_steps.is_service_active",
+                    return_value=True,
+                ),
+            ):
+                _configure_service(_config(username="root"), "/nonexistent")
+
+            with open(service_file, encoding="utf-8") as file_obj:
+                content = file_obj.read()
+            self.assertIn("User=infra-web-panel", content)
+            self.assertNotIn("User=nobody", content)
+
+    def test_disabling_ingest_removes_token_after_service_and_route(self) -> None:
+        order: list[str] = []
+        account = SimpleNamespace(
+            pw_name="agent",
+            pw_uid=1001,
+            pw_gid=1002,
+            pw_dir="/home/agent",
+        )
+        with (
+            patch("common.web_panel_steps._ensure_nginx"),
+            patch(
+                "common.godot_web_steps.discover_local_web_identities",
+                return_value=[],
+            ),
+            patch(
+                "common.godot_web_steps.identities_for_config",
+                return_value=["agent-vm"],
+            ),
+            patch(
+                "common.godot_web_steps.validate_web_identities",
+                side_effect=lambda values: values,
+            ),
+            patch(
+                "common.web_panel_steps._ensure_web_panel_service_account",
+                return_value=account,
+            ),
+            patch(
+                "common.web_panel_steps._install_auth_file",
+                return_value=(False, None),
+            ),
+            patch("common.web_panel_steps._ensure_event_storage"),
+            patch("common.web_panel_steps._validate_ingest_token_path"),
+            patch(
+                "common.web_panel_steps._install_ingest_token",
+                side_effect=lambda enabled, _gid: order.append(
+                    f"token:{enabled}"
+                ),
+            ),
+            patch(
+                "common.web_panel_steps.build_web_panel_manifest",
+                return_value={},
+            ),
+            patch("common.web_panel_steps.os.makedirs"),
+            patch("common.web_panel_steps.write_json_atomic"),
+            patch("common.web_panel_steps._configure_audit_exporter"),
+            patch(
+                "common.web_panel_steps._configure_service",
+                side_effect=lambda _config, _home: order.append("service"),
+            ),
+            patch(
+                "common.web_panel_steps.render_web_panel_nginx",
+                return_value="# managed",
+            ),
+            patch(
+                "common.web_panel_steps._write_nginx_site",
+                side_effect=lambda _content: order.append("nginx") or True,
+            ),
+            patch("common.web_panel_steps.configure_nginx_auth_failure_ban"),
+        ):
+            configure_web_panel(_config(web_panel_notification_ingest=False))
+
+        self.assertEqual(order, ["service", "nginx", "token:False"])
 
     def test_audit_exporter_is_root_only_with_one_writable_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -976,6 +1152,57 @@ class WebPanelEventTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "schema_version 2"):
             validate_notification_payload(payload)
+
+    def test_audit_snapshot_freshness_is_enforced(self) -> None:
+        reference = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as temporary:
+            audit_path = os.path.join(temporary, "audit.json")
+            snapshot = {
+                "version": 1,
+                "generated_at": (reference - timedelta(minutes=5)).isoformat(),
+                "status": "ok",
+                "issues": [],
+                "events": [],
+            }
+            with open(audit_path, "w", encoding="utf-8") as file_obj:
+                json.dump(snapshot, file_obj)
+
+            fresh = load_audit_snapshot(audit_path, now=reference)
+            snapshot["generated_at"] = (
+                reference - timedelta(minutes=16)
+            ).isoformat()
+            with open(audit_path, "w", encoding="utf-8") as file_obj:
+                json.dump(snapshot, file_obj)
+            stale = load_audit_snapshot(audit_path, now=reference)
+
+        self.assertEqual(fresh["status"], "ok")
+        self.assertEqual(fresh["issues"], [])
+        self.assertEqual(stale["status"], "degraded")
+        self.assertIn("stale", stale["issues"][0].lower())
+
+    def test_audit_snapshot_rejects_an_implausible_future_timestamp(self) -> None:
+        reference = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as temporary:
+            audit_path = os.path.join(temporary, "audit.json")
+            with open(audit_path, "w", encoding="utf-8") as file_obj:
+                json.dump(
+                    {
+                        "version": 1,
+                        "generated_at": (
+                            reference + timedelta(minutes=6)
+                        ).isoformat(),
+                        "status": "ok",
+                        "issues": [],
+                        "events": [],
+                    },
+                    file_obj,
+                )
+
+            snapshot = load_audit_snapshot(audit_path, now=reference)
+
+        self.assertEqual(snapshot["status"], "unavailable")
+        self.assertEqual(snapshot["events"], [])
+        self.assertIn("future", snapshot["issues"][0].lower())
 
     def test_ingest_rejects_bad_token_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
