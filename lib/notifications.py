@@ -13,7 +13,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from logging import ERROR, INFO, Logger, WARNING
+from logging import DEBUG, ERROR, INFO, Logger, WARNING
 from typing import Any, Literal, Optional, cast
 from uuid import uuid4
 import urllib.request
@@ -202,7 +202,7 @@ class NotificationSender:
             log_event(
                 self.logger,
                 "Notification suppressed by notification level",
-                level=INFO,
+                level=DEBUG,
                 job=notification.job,
                 event_type=notification.event_type,
                 status=notification.status,

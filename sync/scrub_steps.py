@@ -114,7 +114,16 @@ def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = 
         os.makedirs(log_dir, exist_ok=True)
         scrub_id = hashlib.md5(f"{directory}:{database_path}".encode()).hexdigest()[:8]
         log_file = f"{log_dir}/scrub-{scrub_id}.log"
-        result = scrub_directory(directory, database_path, redundancy_value, log_file, verify=False)
+        # Setup reports its own final success or failure. Avoid reading and
+        # notifying with stale target state before this run saves its config.
+        result = scrub_directory(
+            directory,
+            database_path,
+            redundancy_value,
+            log_file,
+            verify=False,
+            suppress_notifications=True,
+        )
         if not result.get("ok", False):
             raise RuntimeError("Initial par2 creation did not complete successfully")
 

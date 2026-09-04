@@ -92,7 +92,11 @@ class TestSetupFailurePropagation(unittest.TestCase):
 
         self.assertEqual(validate_path.call_count, 2)
         self.assertEqual(validate_mount.call_count, 2)
-        run_sync.assert_called_once_with('/source', '/destination')
+        run_sync.assert_called_once_with(
+            '/source',
+            '/destination',
+            suppress_notifications=True,
+        )
         disk_usage.assert_not_called()
         logger.complete.assert_called_once()
         self.assertEqual(logger.complete.call_args.args[0], 'failed')
@@ -141,7 +145,10 @@ class TestScrubResultFailures(unittest.TestCase):
             patch.object(scrub_steps, 'check_path_on_smb_mount', return_value=False),
             patch.object(scrub_steps, 'get_disk_usage_details') as disk_usage,
             patch.object(scrub_steps.os, 'makedirs'),
-            patch('sync.service_tools.scrub_par2.scrub_directory', return_value={'ok': False}),
+            patch(
+                'sync.service_tools.scrub_par2.scrub_directory',
+                return_value={'ok': False},
+            ) as run_scrub,
         ):
             with self.assertRaisesRegex(RuntimeError, 'Initial par2 creation'):
                 scrub_steps.create_scrub_service(
@@ -150,6 +157,14 @@ class TestScrubResultFailures(unittest.TestCase):
                 )
 
         disk_usage.assert_not_called()
+        run_scrub.assert_called_once_with(
+            '/data',
+            '/database',
+            10,
+            '/var/log/scrub/scrub-22073bd1.log',
+            verify=False,
+            suppress_notifications=True,
+        )
         logger.complete.assert_called_once()
         self.assertEqual(logger.complete.call_args.args[0], 'failed')
 

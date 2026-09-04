@@ -148,6 +148,36 @@ class TestNotificationLevelDelivery(unittest.TestCase):
 
         self.assertEqual([config.level for config in configs], ["verbose", "verbose"])
 
+    def test_suppression_diagnostic_is_quiet_at_info_level(self) -> None:
+        stream = io.StringIO()
+        logger = logging.getLogger("test.notification-level.suppression")
+        logger.handlers = []
+        logger.propagate = False
+        logger.addHandler(logging.StreamHandler(stream))
+        logger.setLevel(logging.INFO)
+        sender = NotificationSender(
+            [
+                NotificationConfig(
+                    type="webhook",
+                    target="https://example.com/hook",
+                    level="warning",
+                )
+            ],
+            logger=logger,
+        )
+
+        self.assertTrue(
+            sender.send(
+                Notification(
+                    subject="Routine success",
+                    job="test",
+                    status="good",
+                    message="Nothing requires attention",
+                )
+            )
+        )
+        self.assertNotIn("Notification suppressed", stream.getvalue())
+
     @patch(
         "lib.machine_state.load_setup_config",
         return_value={

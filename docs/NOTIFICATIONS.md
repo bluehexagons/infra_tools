@@ -136,6 +136,9 @@ failure, warning, repair, and recovery events remain externally actionable.
 Producers can opt into success delivery for workflows that need completion
 proof. Cleanup storage-pressure warnings are sent on threshold transitions and
 once again when pressure recovers, rather than on every maintenance run.
+Initial sync and parity work performed inside setup is represented by the
+setup result and does not send a second operation notification using stale
+pre-setup state.
 
 Security-monitor notifications are summarized for people as a time window,
 overall status, categorized findings, evidence, and suggested actions. Routine

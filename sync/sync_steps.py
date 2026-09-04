@@ -88,7 +88,13 @@ def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = No
         print("  ℹ Performing initial sync...")
 
         from sync.service_tools.sync_rsync import run_rsync_with_notifications
-        result = run_rsync_with_notifications(source, destination)
+        # Setup reports its own final success or failure. Avoid reading and
+        # notifying with stale target state before this run saves its config.
+        result = run_rsync_with_notifications(
+            source,
+            destination,
+            suppress_notifications=True,
+        )
         if result != 0:
             raise RuntimeError(f"Initial sync failed with exit code {result}")
 
