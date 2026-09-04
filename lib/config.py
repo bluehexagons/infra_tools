@@ -470,6 +470,7 @@ class SetupConfig:
     backup_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
     notify_specs: Optional[NestedStrList] = None
+    notification_level: MaybeStr = None
     antistatic_server: MaybeStr = None  # "DOMAIN[:port]" spec
     antistatic_admin: MaybeStr = None  # Username; password stays in the credential store
     antistatic_db: MaybeStr = None  # "DOMAIN[:port]" spec
@@ -571,10 +572,12 @@ class SetupConfig:
 
         from lib.validation import (
             validate_godot_bundle_settings,
+            validate_notification_level,
             validate_syncthing_settings,
         )
 
         validate_godot_bundle_settings(self)
+        validate_notification_level(self.notification_level)
         validate_syncthing_settings(self)
         selected_godot_bundles = list(dict.fromkeys(self.godot_bundles or []))
         self.godot_bundles = selected_godot_bundles or None
@@ -1194,6 +1197,10 @@ class SetupConfig:
             for notify_spec in self.notify_specs:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
                 args.append(f"--notify {escaped_spec}")
+        if self.notification_level is not None:
+            args.append(
+                f"--notification-level {shlex.quote(self.notification_level)}"
+            )
         
         if self.antistatic_server:
             args.append(f"--antistatic-server {shlex.quote(self.antistatic_server)}")
@@ -1741,6 +1748,10 @@ class SetupConfig:
             for notify_spec in self.notify_specs:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
                 cmd_parts.append(f"--notify {escaped_spec}")
+        if self.notification_level is not None:
+            cmd_parts.append(
+                f"--notification-level {shlex.quote(self.notification_level)}"
+            )
         
         # Antistatic lobby server
         if self.antistatic_server:
@@ -2407,6 +2418,7 @@ class SetupConfig:
             backup_specs=getattr(args, 'backup_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),
             notify_specs=getattr(args, 'notify_specs', None),
+            notification_level=_optional_str_arg(args, 'notification_level'),
             antistatic_server=getattr(args, 'antistatic_server', None),
             antistatic_admin=getattr(args, 'antistatic_admin', None),
             antistatic_db=getattr(args, 'antistatic_db', None),

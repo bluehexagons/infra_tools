@@ -28,7 +28,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger, log_event
 from lib.atomic_io import write_json_atomic
-from lib.notifications import send_notification_safe, parse_notification_args
+from lib.notifications import (
+    notification_level_from_state,
+    parse_notification_args,
+    send_notification_safe,
+)
 from lib.machine_state import load_setup_config
 from lib.mount_utils import get_mount_ancestor
 from lib.task_utils import needs_mount_check
@@ -311,7 +315,13 @@ def execute_storage_operations() -> dict:
     
     config = RuntimeConfig.from_dict(config_dict)
     sync_specs = config.all_sync_specs()
-    notification_configs = parse_notification_args(config.notify_specs)
+    notification_configs = parse_notification_args(
+        config.notify_specs,
+        notification_level=notification_level_from_state(
+            config.notification_level,
+            logger,
+        ),
+    )
     
     log_event(
         logger,
@@ -611,7 +621,13 @@ def main():
     notification_configs = []
     friendly_name = None
     if config_dict:
-        notification_configs = parse_notification_args(config_dict.get('notify_specs', []))
+        notification_configs = parse_notification_args(
+            config_dict.get('notify_specs', []),
+            notification_level=notification_level_from_state(
+                config_dict.get('notification_level'),
+                logger,
+            ),
+        )
         friendly_name = config_dict.get('friendly_name')
     
     # Acquire lock (non-blocking) - if another instance is running, exit cleanly

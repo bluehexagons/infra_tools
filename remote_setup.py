@@ -479,6 +479,7 @@ def _run_main() -> int:
                     success=False,
                     errors=setup_errors,
                     friendly_name=config.friendly_name,
+                    notification_level=config.notification_level,
                 )
             raise
         elapsed = time.monotonic() - step_started
@@ -692,6 +693,7 @@ def _run_main() -> int:
             host=config.host,
             success=True,
             friendly_name=config.friendly_name,
+            notification_level=config.notification_level,
         )
     
     return 0

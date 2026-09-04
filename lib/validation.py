@@ -1022,6 +1022,14 @@ def validate_ssl_email(email: Optional[str]) -> None:
         raise ValueError(f"Invalid SSL email address: {email}") from exc
 
 
+def validate_notification_level(notification_level: object) -> None:
+    """Validate the optional system-wide outbound notification threshold."""
+
+    from lib.notifications import normalize_notification_level
+
+    normalize_notification_level(notification_level)
+
+
 def validate_apt_packages(packages: Optional[list[str]]) -> None:
     """Validate custom apt package names before setup or patch execution."""
 

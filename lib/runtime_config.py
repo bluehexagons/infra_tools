@@ -25,6 +25,7 @@ class RuntimeConfig:
         sync_specs: List of sync specifications [source, dest, interval]
         scrub_specs: List of scrub specifications [dir, db, redundancy, freq]
         notify_specs: List of notification specifications [type, target]
+        notification_level: Outbound notification threshold for this system
         smb_mounts: List of SMB mount specifications [mountpoint, ip, creds, share, subdir]
     """
     username: str
@@ -34,6 +35,7 @@ class RuntimeConfig:
     backup_specs: list[list[str]] = field(default_factory=list)
     friendly_name: Optional[str] = None
     smb_mounts: Optional[list[list[str]]] = None
+    notification_level: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeConfig":
@@ -53,6 +55,7 @@ class RuntimeConfig:
             notify_specs=data.get("notify_specs") or [],
             friendly_name=data.get("friendly_name"),
             smb_mounts=data.get("smb_mounts"),
+            notification_level=data.get("notification_level"),
         )
 
     @classmethod
@@ -73,6 +76,7 @@ class RuntimeConfig:
             notify_specs=config.notify_specs or [],
             friendly_name=getattr(config, 'friendly_name', None),
             smb_mounts=config.smb_mounts,
+            notification_level=getattr(config, 'notification_level', None),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -89,6 +93,7 @@ class RuntimeConfig:
             "scrub_specs": self.scrub_specs,
             "notify_specs": self.notify_specs,
             "smb_mounts": self.smb_mounts,
+            "notification_level": self.notification_level,
         }
 
     def has_storage_ops(self) -> bool:

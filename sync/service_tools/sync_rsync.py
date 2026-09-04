@@ -70,11 +70,20 @@ def run_rsync_with_notifications(source: str, destination: str, suppress_notific
     if not suppress_notifications:
         try:
             from lib.machine_state import load_setup_config
-            from lib.notifications import parse_notification_args
+            from lib.notifications import (
+                notification_level_from_state,
+                parse_notification_args,
+            )
             setup_config = load_setup_config()
             if setup_config:
                 if 'notify_specs' in setup_config:
-                    notification_configs = parse_notification_args(setup_config['notify_specs'])
+                    notification_configs = parse_notification_args(
+                        setup_config['notify_specs'],
+                        notification_level=notification_level_from_state(
+                            setup_config.get('notification_level'),
+                            logger,
+                        ),
+                    )
                 friendly_name = setup_config.get('friendly_name')
         except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
             log_event(logger, "Failed to load notification configs", level=WARNING, error=str(e))

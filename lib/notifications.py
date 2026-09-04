@@ -26,6 +26,16 @@ from lib.types import JSONDict
 NotificationStatus = Literal["good", "info", "warning", "error"]
 NotificationState = Literal["firing", "resolved", "success"]
 NotificationDeliveryPolicy = Literal["always", "signal"]
+NotificationLevel = Literal["verbose", "normal", "warning", "error", "off"]
+
+NOTIFICATION_LEVELS: tuple[NotificationLevel, ...] = (
+    "verbose",
+    "normal",
+    "warning",
+    "error",
+    "off",
+)
+DEFAULT_NOTIFICATION_LEVEL: NotificationLevel = "normal"
 
 NETWORK_TIMEOUT_SECONDS = 30
 NOTIFICATION_SCHEMA_VERSION = 2
@@ -43,10 +53,12 @@ class NotificationConfig:
     
     type: Literal["webhook", "mailbox"]
     target: str = field(repr=False)
+    level: NotificationLevel = DEFAULT_NOTIFICATION_LEVEL
 
     def __post_init__(self) -> None:
         if isinstance(self.target, str):
             self.target = self.target.strip()
+        self.level = normalize_notification_level(self.level)
     
     def __str__(self) -> str:
         return f"{self.type}:{notification_target_summary(self.type, self.target)}"
@@ -159,22 +171,16 @@ class NotificationSender:
         if not self.configs:
             return True
 
-        if not _should_deliver(notification):
-            if self.logger:
-                log_event(
-                    self.logger,
-                    "Notification suppressed by delivery policy",
-                    level=INFO,
-                    job=notification.job,
-                    event_type=notification.event_type,
-                    status=notification.status,
-                )
-            return True
-        
         all_succeeded = True
+        eligible_count = 0
+        suppressed_levels: set[NotificationLevel] = set()
         for config in self.configs:
             try:
                 validate_notification_config(config)
+                if not _should_deliver(notification, config.level):
+                    suppressed_levels.add(config.level)
+                    continue
+                eligible_count += 1
                 if config.type == "webhook":
                     self._send_webhook(config.target, notification)
                 elif config.type == "mailbox":
@@ -191,6 +197,18 @@ class NotificationSender:
                         target=_redact_notification_target(config),
                         error=str(e),
                     )
+
+        if eligible_count == 0 and suppressed_levels and self.logger:
+            log_event(
+                self.logger,
+                "Notification suppressed by notification level",
+                level=INFO,
+                job=notification.job,
+                event_type=notification.event_type,
+                status=notification.status,
+                state=notification.state,
+                notification_levels=",".join(sorted(suppressed_levels)),
+            )
         
         return all_succeeded
     
@@ -430,10 +448,15 @@ def send_notification_safe(
         return False
 
 
-def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[NotificationConfig]:
+def parse_notification_args(
+    notify_args: Optional[list[list[str]]],
+    notification_level: object = None,
+) -> list[NotificationConfig]:
     """Parse notification arguments from command line."""
     if not notify_args:
         return []
+
+    level = normalize_notification_level(notification_level)
     
     configs: list[NotificationConfig] = []
     seen: set[tuple[str, str]] = set()
@@ -447,6 +470,7 @@ def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[Noti
         config = NotificationConfig(
             type=cast(Literal["webhook", "mailbox"], notif_type),
             target=target.strip(),
+            level=level,
         )
         try:
             validate_notification_config(config)
@@ -470,6 +494,7 @@ def validate_notification_config(config: NotificationConfig) -> None:
         or not isinstance(config.target, str)
     ):
         raise ValueError("Invalid notification configuration")
+    normalize_notification_level(config.level)
     target = config.target.strip()
     if not target:
         raise ValueError(f"Notification target for {config.type} must not be empty")
@@ -546,6 +571,39 @@ def validate_notification_args(notify_args: Optional[list[list[str]]]) -> None:
         )
 
 
+def normalize_notification_level(value: object) -> NotificationLevel:
+    """Return a validated notification level, applying the default when omitted."""
+
+    if value is None:
+        return DEFAULT_NOTIFICATION_LEVEL
+    if not isinstance(value, str) or value not in NOTIFICATION_LEVELS:
+        raise ValueError(
+            "Notification level must be one of: "
+            + ", ".join(NOTIFICATION_LEVELS)
+        )
+    return cast(NotificationLevel, value)
+
+
+def notification_level_from_state(
+    value: object,
+    logger: Optional[Logger] = None,
+) -> NotificationLevel:
+    """Load a saved level without letting corrupt state disable notifications."""
+
+    try:
+        return normalize_notification_level(value)
+    except ValueError as exc:
+        if logger:
+            log_event(
+                logger,
+                "Invalid saved notification level; using default",
+                level=WARNING,
+                error=str(exc),
+                notification_level=DEFAULT_NOTIFICATION_LEVEL,
+            )
+        return DEFAULT_NOTIFICATION_LEVEL
+
+
 def load_notification_configs_from_state(logger: Optional[Logger] = None) -> list[NotificationConfig]:
     """Load notification configs from saved machine state.
     
@@ -571,11 +629,18 @@ def load_notification_configs_from_state(logger: Optional[Logger] = None) -> lis
             notify_specs = setup_config['notify_specs']
             if not isinstance(notify_specs, list):
                 raise ValueError("Saved notification targets must be a list")
+            notification_level = notification_level_from_state(
+                setup_config.get("notification_level"),
+                logger,
+            )
             configs: list[NotificationConfig] = []
             seen: set[tuple[str, str]] = set()
             invalid_count = 0
             for notify_spec in notify_specs:
-                parsed = parse_notification_args([notify_spec])
+                parsed = parse_notification_args(
+                    [notify_spec],
+                    notification_level=notification_level,
+                )
                 if not parsed:
                     invalid_count += 1
                     continue
@@ -611,7 +676,8 @@ def send_setup_notification(
     success: bool,
     errors: Optional[list[str]] = None,
     friendly_name: Optional[str] = None,
-    logger: Optional[Logger] = None
+    logger: Optional[Logger] = None,
+    notification_level: object = None,
 ) -> bool:
     """Send a notification summarizing setup results.
 
@@ -623,11 +689,15 @@ def send_setup_notification(
         errors: Optional list of error messages encountered during setup
         friendly_name: Optional human-readable name for this system
         logger: Optional logger for debugging
+        notification_level: Delivery threshold for this system
 
     Returns:
         True if all notifications were sent successfully, False otherwise
     """
-    configs = parse_notification_args(notify_specs)
+    configs = parse_notification_args(
+        notify_specs,
+        notification_level=notification_level,
+    )
     if not configs:
         return True
 
@@ -666,8 +736,24 @@ def send_setup_notification(
     )
 
 
-def _should_deliver(notification: Notification) -> bool:
-    """Return whether a signal-only notification has operator value."""
+def _should_deliver(
+    notification: Notification,
+    notification_level: object = None,
+) -> bool:
+    """Return whether an event passes the system's outbound notification level."""
+
+    level = normalize_notification_level(notification_level)
+    if level == "off":
+        return False
+    if level == "verbose":
+        return True
+    if level == "error":
+        return notification.status == "error" or notification.state == "resolved"
+    if level == "warning":
+        return notification.status in ("warning", "error") or notification.state in (
+            "firing",
+            "resolved",
+        )
     if notification.delivery_policy == "always":
         return True
     return notification.status in ("warning", "error") or notification.state in (

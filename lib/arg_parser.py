@@ -16,6 +16,7 @@ from lib.config import (
     MACHINE_TYPES,
     WEB_INTERFACES,
 )
+from lib.notifications import NOTIFICATION_LEVELS
 
 
 class CommaSeparatedChoicesAction(argparse.Action):
@@ -1292,6 +1293,15 @@ def add_setup_arguments(
     parser.add_argument("--notify", dest="notify_specs",
                        action="append", nargs=2, metavar=("TYPE", "TARGET"),
                        help="Configure notification target: TYPE (webhook|mailbox), TARGET (URL for webhook or email for mailbox). Sends alerts for important events (errors, warnings, successes). Can be used multiple times for multiple targets.")
+    parser.add_argument(
+        "--notification-level",
+        choices=NOTIFICATION_LEVELS,
+        help=(
+            "Set outbound notification volume: verbose sends every produced event; "
+            "normal keeps each job's default; warning or error applies a severity "
+            "threshold while retaining recovery events; off disables delivery"
+        ),
+    )
     
     parser.add_argument("--antistatic-server", dest="antistatic_server",
                         metavar="[DOMAIN][:PORT]",

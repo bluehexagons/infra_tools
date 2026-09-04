@@ -1149,6 +1149,7 @@ off-network clone boundaries.
 | `--sync SOURCE DEST INTERVAL` | Configure rsync sync |
 | `--scrub DIR DBPATH REDUNDANCY FREQ` | Configure par2 integrity checking |
 | `--notify TYPE TARGET` | Configure notifications |
+| `--notification-level LEVEL` | Set outbound volume to `verbose`, `normal` (default), `warning`, `error`, or `off`; local logs are unaffected |
 
 Samba shares are authenticated and hardened; `TYPE` is `read` or `write`, and
 `PATH` is one absolute directory. The metadata-cache option moves only Samba's

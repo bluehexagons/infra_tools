@@ -9,7 +9,8 @@ targets with repeatable `--notify TYPE TARGET` options.
 ```bash
 infra-tools setup server_lite fileserver admin \
   --notify webhook https://hooks.example.net/infra \
-  --notify mailbox ops@example.com
+  --notify mailbox ops@example.com \
+  --notification-level normal
 ```
 
 Supported target types are:
@@ -69,6 +70,38 @@ scheme, host, and port (or only a mailbox domain); endpoint paths, queries,
 fragments, and mailbox local parts are redacted. Reconstructed setup commands
 still contain the configured target because they must remain executable.
 Identical repeated targets are normalized and notified only once.
+
+## Choose a delivery level
+
+`--notification-level` is a system-wide threshold for outbound webhook and
+mailbox delivery. It does not discard local service logs, setup history, audit
+records, or web-panel log data. The default is `normal`, so existing setups
+keep their current behavior.
+
+| Level | Outbound behavior |
+|-------|-------------------|
+| `verbose` | Send every notification event a job produces, including routine successes normally kept local |
+| `normal` | Use each job's default policy; setup completion and actionable warning, failure, repair, and recovery events are delivered |
+| `warning` | Send warnings, errors, firing incidents, and recovery events |
+| `error` | Send errors and the recovery events needed to close a previously firing incident |
+| `off` | Disable outbound delivery while retaining configured targets and local records |
+
+For a high-signal production system, for example:
+
+```bash
+infra-tools patch fileserver admin --notification-level warning
+```
+
+For a system whose successful maintenance runs need external confirmation:
+
+```bash
+infra-tools patch buildbox agent --notification-level verbose
+```
+
+The selection is saved with the host and reused by scheduled services. A later
+patch that omits the flag preserves the saved selection. `off` is useful for a
+quiet or decommissioning window because the targets remain ready to re-enable;
+it is not a substitute for reviewing the local logs.
 
 For the optional infra-tools web-panel ingest API, put its URL-safe bearer
 token in the webhook URL fragment:
@@ -146,6 +179,7 @@ infra-tools patch fileserver admin \
   --notify webhook https://hooks.example.net/infra
 ```
 
-Use `infra-tools info HOST` to confirm that notification configuration is part
-of the saved host state. Use `infra-tools cmd HOST` to inspect the reconstructed
-command, remembering that notification endpoints may be sensitive.
+Use `infra-tools info HOST` to confirm the target count and effective delivery
+level in saved host state. Use `infra-tools cmd HOST` to inspect the
+reconstructed command, remembering that notification endpoints may be
+sensitive.

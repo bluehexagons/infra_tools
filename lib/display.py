@@ -4,7 +4,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Optional
 from lib.config import GODOT_WEB_HTTPS_PORT, SetupConfig
-from lib.notifications import notification_target_summary, parse_notification_args
+from lib.notifications import (
+    normalize_notification_level,
+    notification_target_summary,
+    parse_notification_args,
+)
 
 
 def _rdp_access_summary(config: SetupConfig) -> str:
@@ -499,9 +503,16 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         for directory, _db_path, redundancy, frequency in config.scrub_specs:
             print(f"  - {directory} ({redundancy}, {frequency})")
     
-    notification_configs = parse_notification_args(config.notify_specs)
+    notification_level = normalize_notification_level(config.notification_level)
+    notification_configs = parse_notification_args(
+        config.notify_specs,
+        notification_level=notification_level,
+    )
     if notification_configs:
-        print(f"Notifications: {len(notification_configs)} target(s)")
+        print(
+            f"Notifications: {len(notification_configs)} target(s) "
+            f"(level: {notification_level})"
+        )
         for notification_config in notification_configs:
             print(
                 f"  - {notification_config.type}: "
@@ -510,6 +521,8 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
                     notification_config.target,
                 )
             )
+    elif config.notification_level is not None:
+        print(f"Notifications: no targets (level: {notification_level})")
 
     if config.antistatic_server:
         print(f"Antistatic server: {config.antistatic_server}")
