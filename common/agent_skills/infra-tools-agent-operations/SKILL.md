@@ -80,3 +80,13 @@ also check file-backed ChatGPT auth daily and after boot, refreshing only stale
 or uncertain credentials through Codex's own managed flow. If Codex auth is
 unhealthy, inspect `codex-auth-maintenance.service` through the host capability
 check before replacing it.
+
+For an explicitly requested migration or recovery, pull file-backed credentials
+to a private controller directory without displaying them:
+
+```bash
+infra-tools agent auth pull HOST USER --output-dir PATH
+```
+
+Do not activate a pulled renewable Codex ChatGPT session concurrently on the
+source and destination machines.

@@ -1,0 +1,178 @@
+# Agent authentication
+
+This guide covers file-backed authentication for GitHub CLI, Codex, Claude
+Code, and OpenCode on managed agent VMs. Tool installation, authentication,
+non-secret configuration, and browser website sessions are separate concerns.
+
+## Supported files
+
+| Tool | Target path |
+| --- | --- |
+| GitHub CLI (`gh`) | `~/.config/gh/hosts.yml` |
+| Codex | `~/.codex/auth.json` |
+| Claude Code | `~/.claude/.credentials.json` |
+| OpenCode | `~/.local/share/opencode/auth.json` |
+
+These are the standard Linux paths used by infra-tools. Supply an explicit
+file when a vendor setting relocates its credential.
+
+Selecting an agent tool does not create authentication. Select tools with
+`--agent-tool` and choose credentials separately:
+
+```bash
+--agent-tool gh,codex,opencode \
+--agent-auth active
+```
+
+## Credential sources
+
+### Active controller user
+
+`--agent-auth active` reads supported files from the invoking controller user,
+or the original user under `sudo`. `--git-auth active` is the GitHub-specific
+form.
+
+For `gh`, infra-tools uses the selected `hosts.yml` token. If GitHub CLI stores
+the token in an operating-system keyring, infra-tools asks the authenticated
+controller-local `gh` command for it. Other tools use only their file-backed
+paths; infra-tools does not run them to create credentials.
+
+### Specified files
+
+Explicit files work when the controller has no local agent installation or
+when each VM has a separate identity:
+
+```bash
+--git-auth-file /run/secrets/agent-1/hosts.yml
+--agent-auth-file codex /run/secrets/agent-1/codex-auth.json
+--agent-auth-file opencode /run/secrets/agent-1/opencode-auth.json
+```
+
+`--agent-auth-file` is repeatable. A source must be a regular non-symlink file,
+must not be group- or world-writable, and must be no larger than 4 MiB. The
+controller does not need the corresponding agent executable.
+
+Do not combine active and file sources for the same tool. GitHub authentication
+must come from exactly one of `--git-auth`, `--git-auth-file`,
+`--agent-auth-file gh`, or the interactive token prompt.
+
+### Interactive setup
+
+`--interactive` can prompt for tools, Git policy, auth sources, non-secret
+configuration, and optional pairing. Hidden prompts keep tokens and passwords
+out of process arguments. Automation should use protected files. Dry-run mode
+does not prompt for or stage credentials.
+
+## Setup, status, and rotation
+
+Initial setup installs missing selected credentials at the canonical path with
+mode `0600`. Ordinary reruns preserve existing mutable credentials. The narrow
+exception is a Codex target whose metadata definitively requires a refresh: a
+staged, unambiguously current source may replace it.
+
+Use `agent auth set` for every other intentional replacement:
+
+```bash
+infra-tools agent auth status 192.168.0.41 agent-1 --json
+infra-tools agent auth set 192.168.0.41 agent-1 \
+  --tool codex --file /run/secrets/agent-1/codex-auth.json
+infra-tools agent auth set 192.168.0.41 agent-1 --tool gh --active
+```
+
+Status reports installation, presence, ownership, permissions, age, and safe
+Codex freshness metadata without displaying file contents, tokens, or account
+IDs. Rotation replaces the selected target atomically. Inspect status before
+replacing a credential.
+
+## Pull credentials from an agent VM
+
+Run the pull command from a cloned infra-tools repository. The Debian or
+CachyOS control system needs Python 3 and OpenSSH, but does not need an
+infra-tools installation or local agent programs.
+
+```bash
+python3 infra_tools.py ssh-key enroll 192.168.0.41
+python3 infra_tools.py agent auth pull 192.168.0.41 agent-1 \
+  --output-dir "$HOME/.agent-credentials/agent-1"
+```
+
+| Option | Purpose |
+| --- | --- |
+| `--tool TOOL` | Pull only `gh`, `codex`, `claude`, or `opencode`; repeat as needed |
+| `--output-dir PATH` | Required private destination directory |
+| `-k, --key PATH` | SSH identity file |
+| `-p, --port PORT` | SSH port |
+| `--overwrite` | Deliberately replace existing regular output files |
+
+Without `--tool`, absent files are skipped. An explicitly requested but absent
+file fails. The command uses the workspace's strict SSH host-key policy and
+never prints credential contents or remote error text. It reads only the
+canonical paths above and rejects unsafe ownership, permissions, symlinks,
+changes during transfer, empty files, and files over 4 MiB. The private output
+directory is mode `0700`; files are atomically written with mode `0600`.
+
+Output names are `gh-hosts.yml`, `codex-auth.json`,
+`claude-credentials.json`, and `opencode-auth.json`. Reference them with the
+matching setup option or `agent auth set --file`. The command cannot export an
+operating-system keyring; a `gh` file without an embedded token is not a
+portable credential.
+
+Pulling is for migration or recovery, not synchronization. Stop using the
+source VM's renewable Codex ChatGPT session before activating its pulled
+`auth.json` elsewhere.
+
+## Portability and sharing
+
+| Tool | Guidance |
+| --- | --- |
+| `gh` | A `hosts.yml` with an embedded token is portable. A keyring-only file is not; use authenticated `gh` on the source controller or a protected token file. |
+| Codex | `auth.json` is file-backed, but ChatGPT OAuth state is renewable per machine. Do not use copies concurrently. Prefer independent login or a dedicated automation credential. |
+| Claude Code | Linux commonly uses the credentials file; macOS may use Keychain. A Keychain session is not exported by copying this file. |
+| OpenCode | The JSON file can be copied, but use separate provider identities when independent revocation and audit are required. |
+
+Sharing a static token means every VM has the token's full scope, provider
+audit logs show the same identity, and one revocation affects every copy. Use
+least-privilege, per-VM credentials where practical.
+
+## Non-secret agent configuration
+
+`--agent-config active` copies settings, instructions, skills, rules, aliases,
+and extensions for selected tools. It excludes auth files and `gh` `hosts.yml`.
+A setting that selects a keyring backend does not make a portable credential
+file appear. Missing configuration is skipped.
+
+T3 Code is an interface rather than a credential source. Its server uses the
+provider credentials installed for the target user, while pairing state is
+managed on the VM. Browser cookies and website sessions are also outside this
+copying flow.
+
+## Codex maintenance
+
+Codex-enabled VMs receive a non-root daily maintenance timer with an additional
+check after boot. It asks Codex to refresh file-backed ChatGPT authentication
+only when safe metadata reports stale or uncertain state. It does not refresh
+API-key auth.
+
+If Codex authentication fails:
+
+```bash
+infra-tools agent doctor HOST USER --tool codex --capability host --json
+infra-tools agent auth status HOST USER --tool codex --json
+```
+
+Inspect `codex-auth-maintenance.service` when the timer is present. If the file
+is invalid, lacks required refresh state, or remains stale after provider
+rejection, authenticate the VM independently or deliberately replace it with
+`agent auth set`.
+
+## Security and lifecycle
+
+- Keep sources in protected directories outside repositories.
+- Credential source paths and payloads are not stored in setup history.
+- Setup removes transient staged copies after success or failure.
+- Use separate identities for separate revocation and audit boundaries.
+- Revoke provider-side credentials when a VM retires or may be compromised.
+- Do not distribute one renewable Codex ChatGPT session to concurrent VMs.
+
+See [Credentials overview](CREDENTIALS.md), [Git access](GIT_ACCESS.md), and
+[Agentic coding security](AGENT_SECURITY.md).

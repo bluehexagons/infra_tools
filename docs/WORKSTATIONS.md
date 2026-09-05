@@ -23,9 +23,9 @@ for XRDP sessions. Select only the graphical agents needed with repeatable
 `--agent-tool` flags; language runtimes remain separate explicit options.
 
 Agent installation, authentication, and non-secret configuration are separate
-choices. See [Credentials and agent configuration](CREDENTIALS.md) before
-copying active-user credentials to a workstation or VM, especially when
-multiple VMs need independent GitHub access.
+choices. See [Agent authentication](AGENT_AUTHENTICATION.md) and
+[Git access](GIT_ACCESS.md) before copying active-user credentials to a
+workstation or VM, especially when multiple VMs need independent access.
 For agent-controlled page previews and interaction, see
 [Agent browser automation](BROWSER_AUTOMATION.md); it is independent of the
 human-operated browser described in this guide.

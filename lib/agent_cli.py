@@ -306,6 +306,33 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
     )
     auth_status.add_argument("--json", action="store_true", help="Output JSON")
     auth_status.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
+
+    auth_pull = auth_commands.add_parser(
+        "pull",
+        help="Copy file-backed credentials from an existing agent VM",
+    )
+    auth_pull.add_argument("agent_auth_host", metavar="HOST")
+    auth_pull.add_argument("agent_auth_username", metavar="USER")
+    auth_pull.add_argument(
+        "--tool",
+        dest="agent_auth_tools",
+        action="append",
+        choices=AGENT_AUTH_TOOLS,
+        help="Credential to pull; repeat as needed (default: every present file)",
+    )
+    auth_pull.add_argument(
+        "--output-dir",
+        required=True,
+        metavar="PATH",
+        help="Private directory for the pulled credential files",
+    )
+    auth_pull.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
+    auth_pull.add_argument("-p", "--port", type=int, default=22, help="SSH port")
+    auth_pull.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Deliberately replace existing regular output files",
+    )
     web = commands.add_parser(
         "web",
         help="Pair with a remote agent web interface",
@@ -2301,17 +2328,23 @@ def run_agent_command(args: argparse.Namespace) -> int:
         return 1
 
     if args.agent_command == "auth":
-        from lib.agent_auth import run_agent_auth_set, run_agent_auth_status
+        from lib.agent_auth import (
+            run_agent_auth_pull,
+            run_agent_auth_set,
+            run_agent_auth_status,
+        )
 
         try:
             if args.agent_auth_command == "set":
                 return run_agent_auth_set(args)
             if args.agent_auth_command == "status":
                 return run_agent_auth_status(args)
+            if args.agent_auth_command == "pull":
+                return run_agent_auth_pull(args)
         except (OSError, RuntimeError, ValueError, EOFError, KeyboardInterrupt) as exc:
             print(f"Error: {exc}")
             return 1
-        print("Error: agent auth command required (set or status)")
+        print("Error: agent auth command required (set, status, or pull)")
         return 1
 
     if args.agent_command == "update":

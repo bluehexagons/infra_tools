@@ -18,7 +18,7 @@ infra-tools = "infra_tools:main"
 webhook_manager = "web.service_tools.webhook_manager:main"
 
 [tool.setuptools]
-py-modules = ["agent_auth_pull", "infra_tools", "remote_setup"]
+py-modules = ["infra_tools", "remote_setup"]
 
 [tool.setuptools.packages.find]
 where = ["."]

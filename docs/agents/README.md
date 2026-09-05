@@ -15,7 +15,9 @@ managed machine.
 | --- | --- | --- |
 | Choose a headless or graphical coding profile | [Workstations](../WORKSTATIONS.md) | [Command-line agent flags](../COMMAND_LINE.md#agent-host-flags) |
 | Choose default, passwordless-sudo, or hardened operation | [Agentic coding security](../AGENT_SECURITY.md) | [Workstations](../WORKSTATIONS.md) |
-| Provide Git, GitHub, or coding-agent credentials | [Credentials and agent configuration](../CREDENTIALS.md) | [SSH authentication](../SSH.md) |
+| Choose a credential workflow | [Credentials overview](../CREDENTIALS.md) | [SSH authentication](../SSH.md) |
+| Seed, rotate, or recover coding-agent auth | [Agent authentication](../AGENT_AUTHENTICATION.md) | [Credentials overview](../CREDENTIALS.md) |
+| Configure GitHub or self-hosted Git access | [Git access](../GIT_ACCESS.md) | [Credentials overview](../CREDENTIALS.md) |
 | Use managed browser testing | [Agent browser automation](../BROWSER_AUTOMATION.md) | [Managed workflow skills](../AGENT_SKILLS.md) |
 | Install or operate T3 Code | [T3 Code server](../T3_CODE.md) | [Agent browser automation](../BROWSER_AUTOMATION.md) |
 | Understand installed skills and capability routing | [Managed workflow skills](../AGENT_SKILLS.md) | [Command-line agent flags](../COMMAND_LINE.md#agent-host-flags) |
@@ -42,7 +44,7 @@ protecting active work from scheduled host maintenance; see
 | Concern | Guide |
 | --- | --- |
 | Privilege, sandboxing, prompt injection, and supply chain | [Agentic coding security](../AGENT_SECURITY.md) |
-| Credential scope, copying, rotation, and lifecycle | [Credentials and agent configuration](../CREDENTIALS.md) |
+| Credential scope, copying, rotation, and lifecycle | [Agent authentication](../AGENT_AUTHENTICATION.md) |
 | Browser access and private-network trust | [Agent browser automation](../BROWSER_AUTOMATION.md) |
 | Host capability differences | [Machine types](../MACHINE_TYPES.md) |
 | Managed worktrees and deployment smoke checks | [Managed workflow skills](../AGENT_SKILLS.md) |

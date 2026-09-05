@@ -38,7 +38,9 @@ overview.
 | Guide | Use it for |
 | --- | --- |
 | [SSH authentication](SSH.md) | Passphrase-protected keys, terminal prompts, SSH agents, and troubleshooting |
-| [Credentials and agent configuration](CREDENTIALS.md) | Workspace passwords, Git access, agent auth/config, sharing, and rotation |
+| [Credentials overview](CREDENTIALS.md) | Choose the correct credential store or workflow |
+| [Agent authentication](AGENT_AUTHENTICATION.md) | Agent auth sources, rotation, recovery, portability, and lifecycle |
+| [Git access and authentication](GIT_ACCESS.md) | Git policy, GitHub, self-hosted HTTPS, private CAs, and Git LFS |
 | [Authentication hardening](AUTHENTICATION_HARDENING.md) | Reachability, rate limits, failure bans, and verification for login surfaces |
 | [Notifications](NOTIFICATIONS.md) | Webhook, mailbox, and web-panel delivery; event volume; and alert interpretation |
 | [Minimal web panel](WEB_PANEL.md) | Authenticated service links, audit activity, notification history, ingest tokens, and access troubleshooting |

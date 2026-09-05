@@ -153,8 +153,9 @@ command when the token is stored in the controller's keyring; file-backed
 Codex, Claude Code, and OpenCode credentials must be supplied as files. Use
 `--repo GIT_URL` for target-side HTTPS clones; public repositories on any
 reachable Git host are supported.
-The [credentials guide](CREDENTIALS.md) explains the difference between
-workspace passwords, GitHub auth, agent auth, and non-secret agent config.
+The [credentials overview](CREDENTIALS.md) routes workspace passwords,
+[Git access](GIT_ACCESS.md), and [agent authentication](AGENT_AUTHENTICATION.md)
+to their focused workflows.
 
 Node and agent-tool setup installs a managed Bash environment under
 `~/.local/share/infra-tools/shell-env.sh`. The active Bash login file and
@@ -350,15 +351,16 @@ infra-tools credentials remove admin
 
 Passwords are excluded from saved setup state and reconstructed commands.
 
-For agent VM authentication, Git policy, active/file sources, per-VM
-credential isolation, and remote rotation, see [Credentials and agent
-configuration](CREDENTIALS.md).
+For agent VM authentication, active/file sources, per-VM isolation, and remote
+rotation, see [Agent authentication](AGENT_AUTHENTICATION.md). For repository
+policy and HTTPS credentials, see [Git access](GIT_ACCESS.md).
 
 ## Related guides
 
 - [Command-line reference](COMMAND_LINE.md) — all setup flags and system types
-- [Credentials and agent configuration](CREDENTIALS.md) — workspace passwords,
-  Git access, agent auth, configuration, sharing, and rotation
+- [Credentials overview](CREDENTIALS.md) — choose the correct credential flow
+- [Agent authentication](AGENT_AUTHENTICATION.md) — agent auth and recovery
+- [Git access](GIT_ACCESS.md) — repository policy and HTTPS authentication
 - [Workstations](WORKSTATIONS.md) — desktop profiles, browsers, and agents
 - [XRDP](XRDP.md) — RDP sessions and firewall behavior
 - [Machine types](MACHINE_TYPES.md) — Debian VMs, bare metal, and containers

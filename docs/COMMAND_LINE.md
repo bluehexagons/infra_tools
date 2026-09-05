@@ -14,8 +14,10 @@ Related pages:
 - [`GODOT.md`](./GODOT.md) for graphical/headless Godot installation and updates
 - [`SYNCTHING.md`](./SYNCTHING.md) for private peer and folder synchronization
 - [`MACHINE_TYPES.md`](./MACHINE_TYPES.md) for machine type behavior
-- [`CREDENTIALS.md`](./CREDENTIALS.md) for workspace passwords, Git access,
-  agent auth/config sources, sharing, and credential rotation
+- [`CREDENTIALS.md`](./CREDENTIALS.md) for the credential workflow map
+- [`AGENT_AUTHENTICATION.md`](./AGENT_AUTHENTICATION.md) for agent auth
+  sources, rotation, recovery, and portability
+- [`GIT_ACCESS.md`](./GIT_ACCESS.md) for Git policy and HTTPS authentication
 - [`AGENT_SKILLS.md`](./AGENT_SKILLS.md) for managed Codex/OpenCode workflow
   skills and capability routing
 - [`AGENT_SECURITY.md`](./AGENT_SECURITY.md) for coding-user privilege,
@@ -53,6 +55,7 @@ infra-tools agent doctor [HOST USER] [options]
 infra-tools agent update [HOST USER] [options]
 infra-tools agent auth set HOST USER --tool TOOL --file PATH
 infra-tools agent auth status HOST USER [--tool TOOL]
+infra-tools agent auth pull HOST USER --output-dir PATH [--tool TOOL]
 infra-tools agent web pair HOST USER [-k PATH]
 infra-tools agent workspace <create|list|status|remove> ...
 infra-tools agent maintenance <hold|status|release> [HOST USER] [options]
@@ -392,8 +395,8 @@ only when that lighter profile is intentional.
 
 The agent setup model separates explicit tool installation, VM-level Git
 policy, authentication payloads, and non-secret agent configuration. See
-[`CREDENTIALS.md`](./CREDENTIALS.md) for the source/destination matrix,
-per-VM credential guidance, interactive setup, and rotation details.
+[agent authentication](AGENT_AUTHENTICATION.md) and [Git
+access](GIT_ACCESS.md) for those workflows.
 See [`BROWSER_AUTOMATION.md`](./BROWSER_AUTOMATION.md) for the separate
 Playwright runtime, MCP registration, and browser security model.
 
@@ -775,6 +778,7 @@ Credential rotation does not rebuild the VM or overwrite repositories:
 infra-tools agent auth set 10.0.0.10 agent --tool gh --file /run/secrets/gh-hosts.yml
 infra-tools agent auth set 10.0.0.10 agent --tool codex --active
 infra-tools agent auth status 10.0.0.10 agent --json
+python3 infra_tools.py agent auth pull 10.0.0.10 agent --output-dir ~/.agent-credentials/agent
 ```
 
 `auth set` accepts an active-user source, a controller-local file, or
@@ -788,6 +792,10 @@ dates, and the GitHub authentication check; it never prints credential
 contents, token strings, or Codex account IDs. Normal setup preserves existing
 credentials except for a safe refresh of known-outdated Codex auth; `auth set`
 is the deliberate replacement path for every other case.
+`auth pull` copies canonical file-backed credentials from an existing agent VM
+into a private controller directory without requiring local agent programs.
+Run it from a clone when infra-tools is not installed; see [Agent
+authentication](AGENT_AUTHENTICATION.md#pull-credentials-from-an-agent-vm).
 
 The normal restart policy defers for active login sessions, coding agents,
 build and Git processes, terminal multiplexers, maintenance holds, and

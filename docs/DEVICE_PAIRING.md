@@ -266,6 +266,6 @@ its supported CLI, writes a safe provider record, and documents its native
 session/revocation behavior. Arbitrary operator-supplied commands are not
 accepted.
 
-See [T3 Code interfaces](T3_CODE.md) for the complete T3 workflow and
-[Credentials and agent configuration](CREDENTIALS.md) for provider and Git
-credentials.
+See [T3 Code interfaces](T3_CODE.md) for the complete T3 workflow,
+[Agent authentication](AGENT_AUTHENTICATION.md) for provider credentials, and
+[Git access](GIT_ACCESS.md) for repository authentication.

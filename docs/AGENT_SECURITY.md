@@ -148,5 +148,6 @@ disposable identity or VM when those boundaries matter.
 - [Command-line reference](COMMAND_LINE.md)
 - [SSH authentication](SSH.md)
 - [T3 Code server](T3_CODE.md)
-- [Credentials and agent configuration](CREDENTIALS.md)
+- [Credentials overview](CREDENTIALS.md)
+- [Agent authentication](AGENT_AUTHENTICATION.md)
 - [Agent browser automation](BROWSER_AUTOMATION.md)
