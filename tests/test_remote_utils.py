@@ -89,7 +89,7 @@ class TestRunCommandDispatch(unittest.TestCase):
             stderr=None,
             text=True,
             cwd=None,
-            start_new_session=False,
+            start_new_session=True,
         )
         process.communicate.assert_called_once_with(
             input=None,
@@ -109,7 +109,7 @@ class TestRunCommandDispatch(unittest.TestCase):
             stderr=None,
             text=True,
             cwd=None,
-            start_new_session=False,
+            start_new_session=True,
         )
 
     @patch("lib.remote_utils.subprocess.Popen")
@@ -232,8 +232,9 @@ class TestRunCommandDispatch(unittest.TestCase):
         self.assertNotIn("unterminated secret phrase", message)
         self.assertIn("--name 'public value'", message)
 
+    @patch("lib.remote_utils.os.killpg")
     @patch("lib.remote_utils.subprocess.Popen")
-    def test_non_shell_timeout_raises_typed_error_even_when_best_effort(self, mock_popen):
+    def test_non_shell_timeout_raises_typed_error_even_when_best_effort(self, mock_popen, mock_killpg):
         process = self._completed_process(mock_popen)
         process.communicate.side_effect = [
             subprocess.TimeoutExpired(["deploy"], 2, stderr="--token timeout-secret"),
@@ -247,8 +248,32 @@ class TestRunCommandDispatch(unittest.TestCase):
         self.assertEqual(error.timeout, 2)
         self.assertNotIn("command-secret", str(error))
         self.assertNotIn("timeout-secret", str(error))
-        process.kill.assert_called_once_with()
-        process.wait.assert_called_once_with()
+        self.assertEqual(
+            mock_killpg.call_args_list,
+            [unittest.mock.call(1234, signal.SIGTERM), unittest.mock.call(1234, signal.SIGKILL)],
+        )
+        process.wait.assert_called_once_with(timeout=5.0)
+        self.assertEqual(process.communicate.call_args.kwargs, {"timeout": 5.0})
+
+    @patch("lib.remote_utils.os.killpg")
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_escaped_child_cannot_make_timeout_cleanup_unbounded(self, mock_popen, mock_killpg):
+        process = self._completed_process(mock_popen)
+        process.wait.side_effect = subprocess.TimeoutExpired(["deploy"], 5)
+        process.communicate.side_effect = [
+            subprocess.TimeoutExpired(["deploy"], 1),
+            subprocess.TimeoutExpired(["deploy"], 5, stderr=b"partial --token secret"),
+        ]
+
+        with self.assertRaises(CommandTimeoutError) as raised:
+            run(["deploy"], capture_output=True, timeout=1)
+
+        self.assertIn("partial --token <redacted>", str(raised.exception))
+        self.assertEqual(process.communicate.call_args.kwargs, {"timeout": 5.0})
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close.assert_called_once_with()
+        process.poll.assert_called_once_with()
+        mock_killpg.assert_called_with(1234, signal.SIGKILL)
 
     @patch("lib.remote_utils.os.killpg")
     @patch("lib.remote_utils.subprocess.Popen")

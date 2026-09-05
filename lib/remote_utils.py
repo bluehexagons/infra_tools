@@ -200,31 +200,21 @@ def _validate_timeout(timeout: Optional[float]) -> Optional[float]:
 
 def _terminate_timed_out_process(
     process: subprocess.Popen[str],
-    *,
-    process_group: bool,
 ) -> None:
-    """Terminate a timed-out process and any shell descendants."""
-
-    if process_group:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=_TIMEOUT_TERMINATION_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            pass
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        return
+    """Terminate a timed-out command's group, including surviving children."""
 
     try:
-        process.kill()
+        os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
         return
-    process.wait()
+    try:
+        process.wait(timeout=_TIMEOUT_TERMINATION_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def run(
@@ -270,15 +260,26 @@ def run(
         stderr=subprocess.PIPE if capture_output else None,
         text=text,
         cwd=cwd,
-        start_new_session=requires_shell,
+        start_new_session=True,
     )
     try:
         stdout, stderr = process.communicate(input=input_data, timeout=validated_timeout)
     except subprocess.TimeoutExpired as exc:
         assert validated_timeout is not None
-        _terminate_timed_out_process(process, process_group=requires_shell)
-        stdout, stderr = process.communicate()
+        _terminate_timed_out_process(process)
+        try:
+            stdout, stderr = process.communicate(timeout=_TIMEOUT_TERMINATION_GRACE_SECONDS)
+        except subprocess.TimeoutExpired as cleanup_exc:
+            # A child can escape the group with setsid() and retain a pipe.
+            # Never turn timeout handling into another unbounded wait.
+            stderr = cleanup_exc.stderr
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+            process.poll()
         diagnostic = stderr or exc.stderr
+        if isinstance(diagnostic, bytes):
+            diagnostic = diagnostic.decode("utf-8", errors="replace")
         raise CommandTimeoutError(
             log_cmd,
             validated_timeout,

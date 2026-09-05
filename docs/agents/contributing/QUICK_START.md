@@ -45,6 +45,14 @@ python3 -m unittest discover -s tests
 - Mock system calls; use `tempfile.TemporaryDirectory()` for test storage.
 - Keep operator documentation current.
 
+`lib.remote_utils.run()` isolates every command in a process group and applies
+a one-hour default timeout (override with a positive `timeout`, or `None` for
+an intentionally unbounded command). On timeout it terminates the group and
+bounds output collection, including when a detached child retains a pipe.
+Cleanup can add up to two five-second grace periods to the requested timeout.
+Detached processes that create their own sessions require caller-specific
+supervision if they must also be terminated.
+
 For helper selection and setup composition, use the
 [quick reference](QUICK_REFERENCE.md). For the complete contributor workflow,
 use the [contributor guide](README.md).
