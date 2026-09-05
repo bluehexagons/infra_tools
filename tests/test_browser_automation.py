@@ -365,6 +365,33 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
                 30000,
             )
 
+    def test_jsonc_registration_preserves_malformed_config_without_writing(self) -> None:
+        config = _config("opencode")
+        for content in ('{"value":1/*comment*/2}', '{"value":tru/*comment*/e}', '{"mcp":{}} /* unclosed'):
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                config_dir = home / '.config' / 'opencode'
+                config_dir.mkdir(parents=True)
+                path = config_dir / 'opencode.jsonc'
+                path.write_text(content, encoding='utf-8')
+                with (
+                    patch.object(browser_automation_steps, '_tool_available', return_value=True),
+                    patch.object(browser_automation_steps, '_user_home', return_value=str(home)),
+                    patch.object(browser_automation_steps, 'write_json_atomic') as write,
+                    patch.object(browser_automation_steps, '_chown_path') as chown,
+                ):
+                    with self.assertRaisesRegex(RuntimeError, 'malformed'):
+                        browser_automation_steps._configure_opencode(config)
+                    write.assert_not_called()
+                    chown.assert_not_called()
+                self.assertEqual(path.read_text(encoding='utf-8'), content)
+
+    def test_jsonc_block_comments_preserve_valid_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'opencode.jsonc'
+            path.write_text('{/* block */"text":"/* literal */", "value":/* before */12,}', encoding='utf-8')
+            self.assertEqual(browser_automation_steps._load_opencode_config(str(path)), {'text': '/* literal */', 'value': 12})
+
     def test_codex_registration_does_not_match_command_in_another_section(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             home = Path(temporary_directory)

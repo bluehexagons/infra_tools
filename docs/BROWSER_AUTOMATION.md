@@ -70,6 +70,9 @@ the browser registration is applied afterward, so the explicit setup choice
 owns the `infra-tools-playwright` entry while preserving unrelated settings and
 MCP servers.
 Malformed or symlinked target configuration is rejected.
+Unterminated block comments and comments splitting a JSON token are treated as
+malformed; registration leaves that file unchanged instead of repairing it
+into a potentially different configuration.
 
 The MCP launcher resolves the Chromium executable from the same pinned
 Playwright package used to provision the user browser cache and passes that

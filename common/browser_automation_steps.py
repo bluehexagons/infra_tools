@@ -186,12 +186,17 @@ def _strip_jsonc_comments(content: str) -> str:
             while index < len(content) and content[index] not in "\r\n":
                 index += 1
         elif character == "/" and index + 1 < len(content) and content[index + 1] == "*":
+            # A comment is whitespace, not token concatenation (1/*x*/2 must
+            # remain invalid JSONC instead of silently becoming 12).
+            output.append(" ")
             index += 2
             while index + 1 < len(content) and content[index:index + 2] != "*/":
                 if content[index] in "\r\n":
                     output.append(content[index])
                 index += 1
-            index = min(index + 2, len(content))
+            if index + 1 >= len(content):
+                raise ValueError("Unterminated JSONC block comment")
+            index += 2
         else:
             output.append(character)
             index += 1
