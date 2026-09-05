@@ -18,6 +18,9 @@
 | Hosts, IP addresses, usernames | `lib.validators` |
 
 Validate before remote or system mutations.
+Identity validators match the complete input, reject control-character suffixes,
+and accept ASCII IPv4 digits only. Hostnames may have one terminal DNS root dot;
+repeated terminal dots and names longer than 253 characters are rejected.
 
 ## Capability helpers
 

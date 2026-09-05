@@ -12,6 +12,11 @@ from lib.validators import validate_ip_address, validate_host, validate_username
 
 
 class TestValidateIpAddress(unittest.TestCase):
+    def test_rejects_non_ascii_digits_and_trailing_input(self):
+        for value in ('192.0.2.1\n', '192.0.2.1\r', '١٩٢.٠.٢.١', None, 123):
+            with self.subTest(value=value):
+                self.assertFalse(validate_ip_address(value))
+
     def test_valid_ipv4(self):
         self.assertTrue(validate_ip_address('192.168.1.1'))
 
@@ -41,6 +46,11 @@ class TestValidateIpAddress(unittest.TestCase):
 
 
 class TestValidateHost(unittest.TestCase):
+    def test_rejects_trailing_input_repeated_root_dots_and_overlong_names(self):
+        for value in ('example.com\n', '192.0.2.1\n', 'example.com..', '.'.join(['a' * 63] * 4), None):
+            with self.subTest(value=value):
+                self.assertFalse(validate_host(value))
+
     def test_valid_ip(self):
         self.assertTrue(validate_host('192.168.1.1'))
 
@@ -67,6 +77,11 @@ class TestValidateHost(unittest.TestCase):
 
 
 class TestValidateUsername(unittest.TestCase):
+    def test_rejects_trailing_input(self):
+        for value in ('deploy\n', 'deploy\r', 'deploy\x00', None):
+            with self.subTest(value=value):
+                self.assertFalse(validate_username(value))
+
     def test_valid_simple(self):
         self.assertTrue(validate_username('john'))
 
