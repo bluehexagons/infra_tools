@@ -168,6 +168,10 @@ event only verifies webhook connectivity and does not build a repository.
   installed template and TLS certificates. Raw nginx directives, proxy targets,
   and log destinations cannot be supplied by the build server. Generated sites
   refuse to serve symlinks, and their roots must resolve below an allowed base
+- existing nginx sites can only be replaced or removed when their file starts
+  with the infra-tools deployment generator marker and their enabled link
+  references that file. Administrator-owned or unrelated service sites are
+  preserved; adopting an unmarked legacy site requires administrator review
 - build logs live under `/var/lib/infra_tools/cicd/logs/`
 - build scripts run as the dedicated `webhook` user
 - `--build-server --node` and `--build-server --python` bootstrap the build

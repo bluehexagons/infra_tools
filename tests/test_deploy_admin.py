@@ -17,6 +17,7 @@ from web.service_tools.deploy_admin import validate_config_name, validate_servic
 SITE_REQUEST = json.dumps({
     'domain': 'example', 'path': '/', 'serve_path': '/var/www/example', 'project_type': 'static',
 }).encode()
+OLD_CONFIG = (deploy_admin.GENERATED_CONFIG_MARKER + '\nold config\n').encode()
 
 
 class TestDeployAdminValidation(unittest.TestCase):
@@ -89,9 +90,9 @@ class TestDeployAdminFileOperations(unittest.TestCase):
             installed = os.path.join(available, "example")
             link = os.path.join(enabled, "example")
             with open(installed, "wb") as config:
-                config.write(b"old config\n")
+                config.write(OLD_CONFIG)
             os.chmod(installed, 0o640)
-            os.symlink("/old/example", link)
+            os.symlink(installed, link)
             staged_path = f"{staged_prefix}example.json"
             with open(staged_path, "wb") as staged:
                 staged.write(SITE_REQUEST)
@@ -101,9 +102,9 @@ class TestDeployAdminFileOperations(unittest.TestCase):
                     deploy_admin.install_nginx_config("example")
 
             with open(installed, "rb") as config:
-                self.assertEqual(config.read(), b"old config\n")
+                self.assertEqual(config.read(), OLD_CONFIG)
             self.assertEqual(os.stat(installed).st_mode & 0o777, 0o640)
-            self.assertEqual(os.readlink(link), "/old/example")
+            self.assertEqual(os.readlink(link), installed)
             self.assertFalse(os.path.exists(staged_path))
 
     def test_install_rejects_stage_owned_by_another_user(self) -> None:
@@ -125,7 +126,7 @@ class TestDeployAdminFileOperations(unittest.TestCase):
             installed = os.path.join(available, "example")
             link = os.path.join(enabled, "example")
             with open(installed, "wb") as config:
-                config.write(b"config")
+                config.write(OLD_CONFIG)
             os.symlink(installed, link)
 
             with patch.object(deploy_admin, "NGINX_AVAILABLE_DIR", available), patch.object(deploy_admin, "NGINX_ENABLED_DIR", enabled), patch.object(deploy_admin, "NGINX_BINARY", "/mock/nginx"), patch.object(deploy_admin, "_run_checked") as run_checked:
@@ -141,16 +142,49 @@ class TestDeployAdminFileOperations(unittest.TestCase):
             installed = os.path.join(available, "example")
             link = os.path.join(enabled, "example")
             with open(installed, "wb") as config:
-                config.write(b"config")
-            os.symlink("/old/example", link)
+                config.write(OLD_CONFIG)
+            os.symlink(installed, link)
 
             with patch.object(deploy_admin, "NGINX_AVAILABLE_DIR", available), patch.object(deploy_admin, "NGINX_ENABLED_DIR", enabled), patch.object(deploy_admin, "_run_checked", side_effect=RuntimeError("invalid nginx")):
                 with self.assertRaisesRegex(RuntimeError, "invalid nginx"):
                     deploy_admin.remove_nginx_config("example")
 
             with open(installed, "rb") as config:
-                self.assertEqual(config.read(), b"config")
-            self.assertEqual(os.readlink(link), "/old/example")
+                self.assertEqual(config.read(), OLD_CONFIG)
+            self.assertEqual(os.readlink(link), installed)
+
+    def test_install_and_remove_preserve_unmanaged_sites(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            available, enabled, staged_prefix = self._paths(root)
+            installed = os.path.join(available, 'example')
+            link = os.path.join(enabled, 'example')
+            with open(installed, 'wb') as config:
+                config.write(b'# Administrator-owned site\nserver {}\n')
+            os.symlink(installed, link)
+            with open(f'{staged_prefix}example.json', 'wb') as staged:
+                staged.write(SITE_REQUEST)
+            with patch.object(deploy_admin, 'NGINX_AVAILABLE_DIR', available), patch.object(deploy_admin, 'NGINX_ENABLED_DIR', enabled), patch.object(deploy_admin, 'STAGED_CONFIG_PREFIX', staged_prefix), patch.object(deploy_admin, '_run_checked') as run:
+                for operation in (deploy_admin.install_nginx_config, deploy_admin.remove_nginx_config):
+                    with self.subTest(operation=operation.__name__), self.assertRaisesRegex(ValueError, 'unmanaged'):
+                        operation('example')
+                run.assert_not_called()
+            with open(installed, 'rb') as config:
+                self.assertEqual(config.read(), b'# Administrator-owned site\nserver {}\n')
+            self.assertEqual(os.readlink(link), installed)
+
+    def test_remove_preserves_link_to_another_site(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            available, enabled, _ = self._paths(root)
+            installed = os.path.join(available, 'example')
+            link = os.path.join(enabled, 'example')
+            with open(installed, 'wb') as config:
+                config.write(OLD_CONFIG)
+            os.symlink('/unrelated/site', link)
+            with patch.object(deploy_admin, 'NGINX_AVAILABLE_DIR', available), patch.object(deploy_admin, 'NGINX_ENABLED_DIR', enabled), patch.object(deploy_admin, '_run_checked') as run:
+                with self.assertRaisesRegex(ValueError, 'does not reference'):
+                    deploy_admin.remove_nginx_config('example')
+                run.assert_not_called()
+            self.assertEqual(os.readlink(link), '/unrelated/site')
 
     def test_regular_file_reader_rejects_directories_and_limits_size(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

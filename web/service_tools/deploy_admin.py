@@ -13,12 +13,15 @@ import subprocess
 import sys
 import tempfile
 
-# This helper is copied to /usr/local/sbin. Its supporting code is installed
-# by root, never imported from the deploy account's working directory.
-sys.path.insert(0, '/opt/infra_tools')
+# The installed executable uses root-owned supporting code. Module imports
+# leave sys.path alone so repository tests cannot load a stale /opt checkout.
+if not __package__:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    source_root = '/opt/infra_tools' if script_dir == '/usr/local/sbin' else os.path.dirname(os.path.dirname(script_dir))
+    sys.path.insert(0, source_root)
 
 from lib.cicd_deploy_policy import validate_nginx_deployment, validate_nginx_path
-from lib.nginx_config import generate_merged_nginx_config
+from lib.nginx_config import GENERATED_CONFIG_MARKER, generate_merged_nginx_config
 
 
 NGINX_AVAILABLE_DIR = "/etc/nginx/sites-available"
@@ -122,11 +125,15 @@ def _capture_nginx_paths(config_name: str) -> tuple[bytes | None, int, str | Non
             available_path,
             MAX_NGINX_CONFIG_BYTES,
         )
+        if not previous_content.startswith((GENERATED_CONFIG_MARKER + '\n').encode()):
+            raise ValueError(f"refusing to modify unmanaged nginx configuration: {available_path}")
 
     previous_link: str | None = None
     if os.path.lexists(enabled_path):
         if not os.path.islink(enabled_path):
             raise ValueError(f"enabled nginx path is not a symlink: {enabled_path}")
+        if previous_content is None or os.path.realpath(enabled_path) != available_path:
+            raise ValueError(f"enabled nginx path does not reference the managed site: {enabled_path}")
         previous_link = os.readlink(enabled_path)
 
     return previous_content, previous_mode, previous_link
