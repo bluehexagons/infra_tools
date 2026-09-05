@@ -406,11 +406,13 @@ def generate_merged_nginx_config(
     deployments: Deployments,
     is_default: bool = False,
     enable_https_redirect: bool = True,
+    disable_symlinks: bool = False,
 ) -> str:
     """Generate a merged nginx configuration for multiple deployments on the same domain."""
     cert_file, key_file = get_ssl_cert_path(domain)
     server_name_directive = f"server_name {domain};" if domain else "server_name _;"
     default_server = " default_server" if is_default else ""
+    symlink_policy = '\n    disable_symlinks on;' if disable_symlinks else ''
     
     domain_slug = _config_name_for_domain(domain)
     cache_maps, expires_var, cc_var = _make_cache_maps(domain_slug)
@@ -477,7 +479,7 @@ def generate_merged_nginx_config(
     listen 80{default_server};
     listen [::]:80{default_server};
 
-    {server_name_directive}
+    {server_name_directive}{symlink_policy}
 {http_content}
 }}
 
@@ -486,7 +488,7 @@ server {{
     listen [::]:443 ssl{default_server};
     http2 on;
 
-    {server_name_directive}
+    {server_name_directive}{symlink_policy}
 
     ssl_certificate {cert_file};
     ssl_certificate_key {key_file};

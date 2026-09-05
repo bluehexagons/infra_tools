@@ -95,6 +95,15 @@ The target entries default to the `deploy` user, SSH port 22, and `/var/www`.
 Use `cicd connect --port` or `--base-dir` when a target differs. The target name
 used by a repository must match its JSON key. A custom base directory must
 already exist as a real directory and be writable by the `deploy` account.
+For generated nginx sites using a custom base, also authorize that directory
+on the app server in root-owned `/etc/infra_tools/cicd/deploy_policy.json`:
+
+```json
+{"allowed_base_dirs": ["/var/www", "/srv/sites"]}
+```
+
+The policy must not be writable by group or others. Without this file, only
+sites below `/var/www` are accepted. The filesystem root is never a valid base.
 
 ## Repository configuration
 
@@ -154,6 +163,11 @@ event only verifies webhook connectivity and does not build a repository.
 - app-server privilege is exposed only through the validating
   `infra-tools-deploy-admin` helper; the deploy account has no wildcarded root
   `rm`, `mkdir`, or `touch` access
+- nginx requests contain only a domain, route, artifact directory, and project
+  type. The app server validates them and renders configuration using its own
+  installed template and TLS certificates. Raw nginx directives, proxy targets,
+  and log destinations cannot be supplied by the build server. Generated sites
+  refuse to serve symlinks, and their roots must resolve below an allowed base
 - build logs live under `/var/lib/infra_tools/cicd/logs/`
 - build scripts run as the dedicated `webhook` user
 - `--build-server --node` and `--build-server --python` bootstrap the build
@@ -179,6 +193,11 @@ curl -fsS http://127.0.0.1:8080/webhook/health
 Run `patch` on existing app servers to apply the deploy sudo policy and install
 the privileged helper. The helper validates target names and paths before
 allowing the deploy account to update an app server.
+
+Upgrade both app and build servers for the structured nginx protocol. The new
+helper accepts `install-site` with a staged JSON request and removes the old
+`install-nginx` raw-text operation. Mixed versions fail instead of falling back
+to installing unvalidated configuration; existing active sites remain in place.
 
 If you need the full setup flow or command syntax, use
 [Command-line reference](./COMMAND_LINE.md) and

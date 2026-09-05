@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import tempfile
 import unittest
@@ -22,6 +23,7 @@ TARGET = {
     "ssh_port": 2222,
     "base_dir": "/var/www",
 }
+SITE = {'domain': 'example.com', 'path': '/', 'serve_path': '/var/www/example_com', 'project_type': 'static'}
 
 
 def completed(returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess:
@@ -76,6 +78,8 @@ class TestPushNginxConfig(unittest.TestCase):
         def build_scp(*args, **kwargs):
             del kwargs
             captured_source.append(args[2])
+            with open(args[2], encoding='utf-8') as source:
+                self.assertEqual(json.load(source), SITE)
             return ["scp", args[2], args[3]]
 
         def build_ssh(target, remote):
@@ -83,22 +87,22 @@ class TestPushNginxConfig(unittest.TestCase):
             return ["ssh", remote]
 
         with patch.object(remote_deploy, "get_deploy_target", return_value=TARGET), patch.object(remote_deploy, "build_scp_command", side_effect=build_scp), patch.object(remote_deploy, "_build_ssh_cmd", side_effect=build_ssh), patch.object(remote_deploy.subprocess, "run", side_effect=[completed(), completed()]) as run:
-            result = remote_deploy.push_nginx_config("server { listen 80; }\n", "app", "example.com")
+            result = remote_deploy.push_nginx_config(SITE, "app", "example.com")
 
         self.assertTrue(result)
         self.assertEqual(len(captured_source), 1)
         self.assertFalse(os.path.exists(captured_source[0]))
         self.assertEqual(run.call_count, 2)
-        self.assertIn("example_com.conf", run.call_args_list[0].args[0][2])
-        self.assertIn("install-nginx example_com", run.call_args_list[1].args[0][-1])
+        self.assertIn("example_com.json", run.call_args_list[0].args[0][2])
+        self.assertIn("install-site example_com", run.call_args_list[1].args[0][-1])
 
     def test_push_nginx_config_rejects_invalid_domain_and_upload_failure(self) -> None:
         with patch.object(remote_deploy, "get_deploy_target", return_value=TARGET), patch.object(remote_deploy.subprocess, "run") as run:
-            self.assertFalse(remote_deploy.push_nginx_config("config", "app", "../etc"))
+            self.assertFalse(remote_deploy.push_nginx_config(SITE, "app", "../etc"))
         run.assert_not_called()
 
         with patch.object(remote_deploy, "get_deploy_target", return_value=TARGET), patch.object(remote_deploy, "build_scp_command", return_value=["scp"]), patch.object(remote_deploy.subprocess, "run", return_value=completed(1, "upload failed")) as run:
-            self.assertFalse(remote_deploy.push_nginx_config("config", "app", "example.com"))
+            self.assertFalse(remote_deploy.push_nginx_config(SITE, "app", "example.com"))
         run.assert_called_once()
 
 

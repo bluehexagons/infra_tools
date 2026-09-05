@@ -421,7 +421,7 @@ def perform_remote_deployment(
         is_ruby_project,
         parse_deploy_spec,
     )
-    from lib.nginx_config import generate_merged_nginx_config
+    from lib.cicd_deploy_policy import validate_nginx_deployment
     
     target = get_deploy_target(deploy_target)
     if not target:
@@ -460,6 +460,17 @@ def perform_remote_deployment(
         log_event(logger, "Invalid deployment path", level=40, error=str(exc))
         return False
 
+    deployment = None
+    if domain:
+        try:
+            deployment = validate_nginx_deployment({
+                'path': path, 'serve_path': remote_path,
+                'project_type': project_type, 'domain': domain,
+            })
+        except ValueError as exc:
+            log_event(logger, "Invalid nginx deployment", level=40, error=str(exc))
+            return False
+
     # Read required deployment steps before transferring or activating artifacts.
     # Retain the content so a disappearing script cannot become a silent skip.
     deploy_script = repo_config.get('scripts', {}).get('deploy')
@@ -495,17 +506,8 @@ def perform_remote_deployment(
         log.write(f"✓ Artifact pushed to {deploy_target}:{remote_path}\n")
     
     if domain:
-        deployment = {
-            'path': path,
-            'serve_path': remote_path,
-            'project_type': project_type,
-            'needs_proxy': False,
-            'domain': domain,
-        }
-        
-        nginx_config = generate_merged_nginx_config(domain, [deployment])
-        
-        if not push_nginx_config(nginx_config, deploy_target, domain):
+        assert deployment is not None
+        if not push_nginx_config(deployment, deploy_target, domain):
             log_event(logger, "Failed to push nginx config", level=40, deploy_target=deploy_target, domain=domain)
             with open(log_file, 'a') as log:
                 log.write("✗ Failed to push nginx config\n")

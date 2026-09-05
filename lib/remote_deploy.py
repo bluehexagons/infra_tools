@@ -13,6 +13,7 @@ from typing import Optional
 from lib.ssh_utils import build_scp_command, build_ssh_command, build_rsync_ssh_transport, chain_remote_commands, shell_join, ssh_batch_mode
 from lib.types import JSONDict
 from lib.validation import validate_filesystem_path
+from lib.cicd_deploy_policy import validate_nginx_deployment
 
 
 DEPLOY_ADMIN_HELPER = "/usr/local/sbin/infra-tools-deploy-admin"
@@ -156,8 +157,8 @@ def push_artifact(
         return False
 
 
-def push_nginx_config(config_content: str, target_host: str, domain: str) -> bool:
-    """Push nginx configuration to remote server."""
+def push_nginx_config(deployment: JSONDict, target_host: str, domain: str) -> bool:
+    """Send structured site parameters for rendering by the app server."""
     target = get_deploy_target(target_host)
     if not target:
         print(f"  ✗ Unknown deploy target: {target_host}")
@@ -165,12 +166,15 @@ def push_nginx_config(config_content: str, target_host: str, domain: str) -> boo
     
     try:
         config_name = _validate_config_name(domain)
+        request = validate_nginx_deployment(deployment)
+        if request['domain'] != domain:
+            raise ValueError("deployment domain does not match nginx site name")
     except ValueError as exc:
         print(f"  ✗ {exc}")
         return False
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
-        f.write(config_content)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        json.dump(request, f)
         temp_path = f.name
     
     try:
@@ -179,7 +183,7 @@ def push_nginx_config(config_content: str, target_host: str, domain: str) -> boo
         user = target.get('user', 'deploy')
         host = target['host']
         
-        remote_temp_path = f"/tmp/infra-tools-nginx-{config_name}.conf"
+        remote_temp_path = f"/tmp/infra-tools-nginx-{config_name}.json"
         scp_cmd = build_scp_command(
             host,
             user,
@@ -197,7 +201,7 @@ def push_nginx_config(config_content: str, target_host: str, domain: str) -> boo
             return False
         
         remote_cmd = shell_join(
-            ["sudo", DEPLOY_ADMIN_HELPER, "install-nginx", config_name]
+            ["sudo", DEPLOY_ADMIN_HELPER, "install-site", config_name]
         )
         
         ssh_cmd = _build_ssh_cmd(target, remote_cmd)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import stat
 import tempfile
 import unittest
@@ -11,6 +12,10 @@ from unittest.mock import patch
 import web.service_tools.deploy_admin as deploy_admin
 from lib.remote_deploy import _validate_config_name, _validate_deploy_path
 from web.service_tools.deploy_admin import validate_config_name, validate_service_name
+
+SITE_REQUEST = json.dumps({
+    'domain': 'example', 'path': '/', 'serve_path': '/var/www/example', 'project_type': 'static',
+}).encode()
 
 
 class TestDeployAdminValidation(unittest.TestCase):
@@ -42,6 +47,14 @@ class TestDeployAdminValidation(unittest.TestCase):
 
 
 class TestDeployAdminFileOperations(unittest.TestCase):
+    def setUp(self) -> None:
+        self.policy = patch.object(deploy_admin, '_allowed_site_roots', return_value=['/var/www'])
+        self.policy.start()
+        self.addCleanup(self.policy.stop)
+        renderer = patch.object(deploy_admin, 'generate_merged_nginx_config', return_value='server {}\n')
+        self.render = renderer.start()
+        self.addCleanup(renderer.stop)
+
     def _paths(self, root: str) -> tuple[str, str, str]:
         available = os.path.join(root, "available")
         enabled = os.path.join(root, "enabled")
@@ -53,9 +66,9 @@ class TestDeployAdminFileOperations(unittest.TestCase):
     def test_install_writes_config_enables_site_and_removes_stage(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             available, enabled, staged_prefix = self._paths(root)
-            staged_path = f"{staged_prefix}example.conf"
+            staged_path = f"{staged_prefix}example.json"
             with open(staged_path, "wb") as staged:
-                staged.write(b"server {}\n")
+                staged.write(SITE_REQUEST)
 
             with patch.object(deploy_admin, "NGINX_AVAILABLE_DIR", available), patch.object(deploy_admin, "NGINX_ENABLED_DIR", enabled), patch.object(deploy_admin, "STAGED_CONFIG_PREFIX", staged_prefix), patch.object(deploy_admin, "NGINX_BINARY", "/mock/nginx"), patch.object(deploy_admin, "_run_checked") as run_checked:
                 deploy_admin.install_nginx_config("example")
@@ -67,6 +80,7 @@ class TestDeployAdminFileOperations(unittest.TestCase):
             self.assertEqual(os.readlink(link), installed)
             self.assertFalse(os.path.exists(staged_path))
             run_checked.assert_called_once_with(["/mock/nginx", "-t"])
+            self.assertTrue(self.render.call_args.kwargs['disable_symlinks'])
 
     def test_install_rolls_back_previous_site_when_validation_fails(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -77,9 +91,9 @@ class TestDeployAdminFileOperations(unittest.TestCase):
                 config.write(b"old config\n")
             os.chmod(installed, 0o640)
             os.symlink("/old/example", link)
-            staged_path = f"{staged_prefix}example.conf"
+            staged_path = f"{staged_prefix}example.json"
             with open(staged_path, "wb") as staged:
-                staged.write(b"new config\n")
+                staged.write(SITE_REQUEST)
 
             with patch.object(deploy_admin, "NGINX_AVAILABLE_DIR", available), patch.object(deploy_admin, "NGINX_ENABLED_DIR", enabled), patch.object(deploy_admin, "STAGED_CONFIG_PREFIX", staged_prefix), patch.object(deploy_admin, "_run_checked", side_effect=RuntimeError("invalid nginx")):
                 with self.assertRaisesRegex(RuntimeError, "invalid nginx"):
@@ -94,9 +108,9 @@ class TestDeployAdminFileOperations(unittest.TestCase):
     def test_install_rejects_stage_owned_by_another_user(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             available, enabled, staged_prefix = self._paths(root)
-            staged_path = f"{staged_prefix}example.conf"
+            staged_path = f"{staged_prefix}example.json"
             with open(staged_path, "wb") as staged:
-                staged.write(b"server {}\n")
+                staged.write(SITE_REQUEST)
 
             with patch.object(deploy_admin, "NGINX_AVAILABLE_DIR", available), patch.object(deploy_admin, "NGINX_ENABLED_DIR", enabled), patch.object(deploy_admin, "STAGED_CONFIG_PREFIX", staged_prefix), patch.dict(deploy_admin.os.environ, {"SUDO_UID": str(os.getuid() + 1)}):
                 with self.assertRaisesRegex(ValueError, "owned by the invoking user"):

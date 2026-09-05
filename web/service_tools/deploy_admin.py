@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import secrets
@@ -12,6 +13,13 @@ import subprocess
 import sys
 import tempfile
 
+# This helper is copied to /usr/local/sbin. Its supporting code is installed
+# by root, never imported from the deploy account's working directory.
+sys.path.insert(0, '/opt/infra_tools')
+
+from lib.cicd_deploy_policy import validate_nginx_deployment, validate_nginx_path
+from lib.nginx_config import generate_merged_nginx_config
+
 
 NGINX_AVAILABLE_DIR = "/etc/nginx/sites-available"
 NGINX_ENABLED_DIR = "/etc/nginx/sites-enabled"
@@ -19,6 +27,7 @@ NGINX_BINARY = "/usr/sbin/nginx"
 SYSTEMCTL_BINARY = "/bin/systemctl"
 STAGED_CONFIG_PREFIX = "/tmp/infra-tools-nginx-"
 MAX_NGINX_CONFIG_BYTES = 1024 * 1024
+DEPLOY_POLICY_FILE = '/etc/infra_tools/cicd/deploy_policy.json'
 
 _CONFIG_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,253}$")
 _SERVICE_NAME_PATTERN = re.compile(r"^node-[a-z0-9][a-z0-9_.-]{0,126}$")
@@ -145,16 +154,52 @@ def _restore_nginx_paths(
         _replace_symlink(enabled_path, previous_link)
 
 
+def _allowed_site_roots() -> list[str]:
+    """Read optional root-owned authority for custom deployment directories."""
+    try:
+        content, mode, owner = _read_regular_file(DEPLOY_POLICY_FILE, MAX_NGINX_CONFIG_BYTES)
+    except FileNotFoundError:
+        return ['/var/www']
+    if owner != 0 or mode & 0o022:
+        raise ValueError('deploy policy must be root-owned and not writable by group or others')
+    policy = json.loads(content)
+    if not isinstance(policy, dict) or set(policy) != {'allowed_base_dirs'}:
+        raise ValueError('deploy policy requires allowed_base_dirs')
+    roots = policy['allowed_base_dirs']
+    if not isinstance(roots, list) or not roots:
+        raise ValueError('allowed_base_dirs must be a nonempty list')
+    for root in roots:
+        validate_nginx_path(root)
+        if root == '/':
+            raise ValueError('the filesystem root cannot be a deployment base')
+    return roots
+
+
 def install_nginx_config(config_name: str) -> None:
-    """Install a staged deploy-owned nginx site and validate the full config."""
+    """Render a bounded site request locally; never install uploaded nginx text."""
 
     safe_name = validate_config_name(config_name)
-    staged_path = f"{STAGED_CONFIG_PREFIX}{safe_name}.conf"
+    staged_path = f"{STAGED_CONFIG_PREFIX}{safe_name}.json"
     content, _mode, owner_uid = _read_regular_file(staged_path, MAX_NGINX_CONFIG_BYTES)
 
     sudo_uid = os.environ.get("SUDO_UID")
     if sudo_uid is not None and owner_uid != int(sudo_uid):
         raise ValueError("staged nginx configuration is not owned by the invoking user")
+
+    deployment = validate_nginx_deployment(json.loads(content))
+    if deployment['domain'].replace('.', '_') != safe_name:
+        raise ValueError('request domain does not match the nginx site name')
+    serve_path = os.path.realpath(deployment['serve_path'])
+    if not any(
+        serve_path != os.path.realpath(root)
+        and os.path.commonpath([serve_path, os.path.realpath(root)]) == os.path.realpath(root)
+        for root in _allowed_site_roots()
+    ):
+        raise ValueError('site directory must be below an allowed deployment base')
+    content = generate_merged_nginx_config(
+        deployment['domain'], [{**deployment, 'needs_proxy': False}],
+        disable_symlinks=True,
+    ).encode('utf-8')
 
     os.makedirs(NGINX_AVAILABLE_DIR, mode=0o755, exist_ok=True)
     os.makedirs(NGINX_ENABLED_DIR, mode=0o755, exist_ok=True)
@@ -210,7 +255,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    install_parser = subparsers.add_parser("install-nginx")
+    install_parser = subparsers.add_parser("install-site")
     install_parser.add_argument("config_name")
 
     remove_parser = subparsers.add_parser("remove-nginx")
@@ -232,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = _build_parser().parse_args(argv)
     try:
-        if args.command == "install-nginx":
+        if args.command == "install-site":
             install_nginx_config(args.config_name)
         elif args.command == "remove-nginx":
             remove_nginx_config(args.config_name)
