@@ -53,7 +53,7 @@ details.
 | Setup and CLI | Unified `setup`, `patch`, `shares`, saved-host operations, and utility commands | [Command-line reference](docs/COMMAND_LINE.md) |
 | Installation | User/system bootstrap, orchestration host prerequisites, and completion | [Installation](docs/INSTALLATION.md) |
 | Firmware | Local fwupd inventory, dependency installation, and deliberate guarded updates | [Firmware](docs/FIRMWARE.md) |
-| Control planes | Local VM/container administration tools, SSH/rsync, diagnostics, and optional coding agents | [Installation](docs/INSTALLATION.md), [Workstations](docs/WORKSTATIONS.md), [Credentials](docs/CREDENTIALS.md), [Browser automation](docs/BROWSER_AUTOMATION.md) |
+| Control planes | Local VM/container administration tools, SSH/rsync, diagnostics, and optional coding agents | [Installation](docs/INSTALLATION.md), [Agent systems](docs/agents/README.md), [Quick reference](docs/QUICK_REFERENCE.md) |
 | Servers | Security hardening, Nginx/SSL, Cloudflare tunnels, language runtimes, deployments, Gogs, and Antistatic | [CLI reference](docs/COMMAND_LINE.md), [Gogs](docs/GOGS.md), [Cloudflare tunnels](docs/CLOUDFLARE.md), [Antistatic](docs/ANTISTATIC.md) |
 | Workstations | XFCE, i3, LXQt, RDP, browsers, and desktop tooling | [Workstations](docs/WORKSTATIONS.md), [XRDP](docs/XRDP.md), [CLI reference](docs/COMMAND_LINE.md) |
 | Storage | Authenticated Samba shares, private Syncthing exchange, SMB mounts, rsync sync, par2 verification, and recurring operations | [Samba shares](docs/SAMBA_SHARES.md), [Managed Syncthing](docs/SYNCTHING.md), [Storage operations](docs/STORAGE_OPERATIONS.md) |

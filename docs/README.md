@@ -1,78 +1,97 @@
 # infra-tools documentation
 
-Use the [root README](../README.md) for the project overview. This index links
-to the detailed setup and operations guides.
+Start with the [quick reference](QUICK_REFERENCE.md) for a task-oriented map.
+Use the detailed guides only when you need the configuration model, limits, or
+troubleshooting for that task. The [root README](../README.md) is the project
+overview.
 
-## Release target
+## Choose a reading path
 
-The operator guides describe the upcoming stable `v2.0.0` command and behavior
-contract. The repository’s `dev` channel may receive changes before that tag is
-published; see [Installation and bootstrap](INSTALLATION.md) for channel
-selection and upgrade guidance. The `plans/` documents are implementation
-references and may describe future work separately from this live contract.
+| I need to… | Start here | Then use |
+| --- | --- | --- |
+| Install infra-tools or configure a first host | [Installation](INSTALLATION.md) | [Quick reference](QUICK_REFERENCE.md), [CLI reference](COMMAND_LINE.md) |
+| Change or inspect an existing host | [Saved configuration operations](OPERATIONS.md) | [Sysadmin shortcuts](SYSADMIN.md), [Maintenance](MAINTENANCE.md) |
+| Provision or maintain a coding VM | [Agent systems](agents/README.md) | [Workstations](WORKSTATIONS.md), [Credentials](CREDENTIALS.md) |
+| Deploy an application or publish an internal site | [Deployments](DEPLOYMENTS.md) | [Internal web](INTERNAL_WEB.md), [CI/CD](CICD.md) |
+| Operate a Proxmox host or guest | [Proxmox workflows](PROXMOX.md) | [Machine types](MACHINE_TYPES.md) |
+| Configure alerts, audit visibility, or the panel | [Notifications](NOTIFICATIONS.md) | [Minimal web panel](WEB_PANEL.md), [Authentication hardening](AUTHENTICATION_HARDENING.md) |
+| Configure storage, shares, or backups | [Storage operations](STORAGE_OPERATIONS.md) | [Samba](SAMBA_SHARES.md), [Syncthing](SYNCTHING.md), [Backups](BACKUPS.md) |
 
-## Start here
+## Core setup and operations
 
 | Guide | Use it for |
 | --- | --- |
-| [Installation and bootstrap](INSTALLATION.md) | Installing the launcher, preparing an orchestration host, shell completion, and requirements |
-| [Local system maintenance](LOCAL_MAINTENANCE.md) | Focused package, desktop, browser, hostname, IP, and DNS changes |
-| [Firmware auditing and updates](FIRMWARE.md) | Local fwupd inventory, dependency installation, and guarded firmware updates |
-| [Command-line reference](COMMAND_LINE.md) | Setup, patch, targeted updates, and utility flags |
-| [SSH authentication](SSH.md) | Passphrase-protected keys, terminal prompts, SSH agents, and troubleshooting |
-| [Credentials and agent configuration](CREDENTIALS.md) | Workspace passwords, GitHub/Git access, agent auth, non-secret config, sharing, and rotation |
-| [Managed agent workflow skills](AGENT_SKILLS.md) | Installed Codex/OpenCode skills, capability routing, reconciliation, and maintenance |
-| [Agentic coding security](AGENT_SECURITY.md) | Sudo, Codex approval/sandbox policy, hardened mode, accepted LAN/root boundaries, and supply-chain guidance |
-| [Authentication hardening](AUTHENTICATION_HARDENING.md) | Reachability, rate limits, failure bans, and verification for login surfaces |
-| [Agent browser automation](BROWSER_AUTOMATION.md) | Playwright provisioning, Codex/OpenCode registration, verification, and security boundaries |
-| [Client CA trust](CLIENT_CA_TRUST.md) | Diagnosing private-CA errors and optionally enrolling the infra-tools CA on desktop, ChromeOS, and mobile clients |
-| [Internal HTTPS sites and previews](INTERNAL_WEB.md) | Static-site publishing, supervised live previews, managed forwards, TLS trust, and cleanup |
-| [Godot Engine](GODOT.md) | Verified graphical/headless installation, web/publishing bundles, agent access, and updates |
-| [T3 Code server](T3_CODE.md) | Headless service, deliberate updates, pairing, remote clients, and security boundaries |
-| [Protected device pairing](DEVICE_PAIRING.md) | Basic-Auth enrollment portal, one-time provider links, rotation, removal, and security boundaries |
-| [Minimal web panel](WEB_PANEL.md) | Install the dashboard, view audit activity, receive notification logs, manage ingest tokens, and troubleshoot access |
+| [Quick reference](QUICK_REFERENCE.md) | Common command shapes and the shortest route to the right detailed guide |
+| [Installation and bootstrap](INSTALLATION.md) | Launcher installation, control-plane setup, upgrades, and recovery |
+| [Command-line reference](COMMAND_LINE.md) | Complete option and command reference |
+| [Saved configuration operations](OPERATIONS.md) | `list`, `info`, `cmd`, `deploy`, `recall`, the shell, and testing |
 | [Machine types](MACHINE_TYPES.md) | Debian bare metal, VM, LXC, OCI, and capability differences |
+| [Local system maintenance](LOCAL_MAINTENANCE.md) | Focused package, desktop, browser, hostname, IP, and DNS changes |
+| [Recurring maintenance](MAINTENANCE.md) | Timers, update policy, cleanup, and troubleshooting |
+| [Firmware auditing and updates](FIRMWARE.md) | Local fwupd inventory, dependency installation, and guarded updates |
+| [Sysadmin shortcuts](SYSADMIN.md) | SSH, transfers, health, services, logs, upgrades, and reachability |
+| [Shell completion](SHELL_COMPLETION.md) | Bash, Zsh, Fish, and system-wide completion |
+| [Network inventory](NETWORKING.md) | Network profiles and read-only Proxmox firewall planning |
+
+## Security, access, and notifications
+
+| Guide | Use it for |
+| --- | --- |
+| [SSH authentication](SSH.md) | Passphrase-protected keys, terminal prompts, SSH agents, and troubleshooting |
+| [Credentials and agent configuration](CREDENTIALS.md) | Workspace passwords, Git access, agent auth/config, sharing, and rotation |
+| [Authentication hardening](AUTHENTICATION_HARDENING.md) | Reachability, rate limits, failure bans, and verification for login surfaces |
+| [Notifications](NOTIFICATIONS.md) | Webhook, mailbox, and web-panel delivery; event volume; and alert interpretation |
+| [Minimal web panel](WEB_PANEL.md) | Authenticated service links, audit activity, notification history, ingest tokens, and access troubleshooting |
+| [Client CA trust](CLIENT_CA_TRUST.md) | Private-CA diagnosis and client enrollment |
+| [Protected device pairing](DEVICE_PAIRING.md) | Basic-Auth enrollment portal, one-time provider links, rotation, and removal |
+
+## Agent systems
+
+The [agent-systems guide](agents/README.md) is the focused starting point for
+coding VMs and workstations. It routes to the relevant operational guide
+without requiring readers to infer relationships among credentials, browser
+automation, T3 Code, skills, and hardening.
+
+| Guide | Use it for |
+| --- | --- |
+| [Workstations and desktop applications](WORKSTATIONS.md) | Desktop profiles, human-operated browsers, Flatpak, office tools, and verification |
+| [Agentic coding security](AGENT_SECURITY.md) | Sudo, Codex approval/sandbox policy, hardened modes, and supply-chain boundaries |
+| [Agent browser automation](BROWSER_AUTOMATION.md) | Playwright provisioning, Codex/OpenCode registration, and browser security boundaries |
+| [T3 Code server](T3_CODE.md) | Headless service, deliberate updates, pairing, remote clients, and security boundaries |
+| [Managed agent workflow skills](AGENT_SKILLS.md) | Installed Codex/OpenCode skills, capability routing, reconciliation, and maintenance |
+| [Godot Engine](GODOT.md) | Verified graphical/headless installation, web/publishing bundles, agent access, and updates |
+
+## Services, deployments, and data
+
+| Guide | Use it for |
+| --- | --- |
+| [Deployments and manifests](DEPLOYMENTS.md) | `--deploy`, `infra.json`, static sites, services, and runtime behavior |
+| [Deployment safety](DEPLOYMENT_SAFETY.md) | Persistent state, backups, rollback, and deployment boundaries |
+| [Internal HTTPS sites and previews](INTERNAL_WEB.md) | Static-site publishing, supervised live previews, managed forwards, TLS trust, and cleanup |
+| [CI/CD webhook system](CICD.md) | Webhook jobs, build/app servers, and executor behavior |
+| [Cloudflare tunnels](CLOUDFLARE.md) | Tunnel preconfiguration, ingress refresh, firewall policy, and webhooks |
+| [Gogs Git service](GOGS.md) | Self-hosted Git, SSH access, storage, and release updates |
+| [Antistatic services](ANTISTATIC.md) | Lobby server, report administration, STUN, and antistatic-db |
+| [XRDP](XRDP.md) | Desktop RDP architecture, compatibility, and troubleshooting |
 | [Samba shares](SAMBA_SHARES.md) | Authenticated shares, credentials, access changes, removals, and SMB mounts |
 | [Managed Syncthing](SYNCTHING.md) | Private hub-and-spoke file exchange, HTTPS GUI administration, relays, and recovery |
 | [Storage operations](STORAGE_OPERATIONS.md) | Rsync mirrors, par2 protection, schedules, locks, and recovery |
 | [Generic path backups](BACKUPS.md) | Provider-neutral backup mirrors, mounted destinations, parity, and consistency limits |
-
-## Operations and infrastructure
-
-| Guide | Use it for |
-| --- | --- |
 | [Proxmox workflows](PROXMOX.md) | Host registration, VM/LXC provisioning, lifecycle, resource pressure, boot ordering, backups, and smoke tests |
-| [Saved configuration operations](OPERATIONS.md) | `list`, `info`, `cmd`, `deploy`, `recall`, the shell, and testing |
-| [Sysadmin shortcuts](SYSADMIN.md) | SSH, transfers, health, services, logs, upgrades, and reachability |
-| [Network inventory](NETWORKING.md) | Network profiles and read-only Proxmox firewall planning |
-| [Recurring maintenance](MAINTENANCE.md) | Timers, update policy, cleanup, and troubleshooting |
-| [Deployment safety](DEPLOYMENT_SAFETY.md) | Persistent state, backups, rollback, and deployment boundaries |
-| [Deployments and manifests](DEPLOYMENTS.md) | `--deploy`, `infra.json`, static sites, services, and runtime behavior |
-| [Cloudflare tunnels](CLOUDFLARE.md) | Tunnel preconfiguration, ingress refresh, firewall policy, and webhooks |
 
-## Feature guides
+## Plans and contributor material
 
-| Guide | Use it for |
-| --- | --- |
-| [CI/CD webhook system](CICD.md) | Webhook jobs, build/app servers, and executor behavior |
-| [Gogs Git service](GOGS.md) | Self-hosted Git, SSH access, storage, and release updates |
-| [Antistatic services](ANTISTATIC.md) | Lobby server, report administration, STUN, and antistatic-db |
-| [XRDP](XRDP.md) | Desktop RDP architecture, compatibility, and troubleshooting |
-| [Workstations and desktop applications](WORKSTATIONS.md) | Desktop profiles, human-operated browsers, Flatpak, office tools, and verification |
-| [Shell completion](SHELL_COMPLETION.md) | Bash, Zsh, Fish, and system-wide completion |
-| [Notifications](NOTIFICATIONS.md) | Configure webhook, mailbox, and web-panel delivery; choose event volume; interpret alerts; and troubleshoot delivery |
+The [`plans/`](plans/) directory contains implementation plans and audit
+records. It is not operator documentation; start with the
+[planning index](plans/README.md) only when researching project work.
 
-## Design notes
-
-Implementation plans and audit records live under [`plans/`](plans/). They are
-development references, not operator instructions. Start with the
-[planning and issue index](plans/README.md) for the active portfolio, then use
-the [project roadmap](plans/ROADMAP.md) for priority and the
-[GitHub issue triage](plans/GITHUB_ISSUE_TRIAGE_2026-08-17.md) for
-issue-to-implementation evidence.
+Repository contributors should read the
+[AI agent guidance](../.github/ai-agents/README.md). It describes repository
+change rules, not how to administer an infra-tools-managed machine.
 
 ## Documentation conventions
 
-Markdown is the source format so the guides render directly on GitHub and in
-local repository tools. Examples use the installed `infra-tools` launcher and
-placeholder hosts and credentials. Never copy real secrets into documentation.
+Guides should lead with the task, use short procedures and tables for lookup,
+and link to a detailed reference rather than duplicate it. Examples use the
+installed `infra-tools` launcher and placeholders only; never put real secrets
+in documentation.
