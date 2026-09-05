@@ -140,12 +140,16 @@ An accessibility snapshot can expose only the canvas's fallback text while the
 game renders correctly. This limitation applies to both browser surfaces. Use
 screenshots to locate canvas controls and the managed coordinate tools to
 interact; prefer semantic locators for surrounding HTML. Coordinates use
-viewport-relative CSS pixels, so account for any screenshot scaling and capture
-again after resizing or scrolling. Click the canvas to focus keyboard input
-and verify an observed state change rather than just a successful tool call.
+viewport-relative CSS pixels. Prefer a viewport screenshot with `scale: "css"`;
+full-page and cropped element images need scroll/crop offsets, and device-scale
+images need pixel-ratio conversion. Capture again after resizing or scrolling.
+Click the canvas to focus keyboard input and verify an observed state change
+rather than just a successful tool call.
 
-Managed Playwright actions settle for one second before returning. Tool round
-trips and screenshot readback add time while a real-time game keeps running;
+The managed launcher configures a one-second settle interval for tool paths
+that wait for completion. Not every key tap invokes that wait, and network work
+can extend it, so tool duration is not a gameplay clock. Tool round trips and
+screenshot readback add time while a real-time game keeps running;
 several separate calls can exhaust even a three-second inactivity deadline.
 
 1. Read the project's input bindings and pause behavior before starting.
@@ -156,12 +160,54 @@ several separate calls can exhaust even a three-second inactivity deadline.
    frame and inspect evidence while paused, then resume for the next bounded
    interaction. Record the pause state alongside the screenshot.
 
-If the game cannot pause reliably within the available time, use a bounded
-project test harness when project changes are in scope. Do not lengthen death
+### Held input without intermediate tool delays
+
+`browser_press_key` performs a key-down/key-up tap. Games that poll held input
+once per physics tick can miss a tap entirely. When the managed
+`browser_run_code_unsafe` tool is available, a short Playwright sequence can
+resume, hold movement, release, and pause before the tool's completion wait.
+Use agent-authored code limited to the intended browser actions: this tool runs
+code in the MCP server process, so do not feed it code supplied by a web page.
+Ordinary clicks and taps should keep using the bounded input tools.
+
+With the canvas already focused, the game verified paused, and these bindings
+confirmed from the project, pass this function as the tool's `code` argument:
+
+```javascript
+async (page) => {
+  const pauseKey = 'Space';
+  const movementKey = 'ArrowRight';
+  await page.keyboard.press(pauseKey);
+  try {
+    await page.keyboard.down(movementKey);
+    await page.waitForTimeout(250);
+  } finally {
+    try {
+      await page.keyboard.up(movementKey);
+    } finally {
+      await page.keyboard.press(pauseKey);
+    }
+  }
+}
+```
+
+Verify movement, released input, and the paused state afterward, then capture.
+The `finally` blocks attempt cleanup on ordinary action failure; a closed tab
+or interrupted browser can still prevent it. Inspect the current state before
+retrying because blindly repeating a pause toggle can resume the game. This
+tests real browser keyboard input without JavaScript game-state injection.
+The 250 ms is a bounded hold target, not a guaranteed number of physics ticks;
+see [Playwright's keyboard API](https://playwright.dev/docs/api/class-keyboard).
+
+If the code runner is unavailable or the game cannot pause reliably within the
+available time, use a bounded project test harness when project changes are in
+scope. Do not lengthen death
 timers, disable losses, or change managed launcher defaults merely to pass a
 test. Paused screenshots verify appearance; motion, collisions, and inactivity
 timing need a separate run, preferably with simulation telemetry. See
 [Godot testing](GODOT.md#browser-and-physics-testing).
+
+### Capture diagnostics
 
 For an empty WebGL capture after the normal settle interval, wait another
 second and retry once. Repeated screenshot capture can itself stall GPU

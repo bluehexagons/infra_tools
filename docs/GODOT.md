@@ -55,6 +55,8 @@ without writing a game-specific service or Nginx configuration:
 
 ```bash
 cd ~/repos/my-game
+# Complete resource imports on a fresh checkout or after asset changes:
+godot --headless --path . --import
 infra-web publish godot --json
 # Use another preset or create a debug export when needed:
 infra-web publish godot my-game --preset "Web Threads" --debug --json
@@ -222,6 +224,9 @@ interaction, pause immediately, verify that simulation and gameplay timers
 stop, then capture and inspect. Resume only for the next bounded action. For
 example, Snake 3D maps Space to a gameplay pause that leaves the scene visible;
 check each project's current bindings instead of assuming Escape or Space.
+For frame-polled movement, use the browser guide's
+[bounded held-input sequence](BROWSER_AUTOMATION.md#held-input-without-intermediate-tool-delays)
+so the game resumes and pauses within one tool call.
 Godot's tree pause and node process modes affect different parts of processing,
 so verify actual timer and body state, including any custom pause mechanism.
 See [Godot's pause behavior](https://docs.godotengine.org/en/stable/tutorials/scripting/pausing_games.html).
@@ -262,10 +267,20 @@ between samples so brief impacts are retained. Avoid double-counting the same
 contact from both bodies. Keep the sampling phase consistent across runs and
 do not log the whole scene or emit console output every frame.
 
+Collect numeric state in physics callbacks, then aggregate samples and publish
+on the main thread. If physics runs on a separate thread, use a synchronized
+handoff; do not call the collector below or JavaScriptBridge directly from that
+thread. Check `is_finite()` at the measurement source: represent invalid values
+as `null` with an explicit invalid-field list instead of silently substituting
+zero. Godot can coerce NaN during JSON serialization, hiding the original
+physics failure. Use full-precision float serialization for numeric comparison;
+see [Godot's JSON API](https://docs.godotengine.org/en/stable/classes/class_json.html).
+
 This optional collector can be an autoload named `DebugTelemetry`. The project
-explicitly enables it for a diagnostic run and calls `record_sample()` from its
-chosen sampling point with JSON-compatible measurements. It stops at the cap;
-the normal pause/test-completion handler can call `publish_trace()` for a
+calls `start_capture()` with a unique run ID and the metadata described above,
+then calls `record_sample()` from its main-thread sampling point with
+JSON-compatible measurements. It stops at the cap; the normal pause or
+test-completion handler can call `publish_trace()` for a
 shorter run. Call that handler where it still runs while gameplay is paused.
 
 ```gdscript
@@ -274,6 +289,17 @@ extends Node
 const MAX_SAMPLES := 120
 var enabled := false
 var samples: Array[Dictionary] = []
+var run: Dictionary = {}
+
+func start_capture(run_id: String, metadata: Dictionary) -> void:
+    if not OS.is_debug_build():
+        return
+    samples.clear()
+    run = {"id": run_id, "metadata": metadata.duplicate(true)}
+    if OS.has_feature("web"):
+        var browser_window = JavaScriptBridge.get_interface("window")
+        browser_window.__godotPhysicsTrace = null
+    enabled = true
 
 func record_sample(sample: Dictionary) -> void:
     if not OS.is_debug_build() or not enabled or samples.size() >= MAX_SAMPLES:
@@ -286,7 +312,9 @@ func publish_trace() -> void:
     if not OS.is_debug_build() or not enabled:
         return
     enabled = false
-    var payload := JSON.stringify({"schema": 1, "samples": samples})
+    var payload := JSON.stringify(
+        {"schema": 1, "run": run, "samples": samples}, "", true, true
+    )
     if OS.has_feature("web"):
         var browser_window = JavaScriptBridge.get_interface("window")
         browser_window.__godotPhysicsTrace = payload
@@ -294,10 +322,11 @@ func publish_trace() -> void:
         print("GODOT_PHYSICS_TRACE " + payload)
 ```
 
-Clear `samples` and re-enable explicitly before another diagnostic capture;
-bound each sample's body/contact count as well as the number of samples.
-Attach the run metadata to the saved evidence. The bridge assigns a serialized
-data property, with no callable gameplay controls or evaluated code strings.
+Call `start_capture()` for each diagnostic run; it clears both buffered samples
+and the previously published browser result, so an unfinished run cannot be
+mistaken for the preceding capture. Bound each sample's body/contact count as
+well as the number of samples. The bridge assigns a serialized data property,
+with no callable gameplay controls or evaluated code strings.
 It requires a web template with JavaScriptBridge support; see
 [Godot's JavaScriptBridge API](https://docs.godotengine.org/en/stable/classes/class_javascriptbridge.html).
 
@@ -311,10 +340,12 @@ read-only expression and save its result with the screenshot evidence:
 }
 ```
 
-A `null` result means no trace has been published in that page; check the debug
-gate and capture completion. For console transport, parse only the
-`GODOT_PHYSICS_TRACE ` prefix. Do not write game state through evaluation to
-manufacture a passing interaction. Use a project harness that applies input at
+A `null` result means no trace has been published for the current capture; check
+the debug gate and capture completion. Match `run.id` to the requested run before
+comparing measurements. For console transport, parse only the
+`GODOT_PHYSICS_TRACE ` prefix and match the same ID since older console records
+remain visible. Do not write game state through evaluation to manufacture a
+passing interaction. Use a project harness that applies input at
 known physics ticks when browser round trips exceed a gameplay deadline, and
 report harness coverage separately from real browser keyboard/mouse coverage.
 

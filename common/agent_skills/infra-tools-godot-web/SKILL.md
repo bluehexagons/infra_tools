@@ -17,8 +17,8 @@ a public plain-HTTP server or edit Nginx and UFW directly.
    the Godot toolchain is healthy and reports `web_templates: true`.
 2. Confirm the repository contains `project.godot` and an appropriate Web
    export preset in `export_presets.cfg`.
-3. Run `godot --headless --path . --editor --quit-after 1` when imports need to
-   be completed before export.
+3. Run `godot --headless --path . --import` when imports need to be completed
+   before export; it waits for resource imports before quitting.
 4. From the project root, run `infra-web publish godot --json`. It derives a
    stable game slug from the project and suppresses the interactive Godot
    progress stream. Pass an explicit slug, `--preset`, or `--debug` only when
@@ -75,6 +75,10 @@ collision peaks every physics tick so short impacts are not missed.
 Bound the trace by duration, body count, and sample count. Export JSON once
 through a prefixed console message or a debug-only `JavaScriptBridge` window
 property, then read it through the browser tools without mutating game state.
+Start each capture with a unique run ID and cleared previous output. Preserve
+numeric precision and explicitly flag non-finite physics values before JSON
+serialization. Aggregate and publish on the main thread; use a synchronized
+handoff if physics callbacks run on a separate thread.
 Do not assume the canvas exposes Godot objects to JavaScript. Compare a fixed
 seed/input scenario with tolerances and retain the engine/backend, timestep,
 revision, and debug/release mode. Verify the normal release without tracing.
