@@ -162,7 +162,7 @@ separately when needed. The RDP password is
 the target Unix
 account's password; provide it through a secret-sourced environment variable,
 not a literal value in shell history. For a local Debian GNOME machine, use
-the [installer handoff](INSTALLATION.md#choose-one-starting-command), which
+the [installer handoff](INSTALLATION.md#set-up-a-debian-gnome-desktop-control-plane), which
 keeps GNOME for console logins and uses XFCE for RDP.
 
 Agent updates are deliberate rather than automatic; host APT, security,
