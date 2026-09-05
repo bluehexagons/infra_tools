@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -100,6 +103,47 @@ class TestStaticWebPublish(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "symlink"):
                 static_web_publish._validate_output_tree(output)
+
+    def test_json_publication_keeps_build_logs_on_stderr(self) -> None:
+        for failure in (None, "install", "build"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory) / "project"
+                output = project / "dist"
+                output.mkdir(parents=True)
+                (output / "index.html").write_text("new site", encoding="utf-8")
+                (project / "package.json").write_text(
+                    json.dumps({"scripts": {"build": "vite build"}}), encoding="utf-8",
+                )
+                sites_root = Path(directory) / "sites"
+                destination = sites_root / "agent" / "demo"
+                destination.mkdir(parents=True)
+                (destination / "index.html").write_text("old site", encoding="utf-8")
+                stdout, stderr = io.StringIO(), io.StringIO()
+
+                def run(command: list[str], **kwargs: object) -> SimpleNamespace:
+                    phase = "build" if command == ["npm", "run", "build"] else "install"
+                    print(f"{phase} log", file=kwargs.get("stdout"))
+                    return SimpleNamespace(returncode=1 if phase == failure else 0)
+
+                with (
+                    patch.object(static_web_publish, "SITES_ROOT", str(sites_root)),
+                    patch.object(static_web_publish, "_base_url", return_value=None),
+                    patch.object(static_web_publish, "_current_account", return_value=SimpleNamespace(pw_name="agent", pw_uid=os.getuid())),
+                    patch.object(static_web_publish.subprocess, "run", side_effect=run),
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    status = static_web_publish.main(["demo", "--project", str(project), "--json"])
+                result = json.loads(stdout.getvalue())
+                self.assertEqual(result["ok"], failure is None)
+                self.assertEqual(status, 0 if failure is None else 1)
+                self.assertIn("install log", stderr.getvalue())
+                if failure != "install":
+                    self.assertIn("build log", stderr.getvalue())
+                self.assertEqual(
+                    (destination / "index.html").read_text(encoding="utf-8"),
+                    "new site" if failure is None else "old site",
+                )
 
     def test_remove_requires_confirmation_and_owned_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:

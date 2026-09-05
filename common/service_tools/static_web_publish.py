@@ -12,6 +12,7 @@ import pwd
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import webbrowser
@@ -123,6 +124,7 @@ def _run_project_build(
     package: dict[str, object] | None,
     *,
     install: bool,
+    json_output: bool = False,
 ) -> None:
     if package is None:
         raise ValueError("No package.json found; use --no-build with an existing output")
@@ -131,12 +133,18 @@ def _run_project_build(
         raise ValueError("package.json has no build script; use --no-build")
     install_command, build_command = _package_commands(project_dir)
     if install and not os.path.isdir(os.path.join(project_dir, "node_modules")):
-        install_result = subprocess.run(install_command, cwd=project_dir, check=False)
+        install_result = subprocess.run(
+            install_command, cwd=project_dir, check=False,
+            stdout=sys.stderr if json_output else None,
+        )
         if install_result.returncode != 0:
             raise RuntimeError(
                 f"Dependency installation failed with exit code {install_result.returncode}"
             )
-    build_result = subprocess.run(build_command, cwd=project_dir, check=False)
+    build_result = subprocess.run(
+        build_command, cwd=project_dir, check=False,
+        stdout=sys.stderr if json_output else None,
+    )
     if build_result.returncode != 0:
         raise RuntimeError(f"Static-site build failed with exit code {build_result.returncode}")
 
@@ -340,7 +348,9 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
         os.chmod(lock_path, 0o600)
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         if not args.no_build:
-            _run_project_build(project_dir, package, install=not args.no_install)
+            _run_project_build(
+                project_dir, package, install=not args.no_install, json_output=args.json,
+            )
         output_dir = _resolve_output(project_dir, args.output)
         _validate_output_tree(output_dir)
         staging_dir = tempfile.mkdtemp(prefix=f".{site}-", dir=user_root)

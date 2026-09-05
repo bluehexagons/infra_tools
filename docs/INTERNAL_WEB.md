@@ -58,6 +58,9 @@ absent, the automatic `npm install` can create `package-lock.json`; inspect Git
 status before and after publication and handle that file according to the
 project's dependency policy.
 
+With `--json`, stdout contains only the publication result or error object.
+Dependency installation and build logs stream to stderr, including on failure.
+
 Inspect and remove publications as the owning user:
 
 ```bash
