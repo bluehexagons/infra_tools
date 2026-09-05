@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from contextlib import redirect_stderr, redirect_stdout
 import io
+import json
 import os
 from pathlib import Path
 import stat
@@ -15,6 +17,21 @@ from unittest.mock import patch
 
 from lib import agent_auth
 from lib.agent_cli import add_agent_subparser, run_agent_command
+
+
+def _codex_payload(*, expired: bool) -> bytes:
+    claims = {"exp": 1 if expired else 4_102_444_800}
+    token_payload = base64.urlsafe_b64encode(
+        json.dumps(claims, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    token = f"e30.{token_payload}.signature"
+    return json.dumps(
+        {
+            "auth_mode": "chatgpt",
+            "last_refresh": "2000-01-01T00:00:00Z" if expired else "2099-01-01T00:00:00Z",
+            "tokens": {"access_token": token, "refresh_token": "fixture"},
+        }
+    ).encode("utf-8")
 
 
 class AgentAuthPullTests(unittest.TestCase):
@@ -44,6 +61,15 @@ class AgentAuthPullTests(unittest.TestCase):
         self.assertEqual(args.agent_auth_tools, ["codex"])
         self.assertEqual(args.port, 2222)
         self.assertTrue(args.overwrite)
+
+    def test_parser_defaults_to_active_user_paths(self) -> None:
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        add_agent_subparser(subparsers)
+
+        args = parser.parse_args(["agent", "auth", "pull", "vm.example", "agent"])
+
+        self.assertIsNone(args.output_dir)
 
     def test_dispatches_pull(self) -> None:
         args = argparse.Namespace(
@@ -214,6 +240,111 @@ class AgentAuthPullTests(unittest.TestCase):
             self.assertEqual(refused, 1)
             self.assertEqual(overwritten, 0)
             self.assertEqual(destination.read_bytes(), b"new")
+
+    def test_default_destination_is_the_active_user_credential_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / ".codex" / "auth.json"
+            success = subprocess.CompletedProcess([], 0, b"new", b"")
+            with (
+                redirect_stdout(io.StringIO()),
+                patch.object(agent_auth, "_run_remote_script", return_value=success),
+                patch.object(
+                    agent_auth,
+                    "_active_source_path",
+                    return_value=str(destination),
+                ),
+            ):
+                result = agent_auth.pull_agent_credentials(
+                    host="vm.example",
+                    username="agent",
+                    tools=["codex"],
+                    output_dir=None,
+                    ssh_key=None,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(destination.read_bytes(), b"new")
+            self.assertEqual(stat.S_IMODE(destination.parent.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o600)
+
+    def test_default_destination_accepts_owned_nonwritable_vendor_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory) / ".codex"
+            parent.mkdir(mode=0o755)
+            destination = parent / "auth.json"
+            success = subprocess.CompletedProcess([], 0, b"new", b"")
+            with (
+                redirect_stdout(io.StringIO()),
+                patch.object(agent_auth, "_run_remote_script", return_value=success),
+                patch.object(
+                    agent_auth,
+                    "_active_source_path",
+                    return_value=str(destination),
+                ),
+            ):
+                result = agent_auth.pull_agent_credentials(
+                    host="vm.example",
+                    username="agent",
+                    tools=["codex"],
+                    output_dir=None,
+                    ssh_key=None,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(destination.read_bytes(), b"new")
+
+    def test_current_codex_pull_automatically_refreshes_expired_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "credentials"
+            output.mkdir(mode=0o700)
+            destination = output / "codex-auth.json"
+            destination.write_bytes(_codex_payload(expired=True))
+            destination.chmod(0o600)
+            current = _codex_payload(expired=False)
+            success = subprocess.CompletedProcess([], 0, current, b"")
+            with (
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+                patch.object(agent_auth, "_run_remote_script", return_value=success),
+            ):
+                result = agent_auth.pull_agent_credentials(
+                    host="vm.example",
+                    username="agent",
+                    tools=["codex"],
+                    output_dir=str(output),
+                    ssh_key=None,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(destination.read_bytes(), current)
+
+    def test_both_expired_codex_credentials_report_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "credentials"
+            output.mkdir(mode=0o700)
+            destination = output / "codex-auth.json"
+            expired = _codex_payload(expired=True)
+            destination.write_bytes(expired)
+            destination.chmod(0o600)
+            error = io.StringIO()
+            success = subprocess.CompletedProcess([], 0, expired, b"")
+            with (
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(error),
+                patch.object(agent_auth, "_run_remote_script", return_value=success),
+            ):
+                result = agent_auth.pull_agent_credentials(
+                    host="vm.example",
+                    username="agent",
+                    tools=["codex"],
+                    output_dir=str(output),
+                    ssh_key=None,
+                    overwrite=True,
+                )
+
+            self.assertEqual(result, 1)
+            self.assertIn("both expired", error.getvalue())
+            self.assertEqual(destination.read_bytes(), expired)
 
     def test_rejects_unsafe_target_and_output_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

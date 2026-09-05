@@ -55,7 +55,7 @@ infra-tools agent doctor [HOST USER] [options]
 infra-tools agent update [HOST USER] [options]
 infra-tools agent auth set HOST USER --tool TOOL --file PATH
 infra-tools agent auth status HOST USER [--tool TOOL]
-infra-tools agent auth pull HOST USER --output-dir PATH [--tool TOOL]
+infra-tools agent auth pull HOST USER [--output-dir PATH] [--tool TOOL]
 infra-tools agent web pair HOST USER [-k PATH]
 infra-tools agent workspace <create|list|status|remove> ...
 infra-tools agent maintenance <hold|status|release> [HOST USER] [options]
@@ -778,7 +778,7 @@ Credential rotation does not rebuild the VM or overwrite repositories:
 infra-tools agent auth set 10.0.0.10 agent --tool gh --file /run/secrets/gh-hosts.yml
 infra-tools agent auth set 10.0.0.10 agent --tool codex --active
 infra-tools agent auth status 10.0.0.10 agent --json
-python3 infra_tools.py agent auth pull 10.0.0.10 agent --output-dir ~/.agent-credentials/agent
+python3 infra_tools.py agent auth pull 10.0.0.10 agent
 ```
 
 `auth set` accepts an active-user source, a controller-local file, or
@@ -793,9 +793,11 @@ contents, token strings, or Codex account IDs. Normal setup preserves existing
 credentials except for a safe refresh of known-outdated Codex auth; `auth set`
 is the deliberate replacement path for every other case.
 `auth pull` copies canonical file-backed credentials from an existing agent VM
-into a private controller directory without requiring local agent programs.
-Run it from a clone when infra-tools is not installed; see [Agent
-authentication](AGENT_AUTHENTICATION.md#pull-credentials-from-an-agent-vm).
+to the active controller user's canonical paths without requiring local agent
+programs. A private staging directory remains available through
+`--output-dir`. Known-stale Codex auth is refreshed automatically only from a
+current source; other existing files require `--overwrite`. Run it from a
+clone when infra-tools is not installed; see [Agent authentication](AGENT_AUTHENTICATION.md#pull-credentials-from-an-agent-vm).
 
 The normal restart policy defers for active login sessions, coding agents,
 build and Git processes, terminal multiplexers, maintenance holds, and

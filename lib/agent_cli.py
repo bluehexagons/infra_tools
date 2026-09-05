@@ -322,16 +322,15 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
     )
     auth_pull.add_argument(
         "--output-dir",
-        required=True,
         metavar="PATH",
-        help="Private directory for the pulled credential files",
+        help="Private directory for renamed outputs (default: active-user paths)",
     )
     auth_pull.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
     auth_pull.add_argument("-p", "--port", type=int, default=22, help="SSH port")
     auth_pull.add_argument(
         "--overwrite",
         action="store_true",
-        help="Deliberately replace existing regular output files",
+        help="Deliberately replace other existing regular files",
     )
     web = commands.add_parser(
         "web",

@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 from lib.agent_credentials import (
     codex_auth_warning,
+    inspect_codex_auth_file,
     inspect_codex_auth_payload,
 )
 from lib.ssh_utils import build_ssh_command, ssh_batch_mode, ssh_process_timeout
@@ -332,6 +333,30 @@ def _private_output_directory(path: str) -> str:
     return expanded
 
 
+def _credential_output_directory(path: str) -> str:
+    """Validate or create a canonical active-user credential directory."""
+    expanded = os.path.abspath(os.path.expanduser(path))
+    validate_filesystem_path(expanded, must_exist=False)
+    if os.path.lexists(expanded):
+        details = os.lstat(expanded)
+        if not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode):
+            raise ValueError(
+                f"Credential parent must be a non-symlink directory: {expanded}"
+            )
+        if details.st_uid != os.geteuid():
+            raise ValueError(
+                f"Credential parent is not owned by the current user: {expanded}"
+            )
+        if stat.S_IMODE(details.st_mode) & 0o022:
+            raise ValueError(
+                f"Credential parent must not be group- or world-writable: {expanded}"
+            )
+    else:
+        os.makedirs(expanded, mode=0o700)
+        os.chmod(expanded, 0o700)
+    return expanded
+
+
 def _write_pulled_credential(
     destination: str,
     payload: bytes,
@@ -373,12 +398,42 @@ def _write_pulled_credential(
             pass
 
 
+def _codex_pull_should_overwrite(destination: str, payload: bytes) -> bool:
+    """Return whether current pulled Codex auth may replace stale local auth."""
+    if not os.path.lexists(destination):
+        return False
+    details = os.lstat(destination)
+    if not stat.S_ISREG(details.st_mode) or stat.S_ISLNK(details.st_mode):
+        return False
+    if details.st_uid != os.geteuid():
+        return False
+
+    target = inspect_codex_auth_file(destination)
+    source = inspect_codex_auth_payload(payload)
+    if (
+        target.get("access_token_expired") is True
+        and source.get("access_token_expired") is True
+    ):
+        raise ValueError("source and destination Codex credentials are both expired")
+    return (
+        target.get("status") == "refresh_required"
+        and source.get("status") == "current"
+        and codex_auth_warning(source) is None
+    )
+
+
+def _pull_destination(tool: str, output_dir: Optional[str]) -> str:
+    if output_dir is None:
+        return _active_source_path(tool)
+    return os.path.join(output_dir, _PULL_FILENAMES[tool])
+
+
 def pull_agent_credentials(
     *,
     host: str,
     username: str,
     tools: list[str],
-    output_dir: str,
+    output_dir: Optional[str],
     ssh_key: Optional[str],
     port: int = 22,
     overwrite: bool = False,
@@ -401,7 +456,9 @@ def pull_agent_credentials(
     for tool in selected:
         if tool not in AGENT_AUTH_TOOLS:
             raise ValueError(f"Unsupported agent auth tool: {tool}")
-    destination_dir = _private_output_directory(output_dir)
+    destination_dir = (
+        _private_output_directory(output_dir) if output_dir is not None else None
+    )
     pulled = 0
     failed = 0
     for tool in selected:
@@ -441,14 +498,28 @@ def pull_agent_credentials(
             print(f"Error: {tool}: invalid credential payload", file=sys.stderr)
             failed += 1
             continue
-        destination = os.path.join(destination_dir, _PULL_FILENAMES[tool])
+        destination = _pull_destination(tool, destination_dir)
         try:
-            _write_pulled_credential(destination, payload, overwrite=overwrite)
+            if destination_dir is None:
+                _credential_output_directory(os.path.dirname(destination))
+            else:
+                _private_output_directory(os.path.dirname(destination))
+            freshness_overwrite = (
+                _codex_pull_should_overwrite(destination, payload)
+                if tool == "codex"
+                else False
+            )
+            _write_pulled_credential(
+                destination,
+                payload,
+                overwrite=overwrite or freshness_overwrite,
+            )
         except (OSError, ValueError) as exc:
             print(f"Error: {tool}: {exc}", file=sys.stderr)
             failed += 1
             continue
-        print(f"Pulled {tool} credentials to {destination}")
+        action = "Refreshed" if freshness_overwrite and not overwrite else "Pulled"
+        print(f"{action} {tool} credentials to {destination}")
         pulled += 1
 
     if pulled == 0:

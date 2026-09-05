@@ -92,30 +92,37 @@ infra-tools installation or local agent programs.
 
 ```bash
 python3 infra_tools.py ssh-key enroll 192.168.0.41
-python3 infra_tools.py agent auth pull 192.168.0.41 agent-1 \
-  --output-dir "$HOME/.agent-credentials/agent-1"
+python3 infra_tools.py agent auth pull 192.168.0.41 agent-1
 ```
 
 | Option | Purpose |
 | --- | --- |
 | `--tool TOOL` | Pull only `gh`, `codex`, `claude`, or `opencode`; repeat as needed |
-| `--output-dir PATH` | Required private destination directory |
+| `--output-dir PATH` | Write renamed files to a private staging directory instead of active-user paths |
 | `-k, --key PATH` | SSH identity file |
 | `-p, --port PORT` | SSH port |
-| `--overwrite` | Deliberately replace existing regular output files |
+| `--overwrite` | Deliberately replace other existing regular files |
 
 Without `--tool`, absent files are skipped. An explicitly requested but absent
 file fails. The command uses the workspace's strict SSH host-key policy and
 never prints credential contents or remote error text. It reads only the
 canonical paths above and rejects unsafe ownership, permissions, symlinks,
-changes during transfer, empty files, and files over 4 MiB. The private output
-directory is mode `0700`; files are atomically written with mode `0600`.
+changes during transfer, empty files, and files over 4 MiB.
 
-Output names are `gh-hosts.yml`, `codex-auth.json`,
-`claude-credentials.json`, and `opencode-auth.json`. Reference them with the
-matching setup option or `agent auth set --file`. The command cannot export an
-operating-system keyring; a `gh` file without an embedded token is not a
-portable credential.
+By default, each file is written to the active controller user's canonical
+path from the table above. Parent directories must be owned by that user and
+not writable by other users; new directories use mode `0700`. Output files are
+atomically written with mode `0600`. With `--output-dir`, the names are
+`gh-hosts.yml`, `codex-auth.json`, `claude-credentials.json`, and
+`opencode-auth.json`, ready for the matching setup option or `agent auth set
+--file`.
+
+Without `--overwrite`, an existing file is retained except when stale Codex
+auth can be safely refreshed from a current pulled credential. If both Codex
+files contain expired cached access tokens, the command reports an error.
+Expiry cannot be established safely for the other formats, so replacing those
+still requires `--overwrite`. The command cannot export an operating-system
+keyring; a `gh` file without an embedded token is not portable.
 
 Pulling is for migration or recovery, not synchronization. Stop using the
 source VM's renewable Codex ChatGPT session before activating its pulled

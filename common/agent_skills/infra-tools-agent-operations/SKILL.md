@@ -85,8 +85,10 @@ For an explicitly requested migration or recovery, pull file-backed credentials
 to a private controller directory without displaying them:
 
 ```bash
-infra-tools agent auth pull HOST USER --output-dir PATH
+infra-tools agent auth pull HOST USER
 ```
 
+The default writes canonical active-user paths and safely refreshes known-stale
+Codex auth from a current source. Use `--output-dir` for a staging directory.
 Do not activate a pulled renewable Codex ChatGPT session concurrently on the
 source and destination machines.
