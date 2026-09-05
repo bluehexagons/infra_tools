@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 import tempfile
 import unittest
@@ -270,6 +271,10 @@ class TestInstallGogsRelease(unittest.TestCase):
         self.assertLess(version_index, activate_index)
         self.assertTrue(calls[version_index].kwargs["check"])
         self.assertTrue(calls[version_index].kwargs["capture_output"])
+        self.assertEqual(
+            calls[version_index].kwargs["cwd"],
+            f"/opt/gogs/releases/v1.2.4-{'a' * 12}",
+        )
         download_command = next(
             call.args[0]
             for call in calls
@@ -581,6 +586,7 @@ class TestGenerateGogsConfig(unittest.TestCase):
 
         self.assertEqual(
             command,
+            "cd /opt/gogs/current && "
             "runuser -u git -- env HOME=/home/git GOGS_WORK_DIR=/opt/gogs/current "
             "GOGS_CUSTOM=/srv/gogs/custom /opt/gogs/current/gogs "
             "admin create-user --config /srv/gogs/custom/conf/app.ini --name admin",
@@ -960,6 +966,28 @@ class TestGogsRequiredSetupSteps(unittest.TestCase):
         with patch("web.gogs_steps.run", return_value=failed):
             with self.assertRaisesRegex(RuntimeError, "authorized_keys"):
                 gogs_steps._run_gogs_post_setup_commands("/srv/gogs/app.ini")
+
+    @patch("web.gogs_steps._get_git_home", return_value="/home/git")
+    def test_post_setup_commands_leave_private_setup_directory(self, _git_home):
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (
+            tempfile.TemporaryDirectory(prefix="gogs release ") as directory,
+            patch.object(gogs_steps, "GOGS_CURRENT_DIR", directory),
+            patch("web.gogs_steps.run", return_value=completed) as runner,
+        ):
+            config_path = "/srv/git data/custom/conf/app.ini"
+            gogs_steps._run_gogs_post_setup_commands(config_path)
+
+        self.assertEqual(runner.call_count, 2)
+        for call, subcommand in zip(
+            runner.call_args_list, ("rewrite-authorized-keys", "resync-hooks")
+        ):
+            tokens = shlex.split(call.args[0])
+            self.assertEqual(
+                tokens[:8],
+                ["cd", directory, "&&", "runuser", "-u", "git", "--", "env"],
+            )
+            self.assertEqual(tokens[-4:], ["admin", subcommand, "--config", config_path])
 
 
 class TestGogsStorageHealth(unittest.TestCase):

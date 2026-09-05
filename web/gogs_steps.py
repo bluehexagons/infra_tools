@@ -271,6 +271,7 @@ def install_or_update_gogs_release() -> tuple[str, bool, str]:
             f"{shlex.quote(release_binary)} --version",
             check=True,
             capture_output=True,
+            cwd=release_dir,
         )
         run(
             f"ln -sfn {shlex.quote(release_dir)} {shlex.quote(GOGS_CURRENT_DIR)}",
@@ -932,7 +933,9 @@ def build_gogs_admin_command(args: list[str], config_path: str) -> str:
         config_path,
         *args[2:],
     ]
-    return shlex.join(command)
+    # runuser preserves cwd. Macaron inspects it during process initialization,
+    # before GOGS_WORK_DIR is applied, so a private setup home causes a panic.
+    return f"cd {shlex.quote(GOGS_CURRENT_DIR)} && {shlex.join(command)}"
 
 
 def _redacted_admin_create_user_command(config_path: str, username: str, email: str) -> str:
