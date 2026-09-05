@@ -29,6 +29,7 @@ connections at once.
 | [`upgrade`](#upgrade) | Run apt upgrade across one or more hosts |
 | [`reachable`](#reachable) | Check which saved hosts respond via SSH |
 | [`user rename`](#user-rename) | Rename a managed target login and reconcile its configuration |
+| [`agent_auth_pull.py`](CREDENTIALS.md#pull-from-an-existing-agent-vm) | Recover file-backed agent credentials to a minimal control system |
 
 ---
 

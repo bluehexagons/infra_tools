@@ -508,6 +508,52 @@ The host capability check also reports the installed
 infra-tools agent doctor 192.168.0.41 agent-1 --capability host --json
 ```
 
+### Pull from an existing agent VM
+
+`agent_auth_pull.py` retrieves file-backed agent credentials from a previously
+provisioned VM. It is intentionally standalone: the Debian or CachyOS control
+system needs only Python 3 and an OpenSSH client, not an infra-tools install or
+local copies of the agent programs.
+
+On a minimal system, those prerequisites are the `python3` and
+`openssh-client` packages on Debian, or `python` and `openssh` on CachyOS.
+An installed wheel can run the utility as `python3 -m agent_auth_pull`; the
+downloaded-file form works without installing any Python package.
+
+Download and inspect the utility before running it:
+
+```bash
+curl --fail --location --output agent_auth_pull.py \
+  https://raw.githubusercontent.com/bluehexagons/infra_tools/main/agent_auth_pull.py
+python3 agent_auth_pull.py 192.168.0.41 agent-1 \
+  --output-dir "$HOME/.agent-credentials/agent-1"
+rm -f agent_auth_pull.py
+```
+
+Use `--tool gh`, `--tool codex`, `--tool claude`, or `--tool opencode` to pull
+only selected files; repeat the option as needed. `-i PATH` selects an SSH key,
+`-p PORT` selects the SSH port, and `--overwrite` deliberately replaces an
+existing output file. Without `--tool`, absent credential files are skipped.
+An explicitly requested but absent credential makes the command fail.
+
+The utility uses the normal SSH host-key policy and reads only the canonical
+paths listed above. It rejects symlinks, files not owned by the remote user,
+files accessible by other users, and files larger than 4 MiB. The output
+directory must be private and owned by the current controller user; output
+files are written atomically with mode `0600`. Credential contents are never
+printed.
+The resulting files are named `gh-hosts.yml`, `codex-auth.json`,
+`claude-credentials.json`, and `opencode-auth.json`, ready to reference with
+the corresponding setup or `agent auth set --file` option.
+The tool does not export an operating-system keyring; a `gh` file without an
+embedded token is subject to the portability limitation described above.
+
+This is a migration or recovery operation, not a synchronization mechanism.
+In particular, stop using the source VM's renewable Codex ChatGPT session
+before activating its pulled `auth.json` elsewhere. Running copied renewable
+sessions concurrently can cause their refresh state to diverge or invalidate
+one another.
+
 ## Sharing credentials between VMs
 
 Static provider tokens can be seeded to multiple VMs when a shared identity is

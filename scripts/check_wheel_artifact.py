@@ -16,6 +16,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_WHEEL_PATHS = (
+    "agent_auth_pull.py",
     "infra_tools.py",
     "remote_setup.py",
     "lib/config.py",
