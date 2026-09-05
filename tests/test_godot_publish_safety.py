@@ -14,6 +14,26 @@ from common.service_tools import godot_web_publish as publisher
 
 
 class TestGodotExportValidation(unittest.TestCase):
+    def test_unreadable_subtree_stops_validation_before_permission_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            child = root / "unreadable"
+            child.mkdir()
+            real_scandir = os.scandir
+
+            def scan(path):
+                if os.fspath(path) == str(child):
+                    raise PermissionError(13, "Permission denied", str(child))
+                return real_scandir(path)
+
+            with (
+                patch.object(publisher.os, "scandir", side_effect=scan),
+                patch.object(publisher.os, "chmod") as chmod,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Could not validate"):
+                    publisher._make_export_readable(directory)
+                chmod.assert_not_called()
+
     def test_unsafe_generated_files_are_rejected_before_writes(self) -> None:
         for name, kind, precompress in (
             ('game.wasm', 'symlink', True),

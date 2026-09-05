@@ -83,6 +83,8 @@ working copy.
 
 Before compression, metadata writes, or permission changes, the publisher
 rejects symlinks, multiply linked files, and special files in generated output.
+An unreadable directory or other scan failure also stops publication; validation
+must inspect the entire generated tree before permissions are changed.
 Export plugins must produce ordinary files and directories. Rejected exports
 leave the previous publication and files outside the staging directory intact.
 

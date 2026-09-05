@@ -192,7 +192,10 @@ def _precompress_export(export_dir: str) -> list[str]:
 
 def _validate_export_tree(export_dir: str) -> None:
     """Reject links and special files before processing any generated output."""
-    for current_dir, directory_names, file_names in os.walk(export_dir):
+    def scan_failed(error: OSError) -> None:
+        raise RuntimeError(f"Could not validate export directory: {error.filename}") from error
+
+    for current_dir, directory_names, file_names in os.walk(export_dir, onerror=scan_failed):
         if not stat.S_ISDIR(os.lstat(current_dir).st_mode):
             raise RuntimeError(f"Export contains an unsafe directory: {current_dir}")
         for name in directory_names:
