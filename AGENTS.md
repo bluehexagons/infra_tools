@@ -1,6 +1,6 @@
 # AI Agent Quick Start
 
-These instructions apply to the repository. Read `.github/ai-agents/README.md`
+These instructions apply to the repository. Read `docs/agents/contributing/README.md`
 and its linked references when a task needs more detail. Higher-priority user,
 developer, and system instructions still govern the session.
 
@@ -88,4 +88,4 @@ add focused tests, and update the command/reference documentation.
 
 ---
 
-**See `.github/ai-agents/README.md` for detailed patterns and workflows**
+**See `docs/agents/contributing/README.md` for detailed patterns and workflows**

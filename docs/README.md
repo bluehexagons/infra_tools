@@ -86,8 +86,9 @@ records. It is not operator documentation; start with the
 [planning index](plans/README.md) only when researching project work.
 
 Repository contributors should read the
-[AI agent guidance](../.github/ai-agents/README.md). It describes repository
-change rules, not how to administer an infra-tools-managed machine.
+[contributor and coding-agent guide](agents/contributing/README.md). It
+describes repository change rules, not how to administer an
+infra-tools-managed machine.
 
 ## Documentation conventions
 

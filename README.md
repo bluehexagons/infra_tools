@@ -26,7 +26,8 @@ alternate download commands, local control-plane and desktop/RDP profiles,
 channels, credentials, and recovery. The [documentation index](docs/README.md)
 organizes detailed feature and operations guides.
 
-Contributors should also read the [AI agent guidance](.github/ai-agents/README.md)
+Contributors should also read the
+[contributor and coding-agent guide](docs/agents/contributing/README.md)
 before changing the project.
 
 ## Supported targets

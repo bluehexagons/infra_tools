@@ -4,9 +4,10 @@ This is the operator starting point for infra-tools-managed coding VMs and
 workstations. It groups the guides needed to choose a profile, set a security
 posture, provide credentials, and verify the resulting environment.
 
-It does not replace the repository contributor rules in
-[AI agent guidance](../../.github/ai-agents/README.md). Those rules apply when
-changing this repository; this page applies when operating a managed machine.
+It does not replace the repository
+[contributor and coding-agent guide](contributing/README.md). That guide
+applies when changing this repository; this page applies when operating a
+managed machine.
 
 ## Choose a task
 
