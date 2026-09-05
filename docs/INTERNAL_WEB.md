@@ -70,6 +70,10 @@ infra-web site doctor docs
 infra-web site remove docs --yes
 ```
 
+Publishing and removal of the same site share a lock, so removal waits for an
+active publication before checking and deleting the result. Lock files must be
+regular files with no symbolic or additional hard links.
+
 `site doctor` verifies the managed site directory and the HTTPS status of its
 root URL. It does not compare the served tree with the current build, follow a
 client-side route, or execute JavaScript. After publishing a change, compare a

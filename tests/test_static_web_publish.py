@@ -159,6 +159,52 @@ class TestStaticWebPublish(unittest.TestCase):
 
             self.assertFalse(os.path.exists(site))
 
+    def test_remove_acquires_publication_lock_before_inspecting_site(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "agent"
+            root.mkdir()
+            site = root / "demo"
+            account = SimpleNamespace(pw_name="agent", pw_uid=os.getuid())
+
+            def acquire(descriptor: int, operation: int) -> None:
+                self.assertEqual(operation, static_web_publish.fcntl.LOCK_EX)
+                self.assertEqual(
+                    os.fstat(descriptor).st_ino,
+                    (root / ".infra-tools-demo.lock").stat().st_ino,
+                )
+                # Model a publisher completing while removal waits for its lock.
+                site.mkdir()
+
+            with (
+                patch.object(static_web_publish, "SITES_ROOT", directory),
+                patch.object(static_web_publish.fcntl, "flock", side_effect=acquire) as lock,
+                patch.object(static_web_publish, "write_user_catalog") as catalog,
+            ):
+                static_web_publish.remove_site(account, "demo", True)
+                lock.assert_called_once()
+                catalog.assert_called_once_with(str(root), "agent")
+            self.assertFalse(site.exists())
+
+    def test_site_lock_rejects_links_and_special_files_without_chmod(self) -> None:
+        for kind in ("symlink", "hardlink", "fifo"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                outside = root / "outside"
+                outside.write_text("preserve", encoding="utf-8")
+                outside.chmod(0o644)
+                lock_path = root / ".infra-tools-demo.lock"
+                if kind == "symlink":
+                    lock_path.symlink_to(outside)
+                elif kind == "hardlink":
+                    os.link(outside, lock_path)
+                else:
+                    os.mkfifo(lock_path)
+                with self.assertRaises((OSError, RuntimeError)):
+                    with static_web_publish._site_lock(directory, "demo"):
+                        self.fail("Unsafe lock was accepted")
+                self.assertEqual(outside.read_text(encoding="utf-8"), "preserve")
+                self.assertEqual(outside.stat().st_mode & 0o777, 0o644)
+
 
 if __name__ == "__main__":
     unittest.main()

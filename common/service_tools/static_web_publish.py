@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
+from contextlib import contextmanager
 import fcntl
 import html
 import json
@@ -11,6 +13,7 @@ import os
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -318,6 +321,24 @@ def _write_metadata(path: str, value: dict[str, object]) -> None:
     os.chmod(path, 0o644)
 
 
+@contextmanager
+def _site_lock(user_root: str, site: str) -> Iterator[None]:
+    """Serialize publication and removal without following unsafe lock files."""
+    lock_path = os.path.join(user_root, f".infra-tools-{site}.lock")
+    descriptor = os.open(
+        lock_path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600,
+    )
+    try:
+        file_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+            raise RuntimeError(f"Refusing unsafe site lock: {lock_path}")
+        os.fchmod(descriptor, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def publish(args: argparse.Namespace) -> dict[str, object]:
     """Build and publish one site, returning its structured publication record."""
 
@@ -343,10 +364,7 @@ def publish(args: argparse.Namespace) -> dict[str, object]:
     if os.stat(user_root).st_uid != account.pw_uid:
         raise RuntimeError(f"Site directory is not owned by {account.pw_name}")
 
-    lock_path = os.path.join(user_root, f".infra-tools-{site}.lock")
-    with open(lock_path, "a", encoding="utf-8") as lock_file:
-        os.chmod(lock_path, 0o600)
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    with _site_lock(user_root, site):
         if not args.no_build:
             _run_project_build(
                 project_dir, package, install=not args.no_install, json_output=args.json,
@@ -407,13 +425,18 @@ def remove_site(account: pwd.struct_passwd, site: str, confirmed: bool) -> None:
     if not confirmed:
         raise ValueError("Removing a published site requires --yes")
     user_root = os.path.join(SITES_ROOT, account.pw_name)
-    path = os.path.join(user_root, site)
-    if os.path.islink(path) or not os.path.isdir(path):
-        raise RuntimeError(f"Published site does not exist: {site}")
-    if os.stat(path).st_uid != account.pw_uid:
-        raise RuntimeError(f"Published site is not owned by {account.pw_name}: {site}")
-    shutil.rmtree(path)
-    write_user_catalog(user_root, account.pw_name)
+    if os.path.islink(user_root) or not os.path.isdir(user_root):
+        raise RuntimeError(f"Managed site directory is unavailable: {user_root}")
+    if os.stat(user_root).st_uid != account.pw_uid:
+        raise RuntimeError(f"Site directory is not owned by {account.pw_name}")
+    with _site_lock(user_root, site):
+        path = os.path.join(user_root, site)
+        if os.path.islink(path) or not os.path.isdir(path):
+            raise RuntimeError(f"Published site does not exist: {site}")
+        if os.stat(path).st_uid != account.pw_uid:
+            raise RuntimeError(f"Published site is not owned by {account.pw_name}: {site}")
+        shutil.rmtree(path)
+        write_user_catalog(user_root, account.pw_name)
 
 
 def main(argv: list[str] | None = None) -> int:
