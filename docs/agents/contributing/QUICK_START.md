@@ -50,6 +50,8 @@ a one-hour default timeout (override with a positive `timeout`, or `None` for
 an intentionally unbounded command). On timeout it terminates the group and
 bounds output collection, including when a detached child retains a pipe.
 Cleanup can add up to two five-second grace periods to the requested timeout.
+Keyboard interruption also terminates the isolated command group before
+propagating cancellation to the caller.
 Detached processes that create their own sessions require caller-specific
 supervision if they must also be terminated.
 

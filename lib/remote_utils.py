@@ -285,6 +285,15 @@ def run(
             validated_timeout,
             diagnostic if isinstance(diagnostic, str) else None,
         ) from exc
+    except KeyboardInterrupt:
+        # Isolated groups do not receive the caller's terminal SIGINT.
+        # Do not leave setup or deployment children running after cancellation.
+        _terminate_timed_out_process(process)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+        process.poll()
+        raise
 
     result = subprocess.CompletedProcess(
         args=command,

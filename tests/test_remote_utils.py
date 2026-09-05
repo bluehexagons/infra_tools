@@ -299,6 +299,22 @@ class TestRunCommandDispatch(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "positive number"):
                     run("echo hello", timeout=timeout)
 
+    @patch("lib.remote_utils.os.killpg")
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_keyboard_interrupt_terminates_isolated_children(self, mock_popen, mock_killpg):
+        process = self._completed_process(mock_popen)
+        process.communicate.side_effect = KeyboardInterrupt
+        with self.assertRaises(KeyboardInterrupt):
+            run(['deploy'], capture_output=True)
+        self.assertEqual(
+            mock_killpg.call_args_list,
+            [unittest.mock.call(1234, signal.SIGTERM), unittest.mock.call(1234, signal.SIGKILL)],
+        )
+        process.wait.assert_called_once_with(timeout=5.0)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close.assert_called_once_with()
+        process.poll.assert_called_once_with()
+
     @patch("lib.remote_utils.subprocess.Popen")
     def test_command_echo_is_opt_in(self, mock_popen):
         self._completed_process(mock_popen)
