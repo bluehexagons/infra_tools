@@ -12,6 +12,7 @@ import os
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -189,8 +190,26 @@ def _precompress_export(export_dir: str) -> list[str]:
     return sorted(compressed)
 
 
+def _validate_export_tree(export_dir: str) -> None:
+    """Reject links and special files before processing any generated output."""
+    for current_dir, directory_names, file_names in os.walk(export_dir):
+        if not stat.S_ISDIR(os.lstat(current_dir).st_mode):
+            raise RuntimeError(f"Export contains an unsafe directory: {current_dir}")
+        for name in directory_names:
+            path = os.path.join(current_dir, name)
+            if not stat.S_ISDIR(os.lstat(path).st_mode):
+                raise RuntimeError(f"Export contains an unsafe directory: {path}")
+        for name in file_names:
+            path = os.path.join(current_dir, name)
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise RuntimeError(f"Export contains an unsafe file: {path}")
+
+
 def _make_export_readable(export_dir: str) -> None:
-    """Give Nginx read access without accepting generated symlinks."""
+    """Give Nginx read access only after validating the entire export."""
+
+    _validate_export_tree(export_dir)
 
     for current_dir, directory_names, file_names in os.walk(export_dir):
         if os.path.islink(current_dir):
@@ -375,6 +394,9 @@ def _publish(args: argparse.Namespace) -> tuple[str, str, dict[str, object]]:
                     raise RuntimeError("Godot did not create index.html")
                 raise RuntimeError(f"Godot export failed with exit code {result.returncode}")
 
+            # Compression and metadata writes can follow existing output links.
+            # Validate before either operation, including with --no-precompress.
+            _validate_export_tree(staging_dir)
             compressed = _precompress_export(staging_dir) if args.precompress else []
             published_url = _published_url(account.pw_name, game)
             destination_dir = os.path.join(user_root, game)

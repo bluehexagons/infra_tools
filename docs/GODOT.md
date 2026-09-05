@@ -81,6 +81,11 @@ completes a new export, with a per-game lock so unrelated games may publish in
 parallel without conflicting updates. A failed build does not remove the last
 working copy.
 
+Before compression, metadata writes, or permission changes, the publisher
+rejects symlinks, multiply linked files, and special files in generated output.
+Export plugins must produce ordinary files and directories. Rejected exports
+leave the previous publication and files outside the staging directory intact.
+
 Use the same utility for inspection and cleanup:
 
 ```bash
