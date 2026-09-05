@@ -20,8 +20,8 @@ a public plain-HTTP server or edit Nginx and UFW directly.
 3. Run `godot --headless --path . --import` when imports need to be completed
    before export; it waits for resource imports before quitting.
 4. From the project root, run `infra-web publish godot --json`. It derives a
-   stable game slug from the project and suppresses the interactive Godot
-   progress stream. Pass an explicit slug, `--preset`, or `--debug` only when
+   stable game slug from the project and sends Godot progress and diagnostics
+   to stderr, leaving stdout as JSON. Pass an explicit slug, `--preset`, or `--debug` only when
    the task requires them. The result reports the URL, elapsed time, artifact
    sizes, and whether it replaced an earlier publication.
 5. Replace `GAME` below with the lowercase `game` value returned by `publish`:

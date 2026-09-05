@@ -7,7 +7,7 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -282,6 +282,39 @@ class TestGodotWebHost(unittest.TestCase):
 
 
 class TestGodotWebPublisher(unittest.TestCase):
+    def test_json_export_streams_logs_without_buffering_or_polluting_result(self) -> None:
+        for returncode in (0, 1):
+            with self.subTest(returncode=returncode), tempfile.TemporaryDirectory() as directory:
+                project = os.path.join(directory, "project")
+                games = os.path.join(directory, "games")
+                os.makedirs(project)
+                os.makedirs(os.path.join(games, "agent"))
+                with open(os.path.join(project, "project.godot"), "w", encoding="utf-8"):
+                    pass
+                output, errors = io.StringIO(), io.StringIO()
+
+                def export(command, **kwargs):
+                    self.assertNotIn("capture_output", kwargs)
+                    self.assertIs(kwargs["stdout"], errors)
+                    print("export diagnostic", file=kwargs["stdout"])
+                    if returncode == 0:
+                        with open(command[-1], "w", encoding="utf-8") as exported:
+                            exported.write("game")
+                    return SimpleNamespace(returncode=returncode)
+
+                with (
+                    patch.object(godot_web_publish, "GAMES_ROOT", games),
+                    patch.object(godot_web_publish, "_base_url", return_value=None),
+                    patch.object(godot_web_publish, "_current_account", return_value=SimpleNamespace(pw_name="agent", pw_uid=os.getuid())),
+                    patch.object(godot_web_publish.subprocess, "run", side_effect=export),
+                    redirect_stdout(output),
+                    redirect_stderr(errors),
+                ):
+                    status = godot_web_publish.main(["demo", "--project", project, "--json"])
+                self.assertEqual(status, returncode)
+                self.assertEqual(json.loads(output.getvalue())["ok"], returncode == 0)
+                self.assertEqual(errors.getvalue(), "export diagnostic\n")
+
     def test_failed_activation_restores_previous_export(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             destination_dir = os.path.join(temporary_dir, "demo")

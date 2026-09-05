@@ -99,9 +99,10 @@ infra-web remove my-game --yes
 
 `doctor` verifies trusted HTTPS, the secure-context and cross-origin isolation
 headers, and the `application/wasm` content type. `--json` is available on
-publish, list, and doctor for agent automation. Publication JSON suppresses
-Godot's progress stream and reports elapsed time, exported artifact counts and
-sizes, and whether the prior snapshot was replaced. `--open` opens a successful
+publish, list, and doctor for agent automation. Publication JSON sends Godot's
+progress and diagnostics directly to stderr without buffering the export log.
+Stdout reports elapsed time, exported artifact counts and sizes, and whether
+the prior snapshot was replaced. `--open` opens a successful
 publication in the user's default browser. Treat the URL returned by
 `infra-web` as authoritative: static games are paths behind the shared Nginx
 HTTPS listener, not processes bound to game-specific ports.

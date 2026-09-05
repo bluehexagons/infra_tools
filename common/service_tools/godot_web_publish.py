@@ -387,12 +387,9 @@ def _publish(args: argparse.Namespace) -> tuple[str, str, dict[str, object]]:
             result = subprocess.run(
                 command,
                 check=False,
-                capture_output=args.json,
-                text=args.json,
+                stdout=sys.stderr if args.json else None,
             )
             if result.returncode != 0 or not os.path.isfile(export_path):
-                if args.json and result.stderr:
-                    print(result.stderr, file=sys.stderr, end="")
                 if result.returncode == 0:
                     raise RuntimeError("Godot did not create index.html")
                 raise RuntimeError(f"Godot export failed with exit code {result.returncode}")
