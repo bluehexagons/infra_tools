@@ -108,13 +108,6 @@ process limit, so a cold browser can complete while a small ballooned VM is
 temporarily swapping. Exceeding that limit reports likely memory, swap, or
 storage pressure instead of an ambiguous locator timeout.
 
-Managed actions settle for one second before returning, which gives WebGL
-canvases more time to present a complete frame after input. A still-empty
-capture should be retried once after another short wait. Chromium GPU capture
-messages such as `ReadPixels` warnings are browser-process diagnostics; use the
-browser console tool to determine whether the page itself logged warnings or
-errors.
-
 Website authentication is deliberately not part of infra-tools credential
 copying. Supply site-specific credentials through the application or a scoped
 secret workflow appropriate to the task; do not put passwords or session tokens
@@ -134,6 +127,50 @@ connected client's network or certificate trust. When either surface is
 equally suitable, an already attached preview is useful; otherwise VM-local
 Playwright is the dependable default. Agents should state which network origin
 produced evidence when that affects the conclusion.
+
+If the T3 client is known to be closed, start with healthy Playwright directly.
+No preview probe or service restart is needed. For asynchronous review, provide
+selected screenshot artifacts and a short record of inputs and observed states.
+Live visibility is a reason to choose T3; it is not a prerequisite for complete
+VM-origin rendering, input, console, and network checks.
+
+## Real-time canvas testing
+
+An accessibility snapshot can expose only the canvas's fallback text while the
+game renders correctly. This limitation applies to both browser surfaces. Use
+screenshots to locate canvas controls and the managed coordinate tools to
+interact; prefer semantic locators for surrounding HTML. Coordinates use
+viewport-relative CSS pixels, so account for any screenshot scaling and capture
+again after resizing or scrolling. Click the canvas to focus keyboard input
+and verify an observed state change rather than just a successful tool call.
+
+Managed Playwright actions settle for one second before returning. Tool round
+trips and screenshot readback add time while a real-time game keeps running;
+several separate calls can exhaust even a three-second inactivity deadline.
+
+1. Read the project's input bindings and pause behavior before starting.
+2. Perform the short interaction under test and pause immediately, before
+   screenshots, console review, or analysis. Prefer a gameplay pause that
+   leaves the scene visible over a menu that obscures it.
+3. Verify that pause stops both simulation and gameplay timers. Capture the
+   frame and inspect evidence while paused, then resume for the next bounded
+   interaction. Record the pause state alongside the screenshot.
+
+If the game cannot pause reliably within the available time, use a bounded
+project test harness when project changes are in scope. Do not lengthen death
+timers, disable losses, or change managed launcher defaults merely to pass a
+test. Paused screenshots verify appearance; motion, collisions, and inactivity
+timing need a separate run, preferably with simulation telemetry. See
+[Godot testing](GODOT.md#browser-and-physics-testing).
+
+For an empty WebGL capture after the normal settle interval, wait another
+second and retry once. Repeated screenshot capture can itself stall GPU
+readback. In the report, group identical capture-time `ReadPixels`/GPU-stall
+warnings with a representative message and count instead of flooding the
+handoff. Keep the raw evidence and review page console errors, WebGL context
+loss, and persistent blank frames separately; do not suppress all GPU warnings
+or change Chromium flags to hide them. Measure gameplay performance without
+continuous screenshots before attributing capture overhead to the game.
 
 ## Collaborative preview and private networks
 

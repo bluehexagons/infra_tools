@@ -208,6 +208,123 @@ or TLS verification bypasses. They contain no credentials and are not installed
 for a profile that selects neither agent. See
 [Managed agent workflow skills](AGENT_SKILLS.md) for the full catalog.
 
+## Browser and physics testing
+
+Use healthy managed Playwright directly for repeatable VM-origin checks. T3
+preview is useful for live shared inspection or client-origin checks and needs
+the connected client app running. Its absence does not reduce Playwright's
+canvas, input, console, or network coverage. Share selected screenshots and the
+input sequence for asynchronous review; see
+[browser selection and real-time capture](BROWSER_AUTOMATION.md#real-time-canvas-testing).
+
+Identify the project's pause action before starting. Perform a short gameplay
+interaction, pause immediately, verify that simulation and gameplay timers
+stop, then capture and inspect. Resume only for the next bounded action. For
+example, Snake 3D maps Space to a gameplay pause that leaves the scene visible;
+check each project's current bindings instead of assuming Escape or Space.
+Godot's tree pause and node process modes affect different parts of processing,
+so verify actual timer and body state, including any custom pause mechanism.
+See [Godot's pause behavior](https://docs.godotengine.org/en/stable/tutorials/scripting/pausing_games.html).
+
+### Collect a bounded debug trace
+
+Screenshots alone cannot quantify physics feel. When the project task includes
+physics investigation, add or reuse project-owned instrumentation, disabled by
+default and gated by `OS.is_debug_build()`. For web debugging, export with
+`infra-web publish godot my-game-debug --debug --json` using a distinct chosen slug
+so the diagnostic build does not replace the normal game. A debug export alone
+does not add telemetry or expose Godot scene objects to the browser.
+
+Use a fixed initial state, random seed, and input sequence. Record the commit,
+Godot version, physics backend (including Jolt versus Godot Physics), physics
+tick rate, export mode, and input timing. Measure against simulation ticks or
+accumulated physics delta, not time spent waiting for browser tools.
+
+| Measurement | Capture and interpretation |
+| --- | --- |
+| Position and velocity | Stable body ID, world position, linear and angular velocity; encode vectors as numeric arrays and state the units. Use physics state rather than an interpolated mesh transform. |
+| Chain constraints | Both endpoint IDs, actual distance, rest length, and `distance - rest_length`; compare peak and sustained stretch with project-specific tolerances. |
+| Contacts | Contact count and per-contact impulse from the existing body `_integrate_forces(state)` callback. Keep scripted/applied impulses separate from solver contact impulses. |
+| Gameplay | Session time, pause/loss state, inactivity timer, and active input; relate a loss to the simulation interval that caused it. |
+
+For contact data, configure a bounded nonzero `max_contacts_reported` on the
+observed rigid bodies; enable `contact_monitor` when using contact signals.
+Collect `state.get_contact_count()` and `state.get_contact_impulse(i)` in the
+existing callback without replacing its force logic. Record the reporting cap:
+contact data may be truncated, and a zero count with reporting disabled does
+not prove there was no collision. See the
+[RigidBody3D contact settings](https://docs.godotengine.org/en/stable/classes/class_rigidbody3d.html#class-rigidbody3d-property-max-contacts-reported)
+and [direct physics state API](https://docs.godotengine.org/en/stable/classes/class_physicsdirectbodystate3d.html#class-physicsdirectbodystate3d-method-get-contact-impulse).
+
+Sample a few selected bodies at about 10 Hz for a short run, for example 120
+samples over 12 seconds. Accumulate contact peaks/counts every physics tick
+between samples so brief impacts are retained. Avoid double-counting the same
+contact from both bodies. Keep the sampling phase consistent across runs and
+do not log the whole scene or emit console output every frame.
+
+This optional collector can be an autoload named `DebugTelemetry`. The project
+explicitly enables it for a diagnostic run and calls `record_sample()` from its
+chosen sampling point with JSON-compatible measurements. It stops at the cap;
+the normal pause/test-completion handler can call `publish_trace()` for a
+shorter run. Call that handler where it still runs while gameplay is paused.
+
+```gdscript
+extends Node
+
+const MAX_SAMPLES := 120
+var enabled := false
+var samples: Array[Dictionary] = []
+
+func record_sample(sample: Dictionary) -> void:
+    if not OS.is_debug_build() or not enabled or samples.size() >= MAX_SAMPLES:
+        return
+    samples.append(sample.duplicate(true))
+    if samples.size() == MAX_SAMPLES:
+        publish_trace()
+
+func publish_trace() -> void:
+    if not OS.is_debug_build() or not enabled:
+        return
+    enabled = false
+    var payload := JSON.stringify({"schema": 1, "samples": samples})
+    if OS.has_feature("web"):
+        var browser_window = JavaScriptBridge.get_interface("window")
+        browser_window.__godotPhysicsTrace = payload
+    else:
+        print("GODOT_PHYSICS_TRACE " + payload)
+```
+
+Clear `samples` and re-enable explicitly before another diagnostic capture;
+bound each sample's body/contact count as well as the number of samples.
+Attach the run metadata to the saved evidence. The bridge assigns a serialized
+data property, with no callable gameplay controls or evaluated code strings.
+It requires a web template with JavaScriptBridge support; see
+[Godot's JavaScriptBridge API](https://docs.godotengine.org/en/stable/classes/class_javascriptbridge.html).
+
+After publishing the trace, use the managed browser evaluation tool for this
+read-only expression and save its result with the screenshot evidence:
+
+```javascript
+() => {
+  const trace = window.__godotPhysicsTrace;
+  return typeof trace === 'string' ? JSON.parse(trace) : null;
+}
+```
+
+A `null` result means no trace has been published in that page; check the debug
+gate and capture completion. For console transport, parse only the
+`GODOT_PHYSICS_TRACE ` prefix. Do not write game state through evaluation to
+manufacture a passing interaction. Use a project harness that applies input at
+known physics ticks when browser round trips exceed a gameplay deadline, and
+report harness coverage separately from real browser keyboard/mouse coverage.
+
+Compare repeated runs with tolerances for maximum link stretch, speed peaks,
+settling time, and inactivity duration. A fixed seed helps reproduce the
+scenario but does not promise identical physics across engines or platforms.
+Keep screenshots out of performance measurement intervals because GPU readback
+adds overhead. Finish with an ordinary release smoke test with tracing disabled;
+debug instrumentation and paused captures do not establish release performance.
+
 ## Release and integrity policy
 
 Godot itself is not installed from Debian's default APT sources. infra-tools

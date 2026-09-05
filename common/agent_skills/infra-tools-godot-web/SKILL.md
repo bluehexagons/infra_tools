@@ -55,6 +55,32 @@ preview access restored. If VM-local automation fails trust, report the failed
 capability; rerun the saved setup only when the task includes repairing managed
 trust. Never suppress HTTPS errors.
 
+## Real-time and physics checks
+
+Read the project's input map and pause implementation before interacting.
+Pause immediately after a short gameplay action, verify that simulation and
+gameplay timers stop, then capture and inspect while paused. Resume for the next
+bounded action. Canvas fallback text is not proof of a blank frame; use the
+browser skill's screenshot and coordinate workflow. Paused images establish
+appearance, not movement quality or inactivity timing.
+
+When physics feel is in scope, complement screenshots with a project-owned,
+opt-in debug trace. Record simulation ticks/time, stable body IDs, positions,
+linear/angular velocities, link distance versus rest length, and gameplay
+timers. Capture contact impulses in the body's existing `_integrate_forces`
+callback; keep them distinct from scripted impulses and enable a bounded
+`max_contacts_reported`. Sample positions at a modest rate, but accumulate
+collision peaks every physics tick so short impacts are not missed.
+
+Bound the trace by duration, body count, and sample count. Export JSON once
+through a prefixed console message or a debug-only `JavaScriptBridge` window
+property, then read it through the browser tools without mutating game state.
+Do not assume the canvas exposes Godot objects to JavaScript. Compare a fixed
+seed/input scenario with tolerances and retain the engine/backend, timestep,
+revision, and debug/release mode. Verify the normal release without tracing.
+The [physics testing recipe](https://github.com/bluehexagons/infra_tools/blob/main/docs/GODOT.md#browser-and-physics-testing)
+has a bounded capture example and measurement guidance.
+
 ## Live previews
 
 Prefer static publication for normal Godot exports. If a task genuinely needs

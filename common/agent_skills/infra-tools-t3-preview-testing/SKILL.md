@@ -43,6 +43,15 @@ still has no effect, use an equivalent semantic click when appropriate or
 report the keyboard behavior as unverified; do not mutate page state through
 evaluation to fake the check.
 
+Canvas snapshots may expose only fallback text; inspect the screenshot and
+use supported coordinate input for canvas controls, keeping semantic locators
+for surrounding HTML. Account for screenshot scaling and refocus the canvas
+before keyboard input. For real-time games, identify the pause control before
+starting, perform a short interaction, then pause immediately and verify that
+gameplay timers stop before capturing. Resume for the next bounded interaction;
+paused screenshots alone do not verify motion or timing. The same canvas
+limitations apply to both collaborative preview and VM-local browsers.
+
 Device presets change the CSS viewport but retain the desktop user agent.
 Snapshot again after resize or scroll, and expect scroll position to persist
 across some resizes. Restore appearance emulation to `system` after light/dark

@@ -17,6 +17,9 @@ Prefer VM-local Playwright when the task needs repeatable headless interactions,
 DOM/console/network inspection, loopback access, canvas input, or browser-engine
 verification that does not need to be shared live with the user. It remains
 available when the T3 application is closed.
+If the client is known to be closed, go straight to Playwright; preview probes
+or service restarts add no coverage. Share selected screenshots and a short
+interaction record when the user needs to review the result asynchronously.
 
 Prefer the T3 collaborative preview when the user should watch or participate,
 the requested evidence must appear in the shared UI, or the task specifically
@@ -46,11 +49,27 @@ Generated evidence belongs in the private, bounded
 `~/.local/state/infra_tools/playwright-mcp` directory by default. Omit
 `filename` unless the user requested a workspace deliverable.
 
-For canvas applications, map controls from a screenshot and use the bounded
-coordinate input tool. Coordinates are viewport-relative CSS pixels; recapture
-after resizing. The launcher waits one second after actions. For a still-empty
-WebGL capture, wait another second and retry once. Browser-process `ReadPixels`
-warnings are not page console errors.
+Canvas accessibility snapshots may expose only fallback text even when the
+game renders correctly. Use screenshots for canvas controls and the bounded
+coordinate input tool; retain semantic locators for surrounding HTML controls.
+Coordinates are viewport-relative CSS pixels, not source-image pixels; account
+for screenshot scaling and recapture after resizing or scrolling. Click the
+canvas to focus keyboard input and verify the resulting game state.
+
+The launcher waits one second after actions, and tool round trips add time.
+For real-time games, identify the actual pause control before starting; pause
+immediately after the short interaction under test, confirm it took effect,
+then capture and inspect while paused. Prefer a gameplay pause that leaves the
+scene visible. Resume only for the next bounded interaction. If pause is absent
+or does not stop gameplay timers, use a project test harness when in scope and
+report the timing limitation; do not change game balance or launcher defaults
+to make the check pass. A paused image proves appearance, not motion or timing.
+
+For a still-empty WebGL capture, wait another second and retry once. Repeated
+captures can stall GPU readback. Group identical capture-time `ReadPixels`
+warnings in the report, retaining a representative message and count; preserve
+page errors, context loss, and rendering failures separately. Use the console
+tool to distinguish application failures from browser-process diagnostics.
 
 ## Use the collaborative preview
 
