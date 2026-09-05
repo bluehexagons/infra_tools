@@ -5,10 +5,12 @@ from __future__ import annotations
 from io import BytesIO
 import json
 import os
+import stat
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
 
 from web.service_tools import cicd_executor, webhook_receiver
 from web.service_tools.cicd_security import (
@@ -113,6 +115,22 @@ class TestWebhookRequestLimits(unittest.TestCase):
 
 
 class TestExecutorJobHardening(unittest.TestCase):
+    def test_fifo_is_opened_nonblocking_and_rejected(self):
+        with patch.object(cicd_executor.os, 'open', return_value=42) as open_fd, patch.object(cicd_executor.os, 'fstat', return_value=SimpleNamespace(st_mode=stat.S_IFIFO)), patch.object(cicd_executor.os, 'close') as close_fd:
+            with self.assertRaisesRegex(ValueError, 'regular file'):
+                cicd_executor._load_job_file('/mock/job.json')
+            self.assertTrue(open_fd.call_args.args[1] & os.O_NONBLOCK)
+            close_fd.assert_called_once_with(42)
+
+    def test_read_limit_survives_file_growth_after_stat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            job = os.path.join(directory, 'job.json')
+            with open(job, 'wb') as file_obj:
+                file_obj.write(b'{"value":"' + b'a' * 100 + b'"}')
+            with patch.object(cicd_executor, 'MAX_JOB_FILE_BYTES', 20), patch.object(cicd_executor.os, 'fstat', return_value=SimpleNamespace(st_mode=stat.S_IFREG, st_size=1)):
+                with self.assertRaisesRegex(ValueError, 'too large'):
+                    cicd_executor._load_job_file(job)
+
     def test_fresh_clone_checks_out_authenticated_commit_with_hooks_disabled(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             source = os.path.join(temp_dir, "source")

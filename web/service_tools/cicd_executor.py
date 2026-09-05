@@ -193,7 +193,8 @@ def _validate_checkout_fields(ref: str, commit_sha: str) -> tuple[str, str, str]
 def _load_job_file(job_file: str) -> object:
     """Load a small, regular job file without following symlinks."""
 
-    flags = os.O_RDONLY
+    # Opening a FIFO without O_NONBLOCK hangs before fstat can reject it.
+    flags = os.O_RDONLY | os.O_NONBLOCK
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     fd = os.open(job_file, flags)
@@ -203,9 +204,13 @@ def _load_job_file(job_file: str) -> object:
             raise ValueError("job path must be a regular file")
         if file_stat.st_size > MAX_JOB_FILE_BYTES:
             raise ValueError("job file is too large")
-        with os.fdopen(fd, 'r', encoding='utf-8') as file_obj:
+        with os.fdopen(fd, 'rb') as file_obj:
             fd = -1
-            return json.load(file_obj)
+            content = file_obj.read(MAX_JOB_FILE_BYTES + 1)
+        # The writer can grow a file after fstat. Bound the actual read too.
+        if len(content) > MAX_JOB_FILE_BYTES:
+            raise ValueError("job file is too large")
+        return json.loads(content)
     finally:
         if fd >= 0:
             os.close(fd)

@@ -176,6 +176,9 @@ event only verifies webhook connectivity and does not build a repository.
   executor, so the receiver does not need systemd or polkit privileges
 - jobs are consumed after one attempt, including malformed or failed jobs, so
   one bad payload cannot retrigger forever
+- job and privileged request readers open paths without following symlinks or
+  blocking on FIFOs, then require regular files. Job reads remain bounded even
+  if a file grows after its initial size check
 - delivery IDs are not yet persisted, so a repeated valid GitHub delivery can
   create another job for the same commit; monitor webhook retries until delivery
   idempotency is implemented

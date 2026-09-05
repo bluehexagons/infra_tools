@@ -58,7 +58,7 @@ def _run_checked(command: list[str]) -> None:
 
 
 def _read_regular_file(path: str, max_bytes: int) -> tuple[bytes, int, int]:
-    flags = os.O_RDONLY
+    flags = os.O_RDONLY | os.O_NONBLOCK
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     fd = os.open(path, flags)

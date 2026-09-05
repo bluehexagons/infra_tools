@@ -8,6 +8,7 @@ import stat
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import web.service_tools.deploy_admin as deploy_admin
 from lib.remote_deploy import _validate_config_name, _validate_deploy_path
@@ -164,6 +165,13 @@ class TestDeployAdminFileOperations(unittest.TestCase):
                 deploy_admin._read_regular_file(file_path, 2)
             with self.assertRaisesRegex(ValueError, "regular file"):
                 deploy_admin._read_regular_file(directory, 10)
+
+    def test_regular_file_reader_rejects_fifo_without_blocking_open(self) -> None:
+        with patch.object(deploy_admin.os, 'open', return_value=42) as open_fd, patch.object(deploy_admin.os, 'fstat', return_value=SimpleNamespace(st_mode=stat.S_IFIFO)), patch.object(deploy_admin.os, 'close') as close_fd:
+            with self.assertRaisesRegex(ValueError, 'regular file'):
+                deploy_admin._read_regular_file('/mock/request.json', 1024)
+            self.assertTrue(open_fd.call_args.args[1] & os.O_NONBLOCK)
+            close_fd.assert_called_once_with(42)
 
 
 class TestDeployAdminCommands(unittest.TestCase):
