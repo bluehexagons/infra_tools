@@ -129,6 +129,12 @@ to the target directory. Without `deploy_target`, the optional deploy script
 runs locally on the build server. Use repository URLs without embedded
 credentials; the executor rejects credential-bearing URLs.
 
+Remote destinations must normalize to a strict child of the target's base
+directory. A destination equal to the base (including `/.`) or outside it is
+rejected before rsync can run with `--delete`. When a deploy script is
+configured, it must be a readable regular file; the executor reads it before
+transferring artifacts and fails the job if it is missing or unreadable.
+
 After changing the JSON, the next signed push uses the new settings. A ping
 event only verifies webhook connectivity and does not build a repository.
 

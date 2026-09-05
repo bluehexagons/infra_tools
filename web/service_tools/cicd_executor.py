@@ -408,11 +408,12 @@ def perform_remote_deployment(
 ) -> bool:
     """Deploy built artifacts to a remote app server."""
     from lib.remote_deploy import (
+        _build_ssh_stdin_script_cmd,
+        _validate_deploy_path,
         get_deploy_target,
         push_artifact,
         push_nginx_config,
         reload_nginx,
-        restart_service,
     )
     from lib.deploy_utils import (
         detect_project_type,
@@ -453,7 +454,28 @@ def perform_remote_deployment(
     
     from lib.deploy_utils import create_safe_directory_name
     dir_name = create_safe_directory_name(domain, path)
-    remote_path = f"{base_dir}/{dir_name}" if dir_name else base_dir
+    try:
+        remote_path = _validate_deploy_path(f"{base_dir}/{dir_name}", base_dir)
+    except ValueError as exc:
+        log_event(logger, "Invalid deployment path", level=40, error=str(exc))
+        return False
+
+    # Read required deployment steps before transferring or activating artifacts.
+    # Retain the content so a disappearing script cannot become a silent skip.
+    deploy_script = repo_config.get('scripts', {}).get('deploy')
+    script_content = None
+    if deploy_script:
+        script_path = deploy_script if os.path.isabs(deploy_script) else os.path.join(workspace, deploy_script)
+        try:
+            if not os.path.isfile(script_path):
+                raise ValueError(f"Deploy script is not a regular file: {script_path}")
+            with open(script_path, 'r', encoding='utf-8') as script:
+                script_content = script.read()
+        except (OSError, ValueError) as exc:
+            log_event(logger, "Cannot read required deploy script", level=40, error=str(exc))
+            with open(log_file, 'a') as log:
+                log.write(f"\n✗ Cannot read required deploy script: {exc}\n")
+            return False
     
     with open(log_file, 'a') as log:
         log.write(f"\n{'='*80}\n")
@@ -501,46 +523,26 @@ def perform_remote_deployment(
         with open(log_file, 'a') as log:
             log.write("✓ Nginx reloaded\n")
     
-    deploy_script = repo_config.get('scripts', {}).get('deploy')
-    if deploy_script:
-        from lib.remote_deploy import _build_ssh_stdin_script_cmd
-        target_config = get_deploy_target(deploy_target)
-        
-        if not target_config:
-            log_event(logger, "Deploy target not found", level=40, deploy_target=deploy_target)
-            return False
-        
-        script_path = deploy_script if os.path.isabs(deploy_script) else os.path.join(workspace, deploy_script)
-        
-        if not os.path.exists(script_path):
-            log_event(logger, "Deploy script configured but not found", level=30, script_path=script_path, deploy_target=deploy_target)
+    if script_content is not None:
+        ssh_cmd = _build_ssh_stdin_script_cmd(target, remote_path)
+        try:
+            result = subprocess.run(
+                ssh_cmd,
+                input=script_content,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
             with open(log_file, 'a') as log:
-                log.write(f"\n⚠ Deploy script not found: {script_path}\n")
-        else:
-            with open(script_path, 'r') as f:
-                script_content = f.read()
-
-            ssh_cmd = _build_ssh_stdin_script_cmd(target_config, remote_path)
-            
-            try:
-                result = subprocess.run(
-                    ssh_cmd,
-                    input=script_content,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
-                with open(log_file, 'a') as log:
-                    log.write(f"\nDeploy script output:\n{result.stdout}\n")
-                    if result.stderr:
-                        log.write(f"Errors:\n{result.stderr}\n")
-                
-                if result.returncode != 0:
-                    log_event(logger, "Deploy script failed", level=40, deploy_target=deploy_target, stderr=result.stderr.strip())
-                    return False
-            except Exception as e:
-                log_event(logger, "Failed to run deploy script", level=40, deploy_target=deploy_target, error=str(e))
+                log.write(f"\nDeploy script output:\n{result.stdout}\n")
+                if result.stderr:
+                    log.write(f"Errors:\n{result.stderr}\n")
+            if result.returncode != 0:
+                log_event(logger, "Deploy script failed", level=40, deploy_target=deploy_target, stderr=result.stderr.strip())
                 return False
+        except Exception as e:
+            log_event(logger, "Failed to run deploy script", level=40, deploy_target=deploy_target, error=str(e))
+            return False
     
     log_event(logger, "Remote deployment completed", deploy_target=deploy_target, remote_path=remote_path)
     return True

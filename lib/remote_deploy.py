@@ -12,6 +12,7 @@ from typing import Optional
 
 from lib.ssh_utils import build_scp_command, build_ssh_command, build_rsync_ssh_transport, chain_remote_commands, shell_join, ssh_batch_mode
 from lib.types import JSONDict
+from lib.validation import validate_filesystem_path
 
 
 DEPLOY_ADMIN_HELPER = "/usr/local/sbin/infra-tools-deploy-admin"
@@ -32,6 +33,8 @@ def _validate_config_name(domain: str) -> str:
 def _validate_deploy_path(deploy_path: str, base_dir: str) -> str:
     """Require a deployment path to be a child of its configured base directory."""
 
+    validate_filesystem_path(base_dir)
+    validate_filesystem_path(deploy_path)
     normalized_base = posixpath.normpath(base_dir)
     normalized_path = posixpath.normpath(deploy_path)
     if not normalized_base.startswith('/') or not normalized_path.startswith('/'):
@@ -107,7 +110,13 @@ def push_artifact(
     if not target:
         print(f"  ✗ Unknown deploy target: {target_host}")
         return False
-    
+
+    try:
+        remote_path = _validate_deploy_path(remote_path, str(target.get('base_dir', '/var/www')))
+    except ValueError as exc:
+        print(f"  ✗ {exc}")
+        return False
+
     ssh_key = target.get('ssh_key', '/var/lib/infra_tools/cicd/.ssh/deploy_key')
     ssh_port = target.get('ssh_port', 22)
     user = target.get('user', 'deploy')

@@ -47,20 +47,26 @@ class TestPushArtifact(unittest.TestCase):
 
     def test_push_builds_rsync_command_with_excludes_and_trailing_source_slash(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch.object(remote_deploy, "get_deploy_target", return_value=TARGET), patch.object(remote_deploy, "build_rsync_ssh_transport", return_value="ssh -i /tmp/deploy-key"), patch.object(remote_deploy, "ssh_batch_mode", return_value=True), patch.object(remote_deploy.subprocess, "run", return_value=completed()) as run:
-            result = remote_deploy.push_artifact(os.path.join(directory, "build"), "app", "/srv/app", [".git", "*.tmp"])
+            result = remote_deploy.push_artifact(os.path.join(directory, "build"), "app", "/var/www/app", [".git", "*.tmp"])
 
         self.assertTrue(result)
         command = run.call_args.args[0]
         self.assertEqual(command[:5], ["rsync", "-avz", "--delete", "-e", "ssh -i /tmp/deploy-key"])
         self.assertEqual(command[5:9], ["--exclude", ".git", "--exclude", "*.tmp"])
         self.assertTrue(command[-2].endswith("/build/"))
-        self.assertEqual(command[-1], "deploy@app.example:/srv/app")
+        self.assertEqual(command[-1], "deploy@app.example:/var/www/app")
 
     def test_push_artifact_handles_rsync_failure_and_timeout(self) -> None:
         with patch.object(remote_deploy, "get_deploy_target", return_value=TARGET), patch.object(remote_deploy, "build_rsync_ssh_transport", return_value="ssh"), patch.object(remote_deploy.subprocess, "run", return_value=completed(1, "permission denied")):
-            self.assertFalse(remote_deploy.push_artifact("/tmp/build", "app", "/srv/app"))
+            self.assertFalse(remote_deploy.push_artifact("/tmp/build", "app", "/var/www/app"))
         with patch.object(remote_deploy, "get_deploy_target", return_value=TARGET), patch.object(remote_deploy, "build_rsync_ssh_transport", return_value="ssh"), patch.object(remote_deploy.subprocess, "run", side_effect=subprocess.TimeoutExpired(["rsync"], 300)):
-            self.assertFalse(remote_deploy.push_artifact("/tmp/build", "app", "/srv/app"))
+            self.assertFalse(remote_deploy.push_artifact("/tmp/build", "app", "/var/www/app"))
+
+    def test_push_rejects_base_aliases_and_escapes_before_running_commands(self) -> None:
+        for path in ("/var/www", "/var/www/.", "/var/www/app/..", "/var/www/..", "/srv/app", "/var/www/a\n"):
+            with self.subTest(path=path), patch.object(remote_deploy, "get_deploy_target", return_value=TARGET), patch.object(remote_deploy.subprocess, "run") as run:
+                self.assertFalse(remote_deploy.push_artifact("/tmp/build", "app", path))
+                run.assert_not_called()
 
 
 class TestPushNginxConfig(unittest.TestCase):
