@@ -392,6 +392,38 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
             path.write_text('{/* block */"text":"/* literal */", "value":/* before */12,}', encoding='utf-8')
             self.assertEqual(browser_automation_steps._load_opencode_config(str(path)), {'text': '/* literal */', 'value': 12})
 
+    def test_opencode_registration_rejects_linked_and_special_files(self) -> None:
+        for filename in ("opencode.json", "opencode.jsonc"):
+            for kind in ("symlink", "hardlink", "fifo"):
+                with self.subTest(filename=filename, kind=kind), tempfile.TemporaryDirectory() as directory:
+                    home = Path(directory)
+                    config_dir = home / ".config" / "opencode"
+                    config_dir.mkdir(parents=True)
+                    path = config_dir / filename
+                    outside = home / "private.json"
+                    original = '{"private": "must not be copied"}'
+                    outside.write_text(original, encoding="utf-8")
+                    if kind == "symlink":
+                        path.symlink_to(outside)
+                    elif kind == "hardlink":
+                        os.link(outside, path)
+                    else:
+                        os.mkfifo(path)
+                    original_stat = path.lstat()
+                    with (
+                        patch.object(browser_automation_steps, "_tool_available", return_value=True),
+                        patch.object(browser_automation_steps, "_user_home", return_value=str(home)),
+                        patch.object(browser_automation_steps, "write_json_atomic") as write,
+                        patch.object(browser_automation_steps, "_chown_path") as chown,
+                    ):
+                        with self.assertRaisesRegex(RuntimeError, "Cannot update"):
+                            browser_automation_steps._configure_opencode(_config("opencode"))
+                        write.assert_not_called()
+                        chown.assert_not_called()
+                    self.assertFalse(agent_cli._opencode_browser_registration(str(home)))
+                    self.assertEqual(outside.read_text(encoding="utf-8"), original)
+                    self.assertEqual(path.lstat(), original_stat)
+
     def test_codex_registration_does_not_match_command_in_another_section(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             home = Path(temporary_directory)

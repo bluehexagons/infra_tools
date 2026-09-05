@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import stat
 from typing import cast
 
 from lib.atomic_io import write_json_atomic, write_text_atomic
@@ -241,7 +242,13 @@ def _strip_jsonc_trailing_commas(content: str) -> str:
 
 def _load_opencode_config(path: str) -> JSONDict:
     """Load JSON or JSONC OpenCode configuration into a JSON object."""
-    with open(path, encoding="utf-8") as file_obj:
+    # Setup may run as root against a user-controlled destination. Do not
+    # follow a substituted link or block opening a FIFO before checking it.
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, encoding="utf-8") as file_obj:
+        file_stat = os.fstat(file_obj.fileno())
+        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+            raise ValueError(f"OpenCode config must be a singly linked regular file: {path}")
         content = file_obj.read()
     normalized = _strip_jsonc_trailing_commas(_strip_jsonc_comments(content))
     loaded = json.loads(normalized)

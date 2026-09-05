@@ -69,7 +69,8 @@ normalized during the rewrite, while configuration values are preserved. If
 the browser registration is applied afterward, so the explicit setup choice
 owns the `infra-tools-playwright` entry while preserving unrelated settings and
 MCP servers.
-Malformed or symlinked target configuration is rejected.
+Malformed target configuration is rejected. Symlinked, hard-linked, or
+non-regular target files are rejected before their contents are read or merged.
 Unterminated block comments and comments splitting a JSON token are treated as
 malformed; registration leaves that file unchanged instead of repairing it
 into a potentially different configuration.
