@@ -1,7 +1,8 @@
 # HomeBox service support
 
-Status: initial native implementation delivered, 2026-09-07; automatic updates
-and full VM qualification remain deferred.
+Status: native setup, recovery, recurring updates, and operator documentation
+implemented, 2026-09-07. Full disposable-VM qualification remains a release
+validation task.
 Tracks [issue #99](https://github.com/bluehexagons/infra_tools/issues/99), whose
 description links to the maintained `sysadminsmedia/homebox` project and has
 no additional requirements or comments at the time of review.
@@ -22,8 +23,11 @@ the original scope and acceptance targets.
   validation, and the server plugin carry intent through setup and patch.
 - `web/homebox_steps.py` owns verified staging, systemd/Nginx, private
   transient bootstrap, persistent secrets, locking, maintenance, migration
-  rollback, explicit restore, and health. `lib/homebox_cli.py` provides remote
-  operations. Web-panel links contain only public endpoint facts.
+  rollback, explicit restore, automatic recovery-archive retention, and health.
+  `common/service_tools/auto_update_homebox.py` resolves weekly stable releases
+  through the same transaction and reports non-secret state for health and
+  notifications. `lib/homebox_cli.py` provides remote operations. Web-panel
+  links contain only public endpoint facts.
 - Fresh setup pins v0.26.2; reruns retain the saved executable identity.
   Downgrades require full restore. Public HTTPS is checked through a local-only
   readiness route while normal ingress is blocked. Local/tunnel clients must
@@ -41,12 +45,11 @@ the original scope and acceptance targets.
   Generated ACME/HTTPS Nginx configurations passed `nginx -t` with temporary
   certificates and unprivileged fixture ports; the systemd unit passed
   `systemd-analyze verify` with a fixture
-  executable. The full default suite passed 3,425 tests with one live test
+  executable. The full default suite passed 3,449 tests with one live test
   skipped. Full Debian VM restart/reboot, public TLS, and WebSocket browser behavior
   remain follow-up validation. ARM64 was deliberately removed from scope. Unit tests mock
   system mutations; no production service was installed during development.
-- Scheduled updates, automatic retention, monitoring integration, and
-  Cloudflare ingress remain outside this initial delivery.
+- Cloudflare ingress remains outside this delivery.
 
 ## Recommended first scope
 
@@ -62,7 +65,8 @@ server setup pipeline, following Gogs' service composition pattern:
   conflicts with Gogs, the web panel, and other managed applications.
 - Repeatable setup, protected first-user creation, health checks, complete
   backup/restore instructions, and explicit version upgrades.
-- Automatic updates only in a later slice after migration recovery is tested.
+- A weekly automatic update check uses the verified release and recovery path
+  after the focused migration-recovery tests passed.
 
 Defer Docker/Compose, PostgreSQL, remote object storage, multiple instances,
 subpath hosting, OIDC, SMTP provisioning, MQTT, printer integration, and
@@ -182,7 +186,7 @@ or unsafe overlap with other services and exported writable shares.
 | 1. Configuration and planning | `lib/arg_parser.py`, `lib/config.py`, `lib/validation.py`, `lib/setup_common.py`, `plugins/server.py` | Parse, validate, serialize, reconstruct, patch, and dry-run the proposed options; reject unsupported system types before target mutation |
 | 2. Initial setup | New `web/homebox_steps.py`; reuse `lib/release_management.py` and existing Nginx/TLS, machine capability, and state helpers | Install verified release, configure isolated service/storage, complete private bootstrap, and health-gate ingress and successful state |
 | 3. Operations and recovery | New `lib/homebox_cli.py`, CLI registration, `common/web_panel_steps.py`, service-owned backup/upgrade helpers | Health text/JSON, panel facts, explicit upgrades, complete backup/restore, and documented disable/removal that preserves data |
-| 4. Scheduled maintenance | HomeBox updater under `common/service_tools/`, plugin wiring and notification integration | Enable a timer only after recovery tests pass; use the same lock, version policy, activation, and rollback path as explicit upgrades |
+| 4. Scheduled maintenance | `common/service_tools/auto_update_homebox.py`, plugin wiring, health state, and notification integration | Weekly timer resolves a stable tag only for ready services and uses the same lock, version policy, activation, and rollback path as explicit upgrades; manual backups remain untouched while recent automatic recovery archives are retained |
 
 Use the Gogs implementation as a reference, not a wholesale copy: its Git/SSH,
 LFS, user bootstrap, firewall rules, and binary rollback assumptions are
@@ -211,6 +215,6 @@ each package, service, or filesystem operation.
 - Update CLI/reference docs and add `docs/HOMEBOX.md`; update backup,
   credential, web-panel, and maintenance docs as their behavior lands.
 
-Remaining qualification should exercise amd64 on a disposable Debian VM before
-enabling scheduled updates. The larger monitoring project can consume HomeBox
-health facts later.
+Remaining release qualification should exercise amd64 on a disposable Debian
+VM, including restart/reboot, public TLS, and browser WebSocket behavior. The
+larger monitoring project can consume the existing HomeBox health facts later.

@@ -84,6 +84,20 @@ def extend_gogs_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) ->
     steps.append(("Configuring Gogs auto-update", configure_auto_update_gogs))
 
 
+def extend_homebox_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
+    """Append HomeBox setup and its recurring updater when enabled."""
+    if config.homebox is None:
+        return
+
+    from web.homebox_steps import setup_homebox
+
+    steps.append(("Configuring HomeBox inventory service", setup_homebox))
+    if config.homebox:
+        from common.steps import configure_auto_update_homebox
+
+        steps.append(("Configuring HomeBox auto-update", configure_auto_update_homebox))
+
+
 def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Build server-oriented setup steps from plugin-owned capability helpers."""
 
@@ -143,10 +157,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_build_server_steps(config, steps)
     extend_antistatic_steps(config, steps)
     extend_gogs_steps(config, steps)
-    if config.homebox is not None:
-        from web.homebox_steps import setup_homebox
-
-        steps.append(("Configuring HomeBox inventory service", setup_homebox))
+    extend_homebox_steps(config, steps)
     extend_syncthing_steps(config, steps)
     extend_web_panel_steps(config, steps)
     steps.extend(get_final_steps(config))

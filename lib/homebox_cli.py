@@ -74,6 +74,14 @@ def run_homebox_command(args: argparse.Namespace) -> int:
             for name in ("version", "status", "url", "data_path", "error"):
                 if name in value:
                     print(f"  {name}: {value[name]}")
+            automatic = value.get("automatic_update")
+            if isinstance(automatic, dict) and automatic.get("configured"):
+                timer = automatic.get("timer", {})
+                check = automatic.get("check", {})
+                timer_ok = isinstance(timer, dict) and timer.get("active") and timer.get("scheduled")
+                check_ok = isinstance(check, dict) and not check.get("stale") and check.get("successful")
+                print(f"  automatic update timer: {'ok' if timer_ok else 'FAILED'}")
+                print(f"  automatic update check: {'ok' if check_ok else 'FAILED'}")
         else:
             print(value.get("error") or f"HomeBox {action} completed: {args.path}")
         return 0 if result.returncode == 0 else 1

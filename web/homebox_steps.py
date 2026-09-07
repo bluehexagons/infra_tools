@@ -28,7 +28,7 @@ import sys
 import tarfile
 import tempfile
 import time
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 import urllib.error
 import urllib.request
 
@@ -50,10 +50,16 @@ SITE = Path("/etc/nginx/sites-available/infra-tools-homebox")
 LINK = Path("/etc/nginx/sites-enabled/infra-tools-homebox")
 BACKUPS = Path("/var/lib/homebox-backups")
 LOCK = Path("/run/lock/infra-tools-homebox.lock")
+UPDATE_STATE = Path("/opt/infra_tools/state/homebox_update.json")
 MARKER = "# Managed by infra-tools HomeBox"
 STATUS_PATH = "/api/v1/status"
 SERVICE = "homebox.service"
 REPO = "sysadminsmedia/homebox"
+AUTO_UPDATE_SERVICE = "auto-update-homebox.service"
+AUTO_UPDATE_TIMER = "auto-update-homebox.timer"
+MAX_UPDATE_AGE_SECONDS = 9 * 24 * 60 * 60
+RECOVERY_ARCHIVE_RETENTION = 4
+_RECOVERY_ARCHIVE_RE = re.compile(r"^[0-9]+-before-setup\.tar\.gz$")
 
 
 def _safe_path(path: Path) -> None:
@@ -109,17 +115,30 @@ def _stop_service() -> None:
         _command("systemctl", "stop", bootstrap)
 
 
-def _remove_acme_rule() -> None:
-    """Remove only this service's commented HTTP rule, preserving shared rules."""
+def _acme_rule_numbers() -> list[int]:
+    """Return this service's UFW HTTP rules in deletion-safe order."""
     if not shutil.which("ufw"):
-        return
+        return []
     result = run(["ufw", "status", "numbered"], check=True, capture_output=True)
     numbers = []
     for line in result.stdout.splitlines():
         match = re.match(r"^\[\s*(\d+)\].*# homebox acme\s*$", line.strip())
         if match:
             numbers.append(int(match.group(1)))
-    for number in sorted(numbers, reverse=True):
+    return sorted(numbers, reverse=True)
+
+
+def _ensure_acme_rule() -> bool:
+    """Add the managed HTTP challenge rule only when it is not already present."""
+    if not shutil.which("ufw") or _acme_rule_numbers():
+        return False
+    _command("ufw", "allow", "80/tcp", "comment", "homebox acme")
+    return True
+
+
+def _remove_acme_rule() -> None:
+    """Remove only this service's commented HTTP rule, preserving shared rules."""
+    for number in _acme_rule_numbers():
         _command("ufw", "--force", "delete", str(number))
 
 
@@ -210,9 +229,18 @@ def stage_release(version: str) -> dict:
     require_amd64()
     asset_name = "homebox_Linux_x86_64.tar.gz"
     release = _request_json(f"https://api.github.com/repos/{REPO}/releases/tags/{version}")
-    if release.get("tag_name") != version or release.get("draft") or release.get("prerelease"):
+    if (
+        not isinstance(release, dict)
+        or release.get("tag_name") != version
+        or release.get("draft")
+        or release.get("prerelease")
+    ):
         raise RuntimeError("HomeBox requires an exact stable upstream release")
-    assets = [a for a in release.get("assets", []) if a.get("name") == asset_name]
+    assets = [
+        asset
+        for asset in release.get("assets", [])
+        if isinstance(asset, dict) and asset.get("name") == asset_name
+    ]
     if len(assets) != 1:
         raise RuntimeError("HomeBox release is missing the required amd64 asset")
     asset = assets[0]
@@ -248,6 +276,17 @@ def stage_release(version: str) -> dict:
                 binary.parent.mkdir(mode=0o755)
                 shutil.move(str(staged), binary)
     return result
+
+
+def latest_homebox_version() -> str:
+    """Return the newest stable upstream tag accepted by this integration."""
+    release = _request_json(f"https://api.github.com/repos/{REPO}/releases/latest")
+    if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
+        raise RuntimeError("HomeBox latest-release response is not a stable release")
+    try:
+        return validate_homebox_version(release.get("tag_name"))
+    except ValueError as exc:
+        raise RuntimeError("HomeBox latest-release response has an unsupported tag") from exc
 
 
 def _validate_members(members: list[tarfile.TarInfo]) -> None:
@@ -769,6 +808,189 @@ def _frontend_ready(value: dict, *, maintenance: bool = False) -> None:
         raise RuntimeError("HomeBox HTTPS readiness failed")
 
 
+def _version_parts(version: str) -> tuple[int, int, int]:
+    """Return validated HomeBox version components for release ordering."""
+    return tuple(map(int, validate_homebox_version(version)[1:].split(".")))
+
+
+def _reserve_backend_port(previous: dict, desired: dict) -> None:
+    """Fail before stopping HomeBox when a changed private listener is unavailable."""
+    if _active() and previous["port"] == desired["port"]:
+        return
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", desired["port"]))
+
+
+def prune_recovery_archives() -> None:
+    """Retain recent automatic pre-update archives without touching manual backups."""
+    _safe_path(BACKUPS)
+    archives: list[Path] = []
+    for path in BACKUPS.iterdir():
+        if not _RECOVERY_ARCHIVE_RE.fullmatch(path.name):
+            continue
+        _safe_path(path)
+        info = path.stat(follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode):
+            raise RuntimeError(f"Invalid HomeBox recovery archive: {path}")
+        archives.append(path)
+    archives.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
+    for path in archives[RECOVERY_ARCHIVE_RETENTION:]:
+        remove_file_durable(str(path))
+
+
+def _transition_to_ready(
+    previous: dict,
+    desired: dict,
+    *,
+    bootstrap: bool,
+    before_activate: Callable[[], None] | None = None,
+    after_recovery: Callable[[], None] | None = None,
+) -> Path:
+    """Activate one verified release with the same recovery path for all updates."""
+    _reserve_backend_port(previous, desired)
+    archive = BACKUPS / f"{time.time_ns()}-before-setup.tar.gz"
+    _maintenance(None)
+    was_active = _active()
+    _stop_service()
+    try:
+        create_backup(previous, archive)
+    except BaseException:
+        if was_active:
+            _command("systemctl", "start", SERVICE)
+        remove_file_durable(str(CONFIG / "maintenance"))
+        raise
+    _maintenance(archive)
+    activated = False
+    try:
+        if before_activate is not None:
+            before_activate()
+        _activate_files(desired)
+        if bootstrap:
+            _bootstrap(desired)
+        _command("systemctl", "enable", "--now", SERVICE)
+        wait_ready(desired["port"], desired["version"])
+        if _database(desired)["users"] < 1:
+            raise RuntimeError("HomeBox has no user; refusing to expose an incomplete installation")
+        _write_site(render_nginx(desired) if desired["domain"] else None)
+        _frontend_ready(desired, maintenance=True)
+        _save_state(desired)
+        # A later probe cannot safely roll back writes accepted after this point.
+        activated = True
+        remove_file_durable(str(CONFIG / "maintenance"))
+        _frontend_ready(desired)
+    except BaseException:
+        if not activated:
+            try:
+                _recover(archive)
+                if after_recovery is not None:
+                    after_recovery()
+                remove_file_durable(str(CONFIG / "maintenance"))
+            except Exception as recovery_error:
+                raise RuntimeError(
+                    f"HomeBox recovery failed; service remains in maintenance. Restore {archive}"
+                ) from recovery_error
+        raise
+    try:
+        prune_recovery_archives()
+    except (OSError, RuntimeError) as exc:
+        print(f"  ⚠ Could not prune old HomeBox recovery archives: {exc}")
+    return archive
+
+
+def update_homebox(version: str) -> tuple[str, bool]:
+    """Upgrade a ready managed service through the setup transaction."""
+    target = validate_homebox_version(version)
+    require_amd64()
+    with homebox_lock():
+        _owned_files()
+        _require_idle()
+        previous = read_state()
+        if previous is None or previous["status"] == "disabled":
+            return "", False
+        if previous["status"] != "ready" or _needs_bootstrap(previous):
+            raise RuntimeError("HomeBox updates require a completed, ready installation")
+        _check_storage(previous)
+        _secrets()
+        _ensure_account()
+        if _digest(release_path(previous)) != previous["binary_sha256"]:
+            raise RuntimeError("Installed HomeBox binary has changed")
+        if _version_parts(target) <= _version_parts(previous["version"]):
+            return previous["version"], False
+        release = stage_release(target)
+        desired = {**previous, **release, "status": "ready", "bootstrap_pending": False}
+        _transition_to_ready(previous, desired, bootstrap=False)
+        return desired["version"], True
+
+
+def update_homebox_to_latest() -> tuple[str, bool] | None:
+    """Resolve and apply the latest stable release for a ready managed service."""
+    current = read_state()
+    if current is None or current["status"] != "ready" or _needs_bootstrap(current):
+        return None
+    return update_homebox(latest_homebox_version())
+
+
+def _unit_properties(unit: str, properties: str) -> dict[str, str | bool]:
+    result = run(
+        ["systemctl", "show", unit, f"--property={properties},LoadState", "--no-pager"],
+        check=False,
+        capture_output=True,
+    )
+    value: dict[str, str | bool] = {}
+    for line in result.stdout.splitlines():
+        if "=" in line:
+            key, item = line.split("=", 1)
+            value[key] = item
+    value["available"] = result.returncode == 0 and value.get("LoadState") != "not-found"
+    return value
+
+
+def _automatic_update_health() -> dict:
+    """Observe the optional recurring updater without exposing service secrets."""
+    job = _unit_properties(AUTO_UPDATE_SERVICE, "ActiveState,Result,ExecMainStatus")
+    timer = _unit_properties(AUTO_UPDATE_TIMER, "ActiveState,NextElapseUSecRealtime")
+    job_failed = job.get("ActiveState") == "failed" or job.get("Result") not in (None, "", "success")
+    timer_active = timer.get("ActiveState") == "active"
+    timer_scheduled = timer.get("NextElapseUSecRealtime") not in (None, "", "n/a")
+    source = UPDATE_STATE if UPDATE_STATE.exists() else STATE
+    check: dict[str, Any] = {}
+    try:
+        age_seconds: int | None = max(0, int(time.time() - source.stat().st_mtime))
+    except OSError:
+        age_seconds = None
+    if source == UPDATE_STATE:
+        try:
+            _private_file(UPDATE_STATE)
+            loaded = json.loads(UPDATE_STATE.read_text())
+            if isinstance(loaded, dict):
+                check = loaded
+        except (OSError, ValueError, RuntimeError):
+            pass
+    check_successful = (
+        check.get("schema_version") == 1 and check.get("successful") is True
+        if source == UPDATE_STATE
+        else True
+    )
+    stale = age_seconds is None or age_seconds > MAX_UPDATE_AGE_SECONDS
+    configured = timer.get("available") is True
+    return {
+        "configured": configured,
+        "healthy": (
+            not configured
+            or (not job_failed and timer_active and timer_scheduled and check_successful and not stale)
+        ),
+        "job": {"failed": job_failed, **job},
+        "timer": {"active": timer_active, "scheduled": timer_scheduled, **timer},
+        "check": {
+            **check,
+            "age_seconds": age_seconds,
+            "max_age_seconds": MAX_UPDATE_AGE_SECONDS,
+            "stale": stale,
+            "successful": check_successful,
+        },
+    }
+
+
 def _files_match(value: dict) -> bool:
     """A healthy process is insufficient if managed configuration has drifted."""
     try:
@@ -803,6 +1025,7 @@ def setup_homebox(config) -> None:
         if config.homebox == []:
             if previous is None:
                 return
+            run(["systemctl", "disable", "--now", AUTO_UPDATE_TIMER], check=False, capture_output=True)
             _maintenance(None)
             _stop_service()
             if UNIT.exists():
@@ -863,62 +1086,45 @@ def setup_homebox(config) -> None:
             _frontend_ready(desired)
             print(f"  HomeBox already healthy: {public_url(desired)}")
             return
-        with socket.socket() as listener:
-            if not (_active() and previous["port"] == desired["port"]):
-                listener.bind(("127.0.0.1", desired["port"]))
-        archive = BACKUPS / f"{time.time_ns()}-before-setup.tar.gz"
-        _maintenance(None)
-        was_active = _active()
-        _stop_service()
-        try:
-            create_backup(previous, archive)
-        except BaseException:
-            if was_active:
-                _command("systemctl", "start", SERVICE)
-            remove_file_durable(str(CONFIG / "maintenance"))
-            raise
-        _maintenance(archive)
-        exposed = False
-        try:
-            _activate_files(desired)
-            if _needs_bootstrap(previous):
-                _bootstrap(desired)
-            if desired["domain"]:
-                from web.ssl_steps import install_certbot, obtain_letsencrypt_certificate, setup_certificate_renewal
-                if not install_package("nginx", "nginx", "apt-get install -y -qq nginx"):
-                    raise RuntimeError("Failed to install Nginx")
-                _command("systemctl", "enable", "--now", "nginx")
-                if can_manage_firewall(config.machine_type):
-                    # Public HTTP is needed for ACME even when HTTPS access is
-                    # source-restricted. Its site serves only challenges/redirects.
-                    _command("ufw", "allow", "80/tcp", "comment", "homebox acme")
-                # Challenge-only site cannot route to an unverified application.
-                _write_site(render_nginx(desired, challenge=True))
-                install_certbot(config)
-                if not obtain_letsencrypt_certificate([desired["domain"]], config.ssl_email, desired["domain"]):
-                    raise RuntimeError("HomeBox TLS certificate issuance failed")
-                setup_certificate_renewal()
-            _command("systemctl", "enable", "--now", SERVICE)
-            wait_ready(desired["port"], version)
-            if _database(desired)["users"] < 1:
-                raise RuntimeError("HomeBox has no user; refusing to expose an incomplete installation")
-            _write_site(render_nginx(desired) if desired["domain"] else None)
-            if not desired["domain"] and can_manage_firewall(config.machine_type):
+        acme_rule_added = False
+
+        def prepare_ingress() -> None:
+            nonlocal acme_rule_added
+            if not desired["domain"]:
+                return
+            from web.ssl_steps import (
+                install_certbot,
+                obtain_letsencrypt_certificate,
+                setup_certificate_renewal,
+            )
+
+            if not install_package("nginx", "nginx", "apt-get install -y -qq nginx"):
+                raise RuntimeError("Failed to install Nginx")
+            _command("systemctl", "enable", "--now", "nginx")
+            if can_manage_firewall(config.machine_type):
+                # Public HTTP is needed for ACME even when HTTPS access is
+                # source-restricted. Its site serves only challenges/redirects.
+                acme_rule_added = _ensure_acme_rule()
+            # Challenge-only site cannot route to an unverified application.
+            _write_site(render_nginx(desired, challenge=True))
+            install_certbot(config)
+            if not obtain_letsencrypt_certificate([desired["domain"]], config.ssl_email, desired["domain"]):
+                raise RuntimeError("HomeBox TLS certificate issuance failed")
+            setup_certificate_renewal()
+
+        def cleanup_failed_initial_ingress() -> None:
+            if acme_rule_added and previous["status"] == "prepared":
                 _remove_acme_rule()
-            _frontend_ready(desired, maintenance=True)
-            _save_state(desired)
-            # After ingress opens, a failed probe must never discard new writes.
-            exposed = True
-            remove_file_durable(str(CONFIG / "maintenance"))
-            _frontend_ready(desired)
-        except BaseException:
-            if not exposed:
-                try:
-                    _recover(archive)
-                    remove_file_durable(str(CONFIG / "maintenance"))
-                except Exception as recovery_error:
-                    raise RuntimeError(f"HomeBox recovery failed; service remains in maintenance. Restore {archive}") from recovery_error
-            raise
+
+        archive = _transition_to_ready(
+            previous,
+            desired,
+            bootstrap=_needs_bootstrap(previous),
+            before_activate=prepare_ingress,
+            after_recovery=cleanup_failed_initial_ingress,
+        )
+        if not desired["domain"] and can_manage_firewall(config.machine_type):
+            _remove_acme_rule()
         print(f"  HomeBox ready: {public_url(desired)}")
         print(f"  Initial login: {desired['email']}; generated password in {CONFIG}/secrets.json (root only)")
         print(f"  Recovery archive: {archive}")
@@ -949,8 +1155,10 @@ def health_homebox() -> dict:
         result["registration_closed"] = status.get("allowRegistration") is False
         result["version_matches"] = status.get("build", {}).get("version", "").lstrip("v") == value["version"].lstrip("v")
         _frontend_ready(value)
+        result["automatic_update"] = _automatic_update_health()
         result["healthy"] = bool(result["service_active"] and not result["maintenance"] and result["registration_closed"]
-                                 and result["version_matches"] and result["database"]["users"] > 0 and value["status"] == "ready")
+                                 and result["version_matches"] and result["database"]["users"] > 0 and value["status"] == "ready"
+                                 and result["automatic_update"]["healthy"])
     except (OSError, ValueError, RuntimeError, sqlite3.Error, urllib.error.URLError, subprocess.SubprocessError) as exc:
         result["error"] = str(exc)
     return result

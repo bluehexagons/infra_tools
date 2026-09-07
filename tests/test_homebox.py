@@ -104,6 +104,9 @@ class HomeBoxConfigTests(unittest.TestCase):
         from plugins.server import build_server_steps
         funcs = [func.__name__ for _, func in build_server_steps(config())]
         self.assertEqual(funcs.count("setup_homebox"), 1)
+        self.assertEqual(funcs.count("configure_auto_update_homebox"), 1)
+        disabled = [func.__name__ for _, func in build_server_steps(config(homebox=[]))]
+        self.assertNotIn("configure_auto_update_homebox", disabled)
         with patch.object(h, "homebox_lock", side_effect=AssertionError("mutation")), contextlib.redirect_stdout(io.StringIO()):
             h.setup_homebox(config(dry_run=True))
         self.assertNotIn(7745, config().effective_web_ports())
@@ -116,6 +119,22 @@ class HomeBoxConfigTests(unittest.TestCase):
         manifest = build_web_panel_manifest(config(homebox=["a.test"], enable_ssl=True), ["inventory.example.com"])
         self.assertEqual(manifest["services"][0]["url"], "https://a.test/")
         self.assertNotIn("pepper", json.dumps(manifest))
+
+    def test_auto_update_timer_uses_the_managed_binary(self):
+        from common import common_steps
+
+        with patch.object(common_steps, "configure_maintenance_timer", return_value=True) as configure:
+            common_steps.configure_auto_update_homebox(config())
+        configure.assert_called_once_with(
+            service_name="auto-update-homebox",
+            service_desc="Auto-update HomeBox inventory service",
+            timer_desc="Auto-update HomeBox weekly",
+            script_path="/opt/infra_tools/common/service_tools/auto_update_homebox.py",
+            schedule="Sun *-*-* 06:00:00",
+            check_path="/opt/homebox/current/homebox",
+            check_name="HomeBox",
+            purpose="auto-update",
+        )
 
 
 class HomeBoxFixture:
@@ -259,6 +278,52 @@ class HomeBoxFilesTests(HomeBoxFixture, unittest.TestCase):
                 h.stage_release("v0.26.2")
         request.assert_not_called()
 
+    def test_latest_release_rejects_prereleases_and_invalid_tags(self):
+        with patch.object(h, "_request_json", return_value={"tag_name": "v0.26.3"}):
+            self.assertEqual(h.latest_homebox_version(), "v0.26.3")
+        for response in (
+            {"tag_name": "v0.26.3", "prerelease": True},
+            {"tag_name": "latest"},
+            [],
+        ):
+            with self.subTest(response=response), patch.object(h, "_request_json", return_value=response):
+                with self.assertRaises(RuntimeError):
+                    h.latest_homebox_version()
+
+    def test_prune_keeps_recent_automatic_recovery_archives(self):
+        archives = []
+        for number in range(h.RECOVERY_ARCHIVE_RETENTION + 2):
+            archive = h.BACKUPS / f"{number}-before-setup.tar.gz"
+            archive.write_bytes(b"recovery")
+            os.utime(archive, ns=(number + 1, number + 1))
+            archives.append(archive)
+        manual = h.BACKUPS / "manual.tar.gz"
+        manual.write_bytes(b"manual")
+
+        h.prune_recovery_archives()
+
+        self.assertEqual(
+            [path.name for path in archives if path.exists()],
+            [path.name for path in archives[-h.RECOVERY_ARCHIVE_RETENTION:]],
+        )
+        self.assertTrue(manual.exists())
+
+    def test_automatic_update_health_requires_a_scheduled_successful_check(self):
+        update_state = self.root / "state/homebox_update.json"
+        self.stack.enter_context(patch.object(h, "UPDATE_STATE", update_state))
+        update_state.write_text(json.dumps({"schema_version": 1, "successful": True}))
+        job = {"available": True, "ActiveState": "inactive", "Result": "success"}
+        timer = {
+            "available": True,
+            "ActiveState": "active",
+            "NextElapseUSecRealtime": "Sun 2026-09-14 06:00:00 UTC",
+        }
+        with patch.object(h, "_unit_properties", side_effect=(job, timer)):
+            health = h._automatic_update_health()
+        self.assertTrue(health["healthy"])
+        self.assertTrue(health["timer"]["scheduled"])
+        self.assertFalse(health["check"]["stale"])
+
     def test_unit_and_proxy_isolation(self):
         value = state(domain="inventory.example.com", public_port=443, sources=["192.168.1.0/24"])
         env = h.render_environment(value, self.secret)
@@ -391,7 +456,8 @@ class HomeBoxFilesTests(HomeBoxFixture, unittest.TestCase):
     def test_health_does_not_expose_credentials(self):
         with patch.object(h, "_active", return_value=True), patch.object(h, "_check_storage"), \
                 patch.object(h, "_status", return_value={"health": True, "allowRegistration": False, "build": {"version": "0.26.2"}}), \
-                patch.object(h, "_frontend_ready"):
+                patch.object(h, "_frontend_ready"), \
+                patch.object(h, "_automatic_update_health", return_value={"healthy": True}):
             health = h.health_homebox()
         self.assertTrue(health["healthy"])
         self.assertNotIn(self.secret["password"], json.dumps(health))
@@ -502,6 +568,42 @@ class HomeBoxTransactionTests(HomeBoxFixture, unittest.TestCase):
             h.setup_homebox(cfg)
         stage.assert_not_called()
 
+    def test_scheduled_update_uses_the_release_transition_transaction(self):
+        self.fixture_setup()
+        with patch.object(h, "_transition_to_ready") as transition:
+            version, changed = h.update_homebox("v0.26.3")
+        self.assertEqual((version, changed), ("v0.26.3", True))
+        previous, desired = transition.call_args.args
+        self.assertEqual(previous["version"], "v0.26.2")
+        self.assertEqual(desired["version"], "v0.26.3")
+        self.assertFalse(transition.call_args.kwargs["bootstrap"])
+
+    def test_scheduled_update_skips_disabled_and_current_services(self):
+        self.fixture_setup()
+        h._save_state({**self.value, "status": "disabled"})
+        self.assertEqual(h.update_homebox("v0.26.3"), ("", False))
+        h._save_state(self.value)
+        with patch.object(h, "stage_release") as stage:
+            self.assertEqual(h.update_homebox("v0.26.2"), ("v0.26.2", False))
+        stage.assert_not_called()
+
+    def test_scheduled_update_checks_current_binary_before_stopping_service(self):
+        self.fixture_setup()
+        h.release_path(self.value).write_bytes(b"tampered")
+        with patch.object(h, "stage_release") as stage, \
+                patch.object(h, "_transition_to_ready") as transition:
+            with self.assertRaisesRegex(RuntimeError, "binary has changed"):
+                h.update_homebox("v0.26.3")
+        stage.assert_not_called()
+        transition.assert_not_called()
+
+    def test_latest_update_skips_incomplete_installation_without_a_release_check(self):
+        self.fixture_setup()
+        h._save_state({**self.value, "status": "prepared"})
+        with patch.object(h, "latest_homebox_version") as latest:
+            self.assertIsNone(h.update_homebox_to_latest())
+        latest.assert_not_called()
+
     def test_disable_can_be_repeated_after_unit_removal(self):
         cfg = self.fixture_setup()
         cfg.homebox = []
@@ -558,6 +660,25 @@ class HomeBoxCLITests(unittest.TestCase):
             self.assertEqual(run_homebox_command(args), 1)
         self.assertFalse(json.loads(output.getvalue())["healthy"])
         self.assertIn("sudo -n python3 -m web.homebox_steps health", ssh.call_args.kwargs["remote_command"])
+
+    def test_health_text_reports_automatic_update_state(self):
+        args = argparse.Namespace(host="inventory.example.com", username=None, ssh_key=None,
+                                  homebox_command="health", json=False)
+        result = {
+            "healthy": True,
+            "automatic_update": {
+                "configured": True,
+                "timer": {"active": True, "scheduled": True},
+                "check": {"stale": False, "successful": True},
+            },
+        }
+        with patch("lib.homebox_cli.load_setup_command", return_value=None), \
+                patch("lib.homebox_cli.build_ssh_command", return_value=["ssh", "host"]), \
+                patch("lib.homebox_cli.subprocess.run", return_value=subprocess.CompletedProcess([], 0, json.dumps(result), "")), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(run_homebox_command(args), 0)
+        self.assertIn("automatic update timer: ok", output.getvalue())
+        self.assertIn("automatic update check: ok", output.getvalue())
 
     def test_backup_dry_run_and_restore_consent_do_not_connect(self):
         for action, dry_run, expected in (("backup", True, 0), ("restore", False, 1)):

@@ -65,8 +65,9 @@ registration is disabled.
 | `/etc/homebox/homebox.env` | Root-only managed environment |
 | `/etc/homebox/secrets.json` | Root-only initial password and persistent API-key pepper |
 | `/opt/infra_tools/state/homebox.json` | Validated release, endpoint, and storage state |
+| `/opt/infra_tools/state/homebox_update.json` | Last automatic update result, with no credentials |
 | `/var/lib/homebox` or selected data path | `homebox.db`, SQLite sidecars, and attachments |
-| `/var/lib/homebox-backups` | Private automatic recovery archives |
+| `/var/lib/homebox-backups` | Private manual backups and automatic recovery archives |
 
 Use local ext4, xfs, btrfs, or zfs storage below `/srv`, `/mnt`, `/data`, or
 `/var/lib`. Network/FUSE filesystems, symlinked paths, and overlap with managed
@@ -95,12 +96,14 @@ enrolled through the normal infra-tools workflow.
 Health checks service activity, maintenance state, mount identity, free space,
 SQLite integrity and users, secrets, executable digest, API version,
 registration policy, generated configuration and environment permissions, and
-the configured HTTPS frontend. SQLite probes run as the database owner so they
-cannot leave root-owned WAL files that prevent the application from restarting.
-Rerun setup to reconcile configuration drift; a stopped-service backup also
-repairs root-owned SQLite sidecars left by earlier probes. The HTTPS probe runs
-on the target and verifies its certificate; it does not prove public DNS,
-external firewall reachability, or an authenticated browser session.
+the configured HTTPS frontend. When installed, it also reports the HomeBox
+update service, timer, and the age and result of its last check. SQLite probes
+run as the database owner so they cannot leave root-owned WAL files that
+prevent the application from restarting. Rerun setup to reconcile
+configuration drift; a stopped-service backup also repairs root-owned SQLite
+sidecars left by earlier probes. The HTTPS probe runs on the target and
+verifies its certificate; it does not prove public DNS, external firewall
+reachability, or an authenticated browser session.
 
 Select a reviewed stable release explicitly:
 
@@ -111,8 +114,12 @@ infra-tools patch inventory-host --homebox-version v0.26.2
 
 Replace the example tag with the desired newer stable release. Releases are
 verified against GitHub's publisher-supplied SHA-256 asset digest. Reruns keep
-the installed version; there is no automatic update timer. Downgrading requires
-restoring the matching complete backup because startup can migrate SQLite.
+the installed version, while `auto-update-homebox.timer` checks the latest
+stable release every Sunday around 06:00 with a randomized delay. The timer
+uses the same recovery transaction as an explicit upgrade and sends configured
+maintenance notifications only for a successful update or a failure. Disable
+HomeBox to disable the timer. Downgrading requires restoring the matching
+complete backup because startup can migrate SQLite.
 
 Setup blocks public inventory requests, stops the service, snapshots its full
 state, and verifies the new API and HTTPS route before reopening requests.
@@ -145,7 +152,10 @@ Keep completed archives off-host using the [generic backup](BACKUPS.md) flow
 or a protected transfer. Archives contain credentials: store them privately
 and restore them as root-owned mode-`0600` regular files. Reserve space for the
 archive, its unpacked contents, and restoration on the data filesystem. No
-automatic retention or pruning is installed.
+automatic pruning touches manual archives. After each successful setup or
+automatic upgrade, infra-tools retains the four newest
+`*-before-setup.tar.gz` recovery archives and removes older automatic recovery
+archives only.
 
 For a clean amd64 replacement server, set up HomeBox at the same data path,
 hostname, and version first so accounts, dependencies, TLS, and mounts exist. Copy the
@@ -194,14 +204,13 @@ infra-tools patch inventory-host --no-homebox
 ```
 
 Disabling stops the application and removes its unit and Nginx ingress while
-retaining inventory, credentials, releases, and archives. Re-enable by
-supplying the original `--homebox` settings. If initial onboarding had not
-completed before disabling, re-enabling still performs the private bootstrap.
-Shared Nginx/Certbot packages and
-certificates remain installed. Permanent deletion is a separate manual task.
+retaining inventory, credentials, releases, and archives. It also disables the
+HomeBox update timer. Re-enable by supplying the original `--homebox` settings.
+If initial onboarding had not completed before disabling, re-enabling still
+performs the private bootstrap. Shared Nginx/Certbot packages and certificates
+remain installed. Permanent deletion is a separate manual task.
 
-This initial support excludes Cloudflare, containers, PostgreSQL, external
-object storage, multiple instances, OIDC, and adoption of unmanaged installs.
-The native amd64 lifecycle has been smoke-tested; full Debian VM reboot/TLS
-qualification remains outstanding. ARM64 is intentionally unsupported. See the
-[implementation record](plans/HOMEBOX_SUPPORT.md) for validation evidence.
+This support excludes Cloudflare, containers, PostgreSQL, external object
+storage, multiple instances, OIDC, and adoption of unmanaged installs. ARM64
+is intentionally unsupported. See the [implementation
+record](plans/HOMEBOX_SUPPORT.md) for validation evidence.

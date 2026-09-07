@@ -17,6 +17,7 @@ same job at the same instant.
 | `auto-update-node.timer` | Sunday at 03:00 | Setups with Node.js/nvm |
 | `auto-update-uv.timer` | Sunday at 05:00 | Setups with Python and uv |
 | `auto-update-gogs.timer` | Sunday at 05:30 | Setups with Gogs |
+| `auto-update-homebox.timer` | Sunday at 06:00 | Enabled HomeBox services |
 | `auto-update-godot.timer` | Sunday at 06:30 | Setups with Godot; also reconciles selected Godot bundles |
 | `codex-auth-maintenance.timer` | Daily and 15 minutes after boot | Setups with Codex; refreshes file-backed ChatGPT auth only when its cached token is approaching expiry or refresh metadata is overdue |
 | `cleanup-maintenance.timer` | Sunday at 03:30 | Security-enabled setups |
@@ -47,10 +48,12 @@ VMs where their tools were not selected.
 ## Update Policy
 
 [HomeBox](HOMEBOX.md) retains its installed version on ordinary setup reruns.
-Select upgrades explicitly with `--homebox-version TAG`; activation creates
-a stopped-service recovery archive before migrations. There is no HomeBox
-update timer or automatic backup-retention policy. Keep an off-host backup and
-manage retained releases and archives deliberately.
+Select an immediate reviewed upgrade with `--homebox-version TAG`; the weekly
+HomeBox timer also resolves the newest stable upstream release. Both paths use
+the same stopped-service recovery archive, activation, health checks, and
+rollback before reopening ingress. HomeBox retains the newest four automatic
+pre-update archives without touching manual backups. Keep a complete backup
+off-host for recovery from host loss or a failed rollback.
 
 APT uses the infra-tools updater instead of competing distro unattended-upgrade
 timers. It runs `apt-get update` and a non-removing distribution upgrade; it
@@ -151,7 +154,7 @@ artifacts at least seven days old. Change the policy with
 The deployment flag `--deploy-latest DOMAIN_OR_PATH GIT_URL` explicitly bypasses
 the deployment freshness policy for that repository.
 
-Privileged Go, Godot, Butler, Gogs, and managed binary downloads use private,
+Privileged Go, Godot, Butler, Gogs, HomeBox, and managed binary downloads use private,
 randomly named temporary directories. They never download through a
 predictable public `/tmp` filename that another local account could replace
 with a symbolic link.

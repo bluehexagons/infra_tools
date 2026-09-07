@@ -1346,6 +1346,23 @@ def configure_auto_update_gogs(config: SetupConfig) -> None:
     )
 
 
+def configure_auto_update_homebox(config: SetupConfig) -> None:
+    """Configure automatic HomeBox updates after a successful service setup."""
+    del config
+    configured = configure_maintenance_timer(
+        service_name="auto-update-homebox",
+        service_desc="Auto-update HomeBox inventory service",
+        timer_desc="Auto-update HomeBox weekly",
+        script_path="/opt/infra_tools/common/service_tools/auto_update_homebox.py",
+        schedule="Sun *-*-* 06:00:00",
+        check_path="/opt/homebox/current/homebox",
+        check_name="HomeBox",
+        purpose="auto-update",
+    )
+    if not configured:
+        raise RuntimeError("HomeBox auto-update timer failed verification")
+
+
 def install_mail_utils(config: SetupConfig) -> None:
     """Install mail utilities for email notifications."""
     # Only install if mailbox notifications are configured
