@@ -50,6 +50,17 @@ _MAX_OUTPUT_BYTES = 24 * 1024
 _MAX_SERVICE_PROBE_BYTES = 8 * 1024
 _SERVICE_PROBE_TIMEOUT_SECONDS = 1
 _SYSTEM_OVERVIEW_CACHE_SECONDS = 30
+_HOSTED_UNITS = {
+    "nginx.service": "Web gateway",
+    "ssh.service": "SSH",
+    "gogs.service": "Gogs",
+    "homebox.service": "HomeBox",
+    "docker.service": "Docker",
+    "smbd.service": "File sharing",
+    "xrdp.service": "Remote desktop",
+    "fail2ban.service": "Login protection",
+    "auditd.service": "System audit",
+}
 _INTERNAL_WEB_URL_FILE = "/etc/infra-tools/internal-web/base-url"
 _T3_UPDATE_TIMEOUT_SECONDS = 30 * 60
 _T3_CORE_READINESS_CHECKS = (
@@ -412,6 +423,59 @@ def collect_system_overview() -> list[dict[str, str]]:
     ]
 
 
+def collect_service_health() -> list[dict[str, str]]:
+    """Read only fixed service properties; never expose commands or journals."""
+
+    records: list[dict[str, str]] = []
+    scopes = (([], _HOSTED_UNITS), (["--user"], {"t3code.service": "T3 Code"}))
+    for scope, units in scopes:
+        unavailable = {
+            "label": "User services" if scope else "System services",
+            "value": "Unavailable",
+            "description": "Service manager could not be read",
+        }
+        try:
+            result = subprocess.run(
+                [
+                    "systemctl", *scope, "show", *units,
+                    "--property=Id,LoadState,ActiveState,SubState", "--no-pager",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            result = None
+        if (
+            result is None or not result.stdout.strip()
+            or len(result.stdout) > _MAX_CONFIG_BYTES
+        ):
+            records.append(unavailable)
+            continue
+        recognized = False
+        for block in result.stdout.strip().split("\n\n"):
+            properties = dict(
+                line.split("=", 1) for line in block.splitlines() if "=" in line
+            )
+            unit = properties.get("Id", "")
+            if unit not in units:
+                continue
+            recognized = True
+            load_state = properties.get("LoadState")
+            if load_state == "not-found":
+                continue
+            active = properties.get("ActiveState", "unknown") if load_state == "loaded" else "Unavailable"
+            substate = properties.get("SubState", "unknown")
+            records.append({
+                "label": units[unit], "value": active,
+                "description": f"{unit} · {substate}",
+            })
+        if not recognized:
+            records.append(unavailable)
+    return records
+
+
 def _homebox_probe_port(record: dict[str, Any]) -> int | None:
     """Return a validated local HomeBox probe port from a service record."""
 
@@ -557,6 +621,9 @@ class WebPanelState:
         self.action_output = ""
         self._overview: list[dict[str, str]] = []
         self._overview_at = 0.0
+        self._service_health: list[dict[str, str]] = []
+        self._service_health_at = float("-inf")
+        self._service_health_lock = threading.Lock()
 
     def notification_ingest_enabled(self) -> bool:
         return self.manifest["features"].get("notification_ingest") is True
@@ -595,6 +662,16 @@ class WebPanelState:
             self._overview = overview
             self._overview_at = now
             return list(self._overview)
+
+    def service_health(self) -> list[dict[str, str]]:
+        """Cache local service state for thirty seconds, including failures."""
+
+        with self._service_health_lock:
+            now = time.monotonic()
+            if now - self._service_health_at >= _SYSTEM_OVERVIEW_CACHE_SECONDS:
+                self._service_health = collect_service_health()
+                self._service_health_at = now
+            return list(self._service_health)
 
     def t3_update_available(self) -> bool:
         """Return whether T3 Code is both configured and present for this user."""
@@ -786,7 +863,26 @@ body {
   color: var(--text);
   font: 15px/1.5 system-ui, sans-serif;
 }
-main { max-width: 920px; margin: auto; padding: 44px 20px 64px; }
+main { max-width: 1240px; margin: auto; padding: 36px 28px 64px 240px; }
+body { overflow-wrap: anywhere; }
+.sidebar {
+  position: fixed; inset: 0 auto 0 0; width: 212px; padding: 32px 18px;
+  background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto;
+}
+.sidebar strong { display: block; margin: 0 12px 24px; color: var(--accent); }
+.sidebar a { display: block; padding: 12px; color: var(--text); text-decoration: none; border-radius: 8px; }
+.sidebar a:hover { background: var(--accent-soft); color: var(--accent); }
+a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.skip-link { position: fixed; top: -100px; left: 16px; padding: 12px; background: var(--panel); z-index: 3; }
+.skip-link:focus { top: 12px; }
+h2, #trust { scroll-margin-top: 24px; }
+.refresh-link { color: var(--accent); display: inline-block; padding: 10px 0; }
+.service-health { margin-top: 20px; }
+.service-health > summary { font-weight: 650; }
+.service-health .overview-grid { margin-top: 12px; }
+.metric-value.active { color: var(--ok); }
+.metric-value.failed, .metric-value.unavailable { color: var(--bad); }
+.history > summary { margin: 10px 0; }
 header { margin-bottom: 36px; }
 .eyebrow, .section-kicker {
   margin: 0 0 6px;
@@ -831,7 +927,7 @@ h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.015em; }
 .count { color: var(--muted); font-size: .85rem; }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
   gap: 11px;
 }
 .card {
@@ -864,7 +960,7 @@ h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.015em; }
 }
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
   gap: 11px;
   margin: 0;
 }
@@ -1051,7 +1147,7 @@ button:disabled { opacity: .58; cursor: wait; }
 .status.failed { border-left-color: var(--bad); }
 .status p { margin: 2px 0 0; }
 details { margin-top: 10px; }
-summary { width: max-content; cursor: pointer; color: var(--accent); }
+summary { width: fit-content; max-width: 100%; min-height: 44px; padding: 10px 0; cursor: pointer; color: var(--accent); }
 pre {
   max-height: 22rem;
   overflow: auto;
@@ -1071,8 +1167,17 @@ footer {
   color: var(--muted);
   font-size: .85rem;
 }
+@media (max-width: 900px) {
+  main { padding: 28px 20px 48px; }
+  .sidebar { position: static; width: auto; padding: 12px 16px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .sidebar strong { margin: 0 8px 6px; }
+  .sidebar .nav-links { display: flex; flex-wrap: wrap; gap: 0 4px; }
+  .sidebar a { padding: 10px 8px; }
+}
 @media (max-width: 560px) {
   main { padding-top: 30px; }
+  .section-heading, .event-head { align-items: start; flex-direction: column; gap: 6px; }
+  .meta div { flex-wrap: wrap; border-radius: 12px; }
   .access-list li { grid-template-columns: 1fr; }
   .access-list span { grid-column: 1; }
   .action { align-items: stretch; flex-direction: column; }
@@ -1268,6 +1373,16 @@ Write-Host "Certificate downloaded, verified, and installed. Fully restart your 
 </div></details></section>'''
 
 
+def _render_event_history(rows: list[str]) -> str:
+    content = f'<ol class="event-list">{"".join(rows[:5])}</ol>'
+    if len(rows) > 5:
+        content += (
+            f'<details class="history"><summary>Show {len(rows) - 5} more events</summary>'
+            f'<ol class="event-list" start="6">{"".join(rows[5:])}</ol></details>'
+        )
+    return content
+
+
 def _render_audit_section(state: WebPanelState) -> str:
     snapshot = state.audit_snapshot()
     events = snapshot.get("events", [])
@@ -1315,7 +1430,7 @@ def _render_audit_section(state: WebPanelState) -> str:
                     value_html,
                 )
             )
-        content = f'<ol class="event-list">{"".join(rows)}</ol>'
+        content = _render_event_history(rows)
     elif status == "unavailable":
         content = (
             '<p class="empty">Audit data is unavailable. This is not a clean '
@@ -1395,7 +1510,7 @@ def _render_notification_section(state: WebPanelState) -> str:
                     detail_html,
                 )
             )
-        content = f'<ol class="event-list">{"".join(rows)}</ol>'
+        content = _render_event_history(rows)
     count = len(events)
     return f'''<section aria-labelledby="notifications-heading"><div class="section-heading"><div>
 <p class="section-kicker">From managed machines</p><h2 id="notifications-heading">Notifications</h2></div>
@@ -1459,6 +1574,21 @@ def render_page(state: WebPanelState) -> str:
         )
         for record in overview
     )
+    health = state.service_health()
+    health_cards = "".join(
+        '<div class="metric"><dt>{}</dt><dd><span class="metric-value {}">{}</span>'
+        '<span class="metric-description">{}</span></dd></div>'.format(
+            html.escape(record["label"]),
+            {"active": "active", "failed": "failed", "Unavailable": "unavailable"}.get(record["value"], ""),
+            html.escape(record["value"]), html.escape(record["description"]),
+        ) for record in health
+    )
+    health_content = (
+        f'<dl class="overview-grid">{health_cards}</dl>' if health_cards else
+        '<p class="empty">No supported local services were found.</p>'
+    )
+    attention = sum(record["value"] != "active" for record in health)
+    health_label = f" · {attention} inactive or unavailable" if attention else ""
 
     trust_section = _render_certificate_trust(discover_certificate_trust())
     audit_section = _render_audit_section(state)
@@ -1507,27 +1637,46 @@ def render_page(state: WebPanelState) -> str:
         if isinstance(record, dict) and record.get("value")
     )
     access_label = f"{access_count} method" + ("" if access_count == 1 else "s")
+    navigation = [
+        ("overview-heading", "Overview"), ("services-heading", "Services"),
+        ("audit-heading", "Security activity"),
+    ]
+    if notification_section:
+        navigation.append(("notifications-heading", "Notifications"))
+    navigation.append(("access-heading", "Access"))
+    if trust_section:
+        navigation.append(("trust", "Certificate trust"))
+    if action:
+        navigation.append(("maintenance-heading", "Maintenance"))
+    nav_links = "".join(f'<a href="#{target}">{label}</a>' for target, label in navigation)
 
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">{refresh}
 <title>Web panel · {title}</title>
-<style>{_PAGE_STYLE}</style></head><body><main>
+<style>{_PAGE_STYLE}</style></head><body>
+<a class="skip-link" href="#main">Skip to content</a>
+<nav class="sidebar" aria-label="Panel sections"><strong>infra-tools</strong><div class="nav-links">{nav_links}</div></nav>
+<main id="main" tabindex="-1">
 <header><p class="eyebrow">infra-tools web panel</p><h1>{title}</h1>
 <p class="lede">Services, system health, security activity, and available maintenance for <code>{host}</code>.</p>
 <dl class="meta"><div><dt>System</dt><dd>{system_type}</dd></div>
-<div><dt>User</dt><dd>{username}</dd></div></dl></header>
-{status}<section aria-labelledby="services-heading"><div class="section-heading"><div>
+<div><dt>User</dt><dd>{username}</dd></div></dl>
+<a class="refresh-link" href="/">Refresh dashboard</a></header>
+{status}<section aria-labelledby="overview-heading"><div class="section-heading"><div>
+<p class="section-kicker">Host health</p><h2 id="overview-heading">System overview</h2></div>
+<span class="count">Snapshot on page load · cached up to 30 seconds</span></div>
+<dl class="overview-grid">{overview_cards}</dl></section>
+<section aria-labelledby="services-heading"><div class="section-heading"><div>
 <p class="section-kicker">Open in browser</p><h2 id="services-heading">Web services</h2></div>
 <span class="count">{service_count}</span></div><div class="grid">{service_cards}</div></section>
-<section aria-labelledby="overview-heading"><div class="section-heading"><div>
-<p class="section-kicker">Live snapshot</p><h2 id="overview-heading">System overview</h2></div>
-<span class="count">Refreshed periodically</span></div>
-<dl class="overview-grid">{overview_cards}</dl></section>{audit_section}{notification_section}
+<details class="service-health" open><summary>Local service status{health_label}</summary>
+<p class="endpoint">Process state on this host; public DNS, TLS, and application readiness may differ. Cached up to 30 seconds.</p>
+{health_content}</details>{audit_section}{notification_section}
 <section aria-labelledby="access-heading"><div class="section-heading"><div>
 <p class="section-kicker">Connect directly</p><h2 id="access-heading">Access</h2></div>
-<span class="count">{access_label}</span></div>{access_content}</section>{trust_section}{action}
+<span class="count">{access_label}</span></div>{access_content}</section><div id="trust">{trust_section}</div>{action}
 <footer><span>Managed by infra-tools</span><span>Authenticated as {username}</span></footer>
 </main></body></html>'''
 

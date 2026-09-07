@@ -11,6 +11,12 @@ not installed unless `--web-panel` is selected.
 | Notifications | Events accepted from other machines when ingest is enabled |
 | Maintenance | Only fixed actions supported by software on that machine |
 
+Section links form a sidebar on desktop and wrap above the dashboard on mobile.
+The overview comes first; **Refresh dashboard** requests a new page (host and
+service snapshots are cached for up to 30 seconds). Navigation, service links,
+expandable histories, and maintenance forms work without JavaScript. Activity
+feeds initially show five events; expand the remaining history when needed.
+
 ## Install the panel
 
 HTTPS is recommended:
@@ -164,6 +170,15 @@ A rerun reloads managed audit rules even when their on-disk file is unchanged.
 The panel renders configured access from saved setup state and discovers live
 `infra-web` forwards and static sites at page load. When the shared gateway is
 installed, its landing page is linked before individual sites are published.
+
+**Local service status** reads installed Nginx, SSH, Gogs, HomeBox, Docker,
+Samba, xrdp, fail2ban, and auditd units, plus the panel user's T3 Code unit.
+It shows process state and substate, including inactive and failed services.
+Missing units are omitted; an unreachable service manager is shown as
+unavailable. These read-only, fixed-unit checks are bounded to two seconds per
+service manager and cached for 30 seconds. They do not read journals, application
+data, or credentials, and do not prove public connectivity or application
+readiness. Services owned by other users are outside the user-service snapshot.
 
 Hostname-based [HomeBox](HOMEBOX.md) installations add an inventory link and a
 readiness status from a loopback-only probe. It checks the local HomeBox status
