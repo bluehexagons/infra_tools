@@ -38,6 +38,6 @@ def validate_nginx_deployment(value: object) -> dict[str, str]:
     path = validate_nginx_path(value['path'])
     serve_path = validate_nginx_path(value['serve_path'])
     project_type = value['project_type']
-    if not isinstance(project_type, str) or project_type not in {'static', 'node', 'unknown'}:
+    if not isinstance(project_type, str) or project_type not in {'static', 'node', 'unknown', 'godot-web'}:
         raise ValueError("unsupported remote deployment project type")
     return {'domain': domain, 'path': path, 'serve_path': serve_path, 'project_type': project_type}

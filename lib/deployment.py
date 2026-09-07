@@ -921,6 +921,9 @@ class DeploymentOrchestrator:
                         f"Component '{component.name}': static output not found after build: "
                         f"{output_path}"
                     )
+                if component.type == "godot-web":
+                    from lib.godot_deploy import validate_godot_export
+                    validate_godot_export(output_path, staging_path)
                 continue
             if not component.binary:
                 continue
@@ -953,7 +956,7 @@ class DeploymentOrchestrator:
         for component in manifest.components:
             if component.is_service and not component.reverse_proxy:
                 continue
-            route = (self._component_domain(component, deploy_domain), component.path)
+            route = (self._component_domain(component, deploy_domain), component.path.rstrip("/") or "/")
             previous = routes.get(route)
             if previous:
                 raise RuntimeError(
@@ -974,7 +977,7 @@ class DeploymentOrchestrator:
         if component.is_static:
             serve_path = os.path.normpath(os.path.join(dest_path, component.output or ""))
             dep.update(
-                project_type='static',
+                project_type=component.type,
                 needs_proxy=False,
                 serve_path=serve_path,
                 backend_port=None,

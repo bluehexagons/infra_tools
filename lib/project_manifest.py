@@ -129,7 +129,7 @@ class Component:
 
     @property
     def is_static(self) -> bool:
-        return self.type == "static"
+        return self.type in {"static", "godot-web"}
 
     @property
     def is_service(self) -> bool:
@@ -250,12 +250,12 @@ def _parse_component(entry: object, index: int) -> Component:
         raise ValueError(f"{where} must be an object")
 
     comp_type = entry.get("type")
-    if comp_type == "static":
+    if comp_type in ("static", "godot-web"):
         allowed = _COMMON_FIELDS | _STATIC_FIELDS
     elif comp_type == "service":
         allowed = _COMMON_FIELDS | _SERVICE_FIELDS
     else:
-        raise ValueError(f"{where}: type must be 'static' or 'service', got {comp_type!r}")
+        raise ValueError(f"{where}: type must be 'static', 'godot-web' or 'service', got {comp_type!r}")
 
     _reject_unknown_keys(entry, allowed, where)
 
@@ -274,6 +274,9 @@ def _parse_component(entry: object, index: int) -> Component:
     if not isinstance(path, str) or not path.startswith("/"):
         raise ValueError(f"{where}: path must be a string starting with '/'")
     validate_no_control_characters(path, f"{where} path")
+    if comp_type == "godot-web":
+        from lib.cicd_deploy_policy import validate_nginx_path
+        validate_nginx_path(path)
 
     build = _parse_build(entry.get("build"), where)
     env = _parse_env(entry.get("env"), where)
@@ -287,9 +290,11 @@ def _parse_component(entry: object, index: int) -> Component:
         env=env,
     )
 
-    if comp_type == "static":
+    if comp_type in ("static", "godot-web"):
         output = _require_str(entry, "output", where)
         _require_repo_relative(output, "output", where)
+        if comp_type == "godot-web" and not re.fullmatch(r"[A-Za-z0-9_./-]+", output):
+            raise ValueError(f"{where}: output must use safe Nginx path characters")
         return Component(output=output, **common)
 
     return _parse_service(entry, where, common)

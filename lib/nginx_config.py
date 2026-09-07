@@ -401,6 +401,47 @@ def _make_static_location(path: str, serve_path: str, index_file: str, try_files
     }}"""
 
 
+def _make_godot_location(path: str, serve_path: str) -> str:
+    """Serve a complete Godot export without SPA fallback or immutable caching."""
+    from lib.cicd_deploy_policy import validate_nginx_path
+
+    validate_nginx_path(path)
+    validate_nginx_path(serve_path)
+    prefix = "/" if path == "/" else path.rstrip("/") + "/"
+    directive = "root" if prefix == "/" else "alias"
+    directory = serve_path.rstrip("/") + "/"
+    redirect = "" if prefix == "/" else f"""    location = {path.rstrip('/')} {{
+        return 301 {prefix};
+    }}
+"""
+    # No nested add_header blocks: isolation must cover HTML, workers and errors.
+    # Do not use ^~: the server's dotfile deny regex must still win.
+    return redirect + f"""    # Godot web export: fixed filenames must revalidate together
+    location {prefix} {{
+        {directive} {directory};
+        index index.html;
+        autoindex off;
+        disable_symlinks on;
+        types {{
+            text/html html;
+            application/javascript js;
+            application/wasm wasm;
+            application/json json;
+            application/manifest+json webmanifest;
+            image/png png;
+            image/svg+xml svg;
+            text/css css;
+            text/plain txt md;
+        }}
+        default_type application/octet-stream;
+        expires off;
+        add_header Cache-Control "no-cache" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Embedder-Policy "require-corp" always;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    }}"""
+
+
 def generate_merged_nginx_config(
     domain: Optional[str],
     deployments: Deployments,
@@ -442,6 +483,9 @@ def generate_merged_nginx_config(
             ))
         else:
             serve_path = dep['serve_path']
+            if dep.get('project_type') == 'godot-web':
+                locations.append(_make_godot_location(location_path, serve_path))
+                continue
             index_file = "index.html index.htm"
             project_type = dep.get('project_type', 'static')
             

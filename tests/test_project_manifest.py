@@ -153,7 +153,7 @@ class TestRejects(unittest.TestCase):
         )
 
     def test_unknown_type(self):
-        self._assert_rejected(_manifest(_static(type="lambda")), "static' or 'service")
+        self._assert_rejected(_manifest(_static(type="lambda")), "'static', 'godot-web' or 'service'")
 
     def test_missing_required_field(self):
         comp = _static()

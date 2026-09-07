@@ -82,6 +82,65 @@ those commands only. Environment variable names must be shell identifiers: a
 letter or underscore followed by letters, digits, or underscores. Do not put
 secrets in a committed manifest.
 
+### Godot web application
+
+Declare `type: "godot-web"` explicitly; legacy static detection does not add
+the headers required by a threaded Godot export. This is an additive version-1
+manifest component with the same fields as `static`:
+
+```json
+{
+  "version": 1,
+  "components": [{
+    "name": "player",
+    "type": "godot-web",
+    "domain": "{{domain}}",
+    "path": "/music/",
+    "build": "python3 scripts/export_web.py",
+    "output": "exports/web"
+  }]
+}
+```
+
+The build command belongs to the application; this example assumes it provides
+that script. Pin and install the matching Godot engine and export templates in
+the non-root build account's persistent home, or provision them beforehand.
+Infra-tools does not guess an engine version or install Android/native SDKs.
+Godot's headless web exporter needs matching templates and enough disk for its
+downloads. Builds run only on requested deployments unless you separately enable
+webhooks. `--dry-run` validates the manifest but does not run Godot.
+
+Export to `index.html` with adjacent `index.js`, `index.wasm` and `index.pck`.
+Staged output is checked before replacing the active release: nonempty required
+files, WASM/PCK signatures, at most 4096 entries and 2 GiB, no symlinks or special
+files, and no escape from staging. These are structural checks, not an audit of
+application code or every referenced asset. Keep only public export files in
+`output`. For an already-built export repository, omit `build` and set `output`
+to its export directory (or `"."` for the repository root).
+
+Use HTTPS (`--ssl` on a publicly resolvable domain). Nginx emits
+`Cross-Origin-Opener-Policy: same-origin`,
+`Cross-Origin-Embedder-Policy: require-corp`, JavaScript/WASM MIME types and
+`Cache-Control: no-cache` on Godot responses. Fixed asset names revalidate instead
+of receiving the generic site's immutable caching policy. A subpath redirects
+to its trailing-slash form; missing assets return 404, without a SPA fallback.
+Root and subpath hosting are supported; path/output names must use safe ASCII
+path characters. Existing static/service components retain their own policies.
+
+After deployment, check headers on HTML, JS, WASM and worker files, then verify
+`crossOriginIsolated === true` in a real browser. Test audio unlock, import,
+complete-download offline reload and updates with an open session. Service
+workers belong to each app and can override HTTP cache behavior. Cross-origin
+iframes and external assets need compatible isolation policies. GitHub Pages
+cannot configure these headers directly; use it for a project/instruction site.
+
+The existing staged manifest activation and setup-level Nginx validation apply.
+There is no new artifact upload command or coordinated zero-downtime switch of
+files and Nginx configuration. Retain the previous approved artifact/commit for
+redeployment and consult the rollback limitations in `DEPLOYMENT_SAFETY.md`.
+Use the manifest-aware setup/patch deployment path; the legacy webhook executor
+does not interpret this new component contract.
+
 ### Static site plus API service
 
 ```json
