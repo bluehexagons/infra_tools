@@ -472,6 +472,17 @@ def collect_service_health() -> list[dict[str, str]]:
     return records
 
 
+def _parse_on_demand_query(raw: str) -> bool:
+    """Accept the one explicit action shared by on-demand panel views."""
+
+    if len(raw) > 64:
+        raise ValueError("Invalid on-demand query")
+    query = urllib.parse.parse_qs(raw, keep_blank_values=True, max_num_fields=1)
+    if query not in ({}, {"load": ["1"]}):
+        raise ValueError("Invalid on-demand query")
+    return bool(query)
+
+
 def _homebox_probe_port(record: dict[str, Any]) -> int | None:
     """Return a validated local HomeBox probe port from a service record."""
 
@@ -873,9 +884,6 @@ a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .skip-link:focus { top: 12px; }
 h2, #trust { scroll-margin-top: 24px; }
 .refresh-link { color: var(--accent); display: inline-block; padding: 10px 0; }
-.service-health { margin-top: 20px; }
-.service-health > summary { font-weight: 650; }
-.service-health .overview-grid { margin-top: 12px; }
 .metric-value.active { color: var(--ok); }
 .metric-value.failed, .metric-value.unavailable { color: var(--bad); }
 .history > summary { margin: 10px 0; }
@@ -1396,6 +1404,51 @@ def _render_event_history(rows: list[str]) -> str:
     return content
 
 
+def render_service_status(state: WebPanelState, load: bool) -> str:
+    """Render service state separately so the dashboard remains fast to open."""
+
+    host = html.escape(state.manifest["host"])
+    content = (
+        '<p class="empty">Select Load local service status to inspect fixed '
+        'system and current-user services.</p>'
+    )
+    if load:
+        health = state.service_health()
+        cards = "".join(
+            '<div class="metric"><dt>{}</dt><dd><span class="metric-value {}">{}</span>'
+            '<span class="metric-description">{}</span>{}</dd></div>'.format(
+                html.escape(record["label"]),
+                {"active": "active", "failed": "failed", "Unavailable": "unavailable"}.get(record["value"], ""),
+                html.escape(record["value"]),
+                html.escape(record["description"]),
+                '<a href="/logs?service={}">Inspect service</a>'.format(
+                    urllib.parse.quote(record["unit"], safe=""),
+                ) if record.get("unit") else "",
+            )
+            for record in health
+        )
+        attention = sum(record["value"] != "active" for record in health)
+        summary = f"{len(health)} records"
+        if attention:
+            summary += f" · {attention} inactive or unavailable"
+        content = f'<p class="count">{summary} · cached up to 30 seconds</p>'
+        content += (
+            f'<dl class="overview-grid">{cards}</dl>' if cards else
+            '<p class="empty">No supported local services were found.</p>'
+        )
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">
+<title>Local service status · {host}</title><style>{_PAGE_STYLE}</style></head><body>
+<a class="skip-link" href="#main">Skip to content</a>
+<nav class="sidebar" aria-label="Panel sections"><strong>infra-tools</strong><div class="nav-links">
+<a href="/">Dashboard</a><a href="/#services-heading">Web services</a><a href="/services" aria-current="page">Local service status</a><a href="/jobs">Scheduled jobs</a><a href="/logs">Service diagnostics</a></div></nav>
+<main id="main" tabindex="-1"><header><p class="eyebrow">infra-tools web panel</p><h1>Local service status</h1>
+<p class="lede">Process state for supported services on <code>{host}</code>.</p></header>
+<form class="job-load" method="get" action="/services"><button name="load" value="1">Load local service status</button></form>
+<p class="endpoint">This checks fixed system services and the panel user's T3 Code service. It does not prove public DNS, TLS, or application readiness.</p>
+{content}<footer><a href="/">Back to dashboard</a><span>Loaded on request · no automatic refresh</span></footer></main></body></html>'''
+
+
 def _render_audit_section(state: WebPanelState) -> str:
     snapshot = state.audit_snapshot()
     events = snapshot.get("events", [])
@@ -1587,25 +1640,6 @@ def render_page(state: WebPanelState) -> str:
         )
         for record in overview
     )
-    health = state.service_health()
-    health_cards = "".join(
-        '<div class="metric"><dt>{}</dt><dd><span class="metric-value {}">{}</span>'
-        '<span class="metric-description">{}</span>{}</dd></div>'.format(
-            html.escape(record["label"]),
-            {"active": "active", "failed": "failed", "Unavailable": "unavailable"}.get(record["value"], ""),
-            html.escape(record["value"]), html.escape(record["description"]),
-            '<a href="/logs?service={}">Inspect service</a>'.format(
-                urllib.parse.quote(record["unit"], safe=""),
-            ) if record.get("unit") else "",
-        ) for record in health
-    )
-    health_content = (
-        f'<dl class="overview-grid">{health_cards}</dl>' if health_cards else
-        '<p class="empty">No supported local services were found.</p>'
-    )
-    attention = sum(record["value"] != "active" for record in health)
-    health_label = f" · {attention} inactive or unavailable" if attention else ""
-
     trust_section = _render_certificate_trust(discover_certificate_trust())
     audit_section = _render_audit_section(state)
     notification_section = _render_notification_section(state)
@@ -1667,6 +1701,7 @@ def render_page(state: WebPanelState) -> str:
     nav_links = "".join(f'<a href="#{target}">{label}</a>' for target, label in navigation)
     nav_links += '<a href="/logs">Service diagnostics</a>'
     nav_links += '<a href="/jobs">Scheduled jobs</a>'
+    nav_links += '<a href="/services">Local service status</a>'
 
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -1689,9 +1724,7 @@ def render_page(state: WebPanelState) -> str:
 <section aria-labelledby="services-heading"><div class="section-heading"><div>
 <p class="section-kicker">Open in browser</p><h2 id="services-heading">Web services</h2></div>
 <span class="count">{service_count}</span></div><div class="grid">{service_cards}</div></section>
-<details class="service-health" open><summary>Local service status{health_label}</summary>
-<p class="endpoint">Process state on this host; public DNS, TLS, and application readiness may differ. Cached up to 30 seconds.</p>
-{health_content}</details>{audit_section}{notification_section}
+{audit_section}{notification_section}
 <section aria-labelledby="access-heading"><div class="section-heading"><div>
 <p class="section-kicker">Connect directly</p><h2 id="access-heading">Access</h2></div>
 <span class="count">{access_label}</span></div>{access_content}</section><div id="trust">{trust_section}</div>{action}
@@ -1762,6 +1795,14 @@ class WebPanelHandler(BaseHTTPRequestHandler):
                 render_jobs(load, _PAGE_STYLE, self.state.manifest["host"]),
                 "text/html",
             )
+            return
+        if path == "/services":
+            try:
+                load = _parse_on_demand_query(parsed.query)
+            except ValueError:
+                self._send(HTTPStatus.BAD_REQUEST, "Invalid local service query\n", "text/plain")
+                return
+            self._send(HTTPStatus.OK, render_service_status(self.state, load), "text/html")
             return
         if path != "/":
             self._send(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")

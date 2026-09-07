@@ -64,6 +64,33 @@ PROPERTIES = {
 _MAX_BYTES = 64 * 1024
 _TIMEOUT = 5
 _COLLECTORS = threading.BoundedSemaphore(2)
+_PRIVATE_KEY_PATTERN = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+_CREDENTIAL_VALUE_PATTERN = re.compile(
+    r"(?ix)\b(authorization|cookie|set-cookie|password|passwd|secret|api[_-]?key|"
+    r"access[_-]?token|refresh[_-]?token|client[_-]?secret)\s*([:=])\s*"
+    r"(?:bearer\s+|basic\s+)?(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+)
+_SENSITIVE_HEADER_PATTERN = re.compile(
+    r"(?im)^\s*(authorization|cookie|set-cookie)\s*:\s*[^\r\n]*"
+)
+_CREDENTIAL_URL_PATTERN = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s<>()]+", re.IGNORECASE)
+_KNOWN_SECRET_PARAMETERS = {
+    "access_token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "credential",
+    "client_secret",
+    "key",
+    "password",
+    "secret",
+    "sig",
+    "signature",
+    "token",
+}
 
 
 @dataclass(frozen=True)
@@ -150,6 +177,43 @@ def _journal_command(query: DiagnosticQuery) -> list[str]:
     return command
 
 
+def _redact_log_message(message: str) -> str:
+    """Hide common credential encodings while retaining operational context."""
+
+    message = _PRIVATE_KEY_PATTERN.sub("[private key redacted]", message)
+    message = _SENSITIVE_HEADER_PATTERN.sub(
+        lambda match: f"{match[1]}: [redacted]", message
+    )
+    message = _CREDENTIAL_VALUE_PATTERN.sub(
+        lambda match: f"{match[1]}{match[2]}[redacted]", message
+    )
+
+    def redact_url(match: re.Match[str]) -> str:
+        try:
+            parsed = urllib.parse.urlsplit(match[0])
+            if not parsed.hostname:
+                return match[0]
+            query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+            safe_query = urllib.parse.urlencode(
+                [
+                    (name, "[redacted]" if name.lower() in _KNOWN_SECRET_PARAMETERS else value)
+                    for name, value in query
+                ],
+                doseq=True,
+                safe="[]",
+            )
+            host = parsed.hostname
+            if parsed.port is not None:
+                host += f":{parsed.port}"
+            return urllib.parse.urlunsplit(
+                (parsed.scheme, host, parsed.path, safe_query, "[redacted]" if parsed.fragment else "")
+            )
+        except ValueError:
+            return match[0]
+
+    return _CREDENTIAL_URL_PATTERN.sub(redact_url, message)
+
+
 def collect_diagnostics(query: DiagnosticQuery) -> dict[str, object]:
     """Load bounded runtime properties and the newest 100 matching messages."""
 
@@ -190,6 +254,8 @@ def collect_diagnostics(query: DiagnosticQuery) -> dict[str, object]:
             message = event.get("MESSAGE")
             if not isinstance(message, str):
                 message = "[Binary or oversized message omitted by the journal]"
+            else:
+                message = _redact_log_message(message)
             timestamp = "Unknown time"
             try:
                 timestamp = datetime.fromtimestamp(
@@ -239,9 +305,11 @@ def render_diagnostics(query: DiagnosticQuery, style: str, host: str) -> str:
         for event in result["events"]:
             severity = severity_names.get(event["priority"], "Unknown priority")
             badge = "error" if event["priority"] in {"0", "1", "2", "3"} else "warning" if event["priority"] == "4" else "info"
+            message = event["message"]
+            safe_message = _redact_log_message(message) if isinstance(message, str) else "[Invalid message omitted]"
             rows.append(
                 '<li class="event"><div class="event-head"><time>{}</time><span class="badge {}">{}</span></div><pre>{}</pre></li>'.format(
-                    html.escape(event["timestamp"]), badge, severity, html.escape(event["message"]),
+                    html.escape(event["timestamp"]), badge, severity, html.escape(safe_message),
                 )
             )
         logs = f'<ol class="event-list">{"".join(rows)}</ol>' if rows else '<p class="empty">No matching entries are visible to the panel account. The journal may be restricted, rotated, or empty for these filters.</p>'
@@ -258,7 +326,7 @@ def render_diagnostics(query: DiagnosticQuery, style: str, host: str) -> str:
 <title>Service diagnostics · {html.escape(host)}</title><style>{style}</style></head><body>
 <a class="skip-link" href="#main">Skip to content</a>
 <nav class="sidebar" aria-label="Panel sections"><strong>infra-tools</strong><div class="nav-links">
-<a href="/">Dashboard</a><a href="/#services-heading">Services</a><a href="/#audit-heading">Security activity</a><a href="/jobs">Scheduled jobs</a><a href="/logs" aria-current="page">Service diagnostics</a></div></nav>
+<a href="/">Dashboard</a><a href="/#services-heading">Services</a><a href="/#audit-heading">Security activity</a><a href="/services">Local service status</a><a href="/jobs">Scheduled jobs</a><a href="/logs" aria-current="page">Service diagnostics</a></div></nav>
 <main id="main" tabindex="-1"><header><p class="eyebrow">infra-tools web panel</p><h1>Service diagnostics</h1>
 <p class="lede">Inspect runtime details and recent logs on <code>{html.escape(host)}</code>.</p></header>
 <form class="diagnostic-filters" method="get" action="/logs">

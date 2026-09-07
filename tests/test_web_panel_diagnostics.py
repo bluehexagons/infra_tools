@@ -64,6 +64,29 @@ class DiagnosticQueryTest(unittest.TestCase):
             result = diagnostics.collect_diagnostics(diagnostics.DiagnosticQuery(load=True))
         self.assertEqual(len(result["events"]), 100)
 
+    def test_redacts_common_credentials_before_rendering(self) -> None:
+        message = (
+            "Authorization: Bearer keep-this-secret\n"
+            "password='another-secret' https://user:pass@example.test/path?token=query-secret&safe=kept\n"
+            "Cookie: session=first-secret; preferences=second-secret\n"
+            "postgresql://dbuser:database-secret@db.example.test/inventory\n"
+            "-----BEGIN PRIVATE KEY-----\nprivate-data\n-----END PRIVATE KEY-----"
+        )
+        with patch.object(diagnostics, "_bounded_command", side_effect=[
+            ("LoadState=loaded", ""),
+            (json.dumps({"MESSAGE": message}), ""),
+        ]):
+            result = diagnostics.collect_diagnostics(diagnostics.DiagnosticQuery(load=True))
+        rendered = result["events"][0]["message"]
+        for secret in (
+            "keep-this-secret", "another-secret", "user:pass", "query-secret",
+            "first-secret", "second-secret", "database-secret", "private-data",
+        ):
+            self.assertNotIn(secret, rendered)
+        self.assertIn("token=[redacted]", rendered)
+        self.assertIn("safe=kept", rendered)
+        self.assertIn("[private key redacted]", rendered)
+
     def test_system_scope_and_incomplete_journal_are_visible(self) -> None:
         with patch.object(diagnostics, "_bounded_command", side_effect=[
             ("LoadState=not-found", ""),
@@ -100,6 +123,20 @@ class DiagnosticQueryTest(unittest.TestCase):
         with patch.object(diagnostics, "collect_diagnostics", return_value=result):
             page = diagnostics.render_diagnostics(diagnostics.DiagnosticQuery(load=True), "", "host")
         self.assertIn("No matching entries are visible", page)
+
+    def test_renderer_redacts_collector_output_again(self) -> None:
+        result = {
+            "issues": [], "properties": {},
+            "events": [{
+                "message": "password=raw-value https://user:pass@example.test/?token=query-value",
+                "timestamp": "now", "priority": "3",
+            }],
+        }
+        with patch.object(diagnostics, "collect_diagnostics", return_value=result):
+            page = diagnostics.render_diagnostics(diagnostics.DiagnosticQuery(load=True), "", "host")
+        self.assertNotIn("raw-value", page)
+        self.assertNotIn("user:pass", page)
+        self.assertNotIn("query-value", page)
 
     def test_handler_rejects_bad_filters_before_collection(self) -> None:
         handler = object.__new__(panel.WebPanelHandler)

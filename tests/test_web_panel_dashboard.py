@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from common.service_tools import web_panel_service as panel
 
@@ -57,9 +57,6 @@ class DashboardTest(unittest.TestCase):
             patch.object(panel, "discover_infra_web_services", return_value=[]),
             patch.object(panel, "discover_certificate_trust", return_value=None),
             patch.object(state, "system_overview", return_value=[]),
-            patch.object(state, "service_health", return_value=[{
-                "label": "HomeBox", "value": "failed", "description": "homebox.service · failed",
-            }]),
             patch.object(state, "audit_snapshot", return_value={"events": events, "status": "ok"}),
         ):
             page = panel.render_page(state)
@@ -70,8 +67,47 @@ class DashboardTest(unittest.TestCase):
         self.assertIn("Show 3 more events", page)
         self.assertIn("Event &lt;7&gt;", page)
         self.assertNotIn("Event <7>", page)
-        self.assertIn("1 inactive or unavailable", page)
+        self.assertIn('href="/services"', page)
+        self.assertNotIn("homebox.service · failed", page)
         self.assertLess(page.index('id="overview-heading"'), page.index('id="services-heading"'))
+
+    def test_dashboard_does_not_probe_local_services(self) -> None:
+        state = panel.WebPanelState({
+            "title": "Example", "host": "example.test", "username": "agent",
+            "system_type": "server_dev", "features": {}, "services": [], "access": [],
+        })
+        with (
+            patch.object(panel, "discover_infra_web_services", return_value=[]),
+            patch.object(panel, "discover_certificate_trust", return_value=None),
+            patch.object(state, "service_health") as service_health,
+        ):
+            panel.render_page(state)
+        service_health.assert_not_called()
+
+    def test_service_status_requires_explicit_load(self) -> None:
+        state = panel.WebPanelState({"host": "example.test", "features": {}})
+        health = [{
+            "label": "HomeBox", "value": "failed",
+            "description": "homebox.service · failed", "unit": "homebox.service",
+        }]
+        with patch.object(state, "service_health", return_value=health) as collect:
+            unloaded = panel.render_service_status(state, False)
+        collect.assert_not_called()
+        self.assertIn("no automatic refresh", unloaded)
+        with patch.object(state, "service_health", return_value=health) as collect:
+            loaded = panel.render_service_status(state, True)
+        collect.assert_called_once()
+        self.assertIn("1 inactive or unavailable", loaded)
+        self.assertIn('/logs?service=homebox.service', loaded)
+
+    def test_service_status_route_rejects_bad_query_without_probe(self) -> None:
+        handler = object.__new__(panel.WebPanelHandler)
+        handler.path = "/services?load=1&load=1"
+        handler._send = Mock()
+        with patch.object(panel, "render_service_status") as render:
+            handler.do_GET()
+        render.assert_not_called()
+        self.assertEqual(handler._send.call_args.args[0].value, 400)
 
 
 if __name__ == "__main__":

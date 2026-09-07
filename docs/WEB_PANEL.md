@@ -6,6 +6,7 @@ not installed unless `--web-panel` is selected.
 | Panel area | Shows |
 | --- | --- |
 | Overview | Uptime, memory, root-disk use, reboot status, and update timer state |
+| Local service status | On-demand system and T3 Code service process state |
 | Services | Configured and discovered web, SSH, RDP, Samba, Gogs, HomeBox, and Antistatic access |
 | Audit activity | A sanitized snapshot of current auditd events and collection health |
 | Notifications | Events accepted from other machines when ingest is enabled |
@@ -173,9 +174,11 @@ The panel renders configured access from saved setup state and discovers live
 `infra-web` forwards and static sites at page load. When the shared gateway is
 installed, its landing page is linked before individual sites are published.
 
-**Local service status** reads installed Nginx, SSH, Gogs, HomeBox, Docker,
-Samba, xrdp, fail2ban, and auditd units, plus the panel user's T3 Code unit.
-It shows process state and substate, including inactive and failed services.
+**Local service status** (`/services`) reads installed Nginx, SSH, Gogs,
+HomeBox, Docker, Samba, xrdp, fail2ban, and auditd units, plus the panel
+user's T3 Code unit. It opens without probing services; select **Load local
+service status** to collect process state and substate, including inactive and
+failed services.
 Missing units are omitted; an unreachable service manager is shown as
 unavailable. These read-only, fixed-unit checks are bounded to two seconds per
 service manager and cached for 30 seconds. They do not read journals, application
@@ -195,9 +198,11 @@ last service result, exit status, and whether missed calendar runs are caught up
 
 Failed jobs and inactive timers appear first. An inactive job service is normal
 between runs; a default `success` value without a recorded start is shown as
-**No run recorded**. Missing timers are counted separately from unreadable
-timer information. This is current systemd state, not durable job history or
-proof that a backup or update completed its intended work. Times use the host
+**No run recorded**. If the timer fired but systemd no longer has its service
+run details, the panel instead says **Timer triggered; result unavailable**.
+Missing timers are counted separately from unreadable timer information. This
+is current systemd state, not durable job history or proof that a backup or
+update completed its intended work. Times use the host
 timezone, and interval-based deadlines are approximate. Results may reset after
 a reboot or service-manager reload.
 
@@ -234,8 +239,10 @@ Each command is limited to five seconds and 64 KiB of captured output; at most
 two diagnostic requests collect concurrently. Timeouts, permission notices,
 unreadable records, and truncation are shown explicitly. Empty results mean no
 matching entries are visible, not that the service is healthy. Journal messages
-come from applications and may contain sensitive operational information; review
-them before sharing. The page retains the panel's authentication, no-store cache
+come from applications and may contain sensitive operational information. The
+panel redacts common credential fields, private keys, URL userinfo, and known
+secret query parameters, but cannot identify every sensitive value; review logs
+before sharing. The page retains the panel's authentication, no-store cache
 policy, and script restrictions.
 
 Hostname-based [HomeBox](HOMEBOX.md) installations add an inventory link and a

@@ -40,6 +40,14 @@ class JobTest(unittest.TestCase):
         self.assertEqual(row["result"], "No result recorded")
         self.assertEqual(row["tone"], "info")
 
+    def test_trigger_without_retained_service_details_needs_attention(self) -> None:
+        output = _pair().replace(
+            "Persistent=yes", "Persistent=yes\nLastTriggerUSec=Mon 2026-09-07 10:00:00 CDT"
+        )
+        row = self.collect(output).jobs[0]
+        self.assertEqual(row["status"], "Timer triggered; result unavailable")
+        self.assertEqual(row["tone"], "warning")
+
     def test_idle_oneshot_success_is_normal(self) -> None:
         row = self.collect(_pair(started="Mon 2026-09-07 10:00:00 CDT")).jobs[0]
         self.assertEqual(row["status"], "Last run succeeded")

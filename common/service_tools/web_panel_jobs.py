@@ -109,6 +109,8 @@ def collect_jobs() -> JobSnapshot:
                 status = "Last run succeeded"
             elif _reported(started):
                 status, tone = "Last result unavailable", "warning"
+            elif _reported(timer.get("LastTriggerUSec")):
+                status, tone = "Timer triggered; result unavailable", "warning"
             timer_state = timer.get("ActiveState", "unknown")
             if timer_state != "active" and tone == "info":
                 tone = "warning"
@@ -163,7 +165,7 @@ def render_jobs(load: bool, style: str, host: str) -> str:
 <title>Scheduled jobs · {html.escape(host)}</title><style>{style}</style></head><body>
 <a class="skip-link" href="#main">Skip to content</a>
 <nav class="sidebar" aria-label="Panel sections"><strong>infra-tools</strong><div class="nav-links">
-<a href="/">Dashboard</a><a href="/#services-heading">Services</a><a href="/jobs" aria-current="page">Scheduled jobs</a><a href="/logs">Service diagnostics</a></div></nav>
+<a href="/">Dashboard</a><a href="/#services-heading">Services</a><a href="/services">Local service status</a><a href="/jobs" aria-current="page">Scheduled jobs</a><a href="/logs">Service diagnostics</a></div></nav>
 <main id="main" tabindex="-1"><header><p class="eyebrow">infra-tools web panel</p><h1>Scheduled jobs</h1>
 <p class="lede">Update, security, and housekeeping jobs on <code>{html.escape(host)}</code>.</p></header>
 <form class="job-load" method="get" action="/jobs"><button name="load" value="1">Load scheduled jobs</button></form>
