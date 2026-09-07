@@ -178,6 +178,7 @@ TEST_SUITE_PATTERNS: dict[str, tuple[str, ...]] = {
         "tests/test_antistatic_steps.py",
         "tests/test_cloudflare*.py",
         "tests/test_gogs*.py",
+        "tests/test_homebox.py",
         "tests/test_infra_web.py",
         "tests/test_manifest_deploy.py",
         "tests/test_nginx_config.py",

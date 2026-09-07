@@ -1356,6 +1356,15 @@ def add_setup_arguments(
         ),
     )
     
+    homebox_group = parser.add_mutually_exclusive_group()
+    homebox_group.add_argument("--homebox", nargs="+", metavar="HOMEBOX",
+                              help="Install native HomeBox: DOMAIN[:PORT] [DATA_PATH]; hostname requires --ssl, :PORT is loopback-only")
+    homebox_group.add_argument("--no-homebox", dest="homebox", action="store_const", const=[],
+                              help="Remove the managed HomeBox unit and proxy, preserving inventory, secrets, and releases")
+    parser.add_argument("--homebox-version", metavar="TAG", help="Explicit HomeBox version (new installs: v0.26.2; reruns retain installed version)")
+    parser.add_argument("--homebox-admin", metavar="EMAIL", help="Initial HomeBox account email (default: admin@homebox.local); password generated on target")
+    parser.add_argument("--homebox-port", type=int, metavar="PORT", help="Loopback backend port for hostname-based HomeBox (default: 7745)")
+
     restart_group = parser.add_mutually_exclusive_group()
     restart_group.add_argument("--auto-restart", dest="auto_restart",
                                action="store_true",

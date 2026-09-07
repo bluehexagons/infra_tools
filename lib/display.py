@@ -210,6 +210,15 @@ def print_service_access_summary(
             ("Gogs Git over SSH", f"git@{domain or config.host}", "Git access")
         )
 
+    if config.homebox:
+        from lib.homebox_config import homebox_settings
+
+        homebox = homebox_settings(config)
+        address = _http_url(homebox["domain"] or "127.0.0.1", homebox["public_port"],
+                            scheme="https" if homebox["domain"] else "http")
+        note = "inventory" if homebox["domain"] else "inventory; connect through an SSH tunnel"
+        lines.append(("HomeBox", address, note))
+
     if config.antistatic_server:
         antistatic_domain, _antistatic_port = _split_service_spec(
             config.antistatic_server,
@@ -275,6 +284,7 @@ def print_service_access_summary(
         "Web panel",
         "Godot web exports",
         "Gogs web",
+        "HomeBox",
         "Antistatic lobby",
         "Antistatic DB",
         "T3 Code",
@@ -532,6 +542,11 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
 
     if config.gogs:
         print(f"Gogs: {' '.join(config.gogs)}")
+    if config.homebox:
+        print(f"HomeBox: {' '.join(config.homebox)}")
+        print(f"  Version: {config.homebox_version or 'retain installed version; v0.26.2 on first setup'}")
+    elif config.homebox == []:
+        print("HomeBox: remove service and proxy, retain inventory")
     
     print("=" * 60)
     print()

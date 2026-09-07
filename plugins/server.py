@@ -112,6 +112,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         steps.extend(get_web_firewall_steps())
     elif config.system_type == "server_lite" and (
         config.effective_web_ports()
+        or config.homebox == []
         or config.disable_web_panel
         or config.effective_access_sources()
         or config.clear_access_sources
@@ -142,6 +143,10 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_build_server_steps(config, steps)
     extend_antistatic_steps(config, steps)
     extend_gogs_steps(config, steps)
+    if config.homebox is not None:
+        from web.homebox_steps import setup_homebox
+
+        steps.append(("Configuring HomeBox inventory service", setup_homebox))
     extend_syncthing_steps(config, steps)
     extend_web_panel_steps(config, steps)
     steps.extend(get_final_steps(config))

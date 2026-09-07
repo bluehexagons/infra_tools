@@ -49,6 +49,11 @@ not schedule the file-level mirror declared by `--backup`.
 
 ## Consistency and recovery limits
 
+For HomeBox, use [`infra-tools homebox backup`](HOMEBOX.md#backup-and-restore).
+It stops the application and captures SQLite, attachments, secrets, and the
+matching executable together. Mirror completed archives off-host with
+`--backup`; do not mirror its live data directory as a recovery snapshot.
+
 Rsync mirrors are file-level copies. Do not assume that copying a live database
 produces a transactionally consistent backup. For Gogs or another Git service,
 use its application-level export or a coordinated stop/snapshot procedure for

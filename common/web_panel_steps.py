@@ -146,6 +146,17 @@ def build_web_panel_manifest(
                 }
             )
 
+    if config.homebox:
+        from lib.homebox_config import homebox_settings
+
+        homebox = homebox_settings(config)
+        if homebox["domain"]:
+            services.append({
+                "label": "HomeBox",
+                "url": _http_url(homebox["domain"], homebox["public_port"], "https"),
+                "description": "Inventory and attachments",
+            })
+
     for label, spec, default_port, description in (
         ("Antistatic lobby", config.antistatic_server, 8080, "Game lobby"),
         ("Antistatic DB", config.antistatic_db, 8081, "Game database"),

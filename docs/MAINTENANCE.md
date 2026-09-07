@@ -46,6 +46,12 @@ VMs where their tools were not selected.
 
 ## Update Policy
 
+[HomeBox](HOMEBOX.md) retains its installed version on ordinary setup reruns.
+Select upgrades explicitly with `--homebox-version TAG`; activation creates
+a stopped-service recovery archive before migrations. There is no HomeBox
+update timer or automatic backup-retention policy. Keep an off-host backup and
+manage retained releases and archives deliberately.
+
 APT uses the infra-tools updater instead of competing distro unattended-upgrade
 timers. It runs `apt-get update` and a non-removing distribution upgrade; it
 does not run `autoremove` or automatically remove packages. Before each

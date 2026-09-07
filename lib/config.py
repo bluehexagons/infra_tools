@@ -476,6 +476,10 @@ class SetupConfig:
     antistatic_db: MaybeStr = None  # "DOMAIN[:port]" spec
     gogs: Optional[StrList] = None  # ["DOMAIN[:port]", "DATA_PATH"?]
     gogs_sources: Optional[StrList] = None
+    homebox: Optional[StrList] = None  # [] explicitly disables the managed service
+    homebox_version: MaybeStr = None
+    homebox_admin: MaybeStr = None
+    homebox_port: Optional[int] = None
     auto_restart: bool = True
     auto_restart_force_days: int = 7
     auto_restart_grace: int = 5
@@ -751,6 +755,12 @@ class SetupConfig:
         """Return managed TCP web ports for this resolved target."""
 
         ports = list(self.web_ports or [])
+        if self.homebox:
+            from lib.homebox_config import parse_homebox_spec
+
+            homebox_domain, homebox_port = parse_homebox_spec(self.homebox[0])
+            if homebox_domain:
+                ports.extend((80, homebox_port))
         if "t3code" in (self.web_interfaces or []):
             # The shared internal HTTPS host serves the VM CA and landing page
             # used by the managed T3 HTTPS forwards.
@@ -859,6 +869,7 @@ class SetupConfig:
     def to_remote_args(self) -> StrList:
         """Generate command line arguments for remote execution."""
         args: StrList = []
+        args.extend(self._homebox_args())
 
         if self.t3code_ready:
             args.append("--t3code-ready")
@@ -1257,6 +1268,7 @@ class SetupConfig:
         # Add username if different from current user or if requested
         if include_username:
             cmd_parts.append(self.username)
+        cmd_parts.extend(self._homebox_args())
         
         # SSH key
         if self.ssh_key:
@@ -1780,6 +1792,17 @@ class SetupConfig:
             cmd_parts.append(f"--auto-restart-grace {self.auto_restart_grace}")
         
         return cmd_parts
+
+    def _homebox_args(self) -> StrList:
+        if self.homebox == []:
+            return ["--no-homebox"]
+        args: StrList = []
+        if self.homebox:
+            args.append("--homebox " + " ".join(shlex.quote(p) for p in self.homebox))
+        for flag, value in (("version", self.homebox_version), ("admin", self.homebox_admin), ("port", self.homebox_port)):
+            if value is not None:
+                args.append(f"--homebox-{flag} {shlex.quote(str(value))}")
+        return args
 
     def to_dict(self) -> JSONDict:
         data = asdict(self)
@@ -2424,6 +2447,10 @@ class SetupConfig:
             antistatic_db=getattr(args, 'antistatic_db', None),
             gogs=getattr(args, 'gogs', None),
             gogs_sources=getattr(args, 'gogs_sources', None),
+            homebox=getattr(args, 'homebox', None),
+            homebox_version=getattr(args, 'homebox_version', None),
+            homebox_admin=getattr(args, 'homebox_admin', None),
+            homebox_port=getattr(args, 'homebox_port', None),
             auto_restart=auto_restart,
             auto_restart_force_days=auto_restart_force_days,
             auto_restart_grace=auto_restart_grace,

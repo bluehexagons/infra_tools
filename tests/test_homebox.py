@@ -1,0 +1,440 @@
+"""HomeBox setup contracts and failure recovery without host mutations."""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import shlex
+import sqlite3
+import subprocess
+import tarfile
+import tempfile
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+from infra_tools import create_infra_tools_parser, _patch_preserve_keys
+from lib.arg_parser import create_setup_argument_parser
+from lib.cache import merge_setup_configs
+from lib.config import SetupConfig
+from lib.homebox_cli import run_homebox_command
+from lib.homebox_config import (
+    homebox_settings, parse_homebox_spec, validate_homebox_settings,
+)
+from web import homebox_steps as h
+
+
+def config(**kwargs):
+    return SetupConfig(host="inventory.example.com", username="operator", system_type="server_lite",
+                       homebox=kwargs.pop("homebox", [":7745"]), **kwargs)
+
+
+def state(**kwargs):
+    value = {"schema": 1, "version": "v0.26.2", "archive_sha256": "a" * 64,
+             "binary_sha256": hashlib.sha256(b"binary").hexdigest(), "domain": "", "port": 7745,
+             "public_port": 7745, "data_path": "/srv/homebox", "email": "admin@homebox.local",
+             "sources": [], "status": "ready", "mount": {"target": "/", "source": "/dev/test", "fstype": "ext4"}}
+    value.update(kwargs)
+    return value
+
+
+class HomeBoxConfigTests(unittest.TestCase):
+    def test_spec_and_defaults(self):
+        self.assertEqual(parse_homebox_spec(":7745"), ("", 7745))
+        self.assertEqual(parse_homebox_spec("Inventory.example.com"), ("inventory.example.com", 443))
+        self.assertEqual(homebox_settings(config())["data_path"], "/var/lib/homebox")
+
+    def test_invalid_input_before_mutation(self):
+        for spec in ("", "7745", ":80", ":443", ":0", ":65536", "a.test:4x", "a.test:４４３",
+                     "a.test:443\n", "https://a.test", "127.0.0.1", "a.test;id", "a.test/thing"):
+            with self.subTest(spec=spec), self.assertRaises(ValueError):
+                parse_homebox_spec(spec)
+        for options in ({"homebox": ["a.test"]}, {"homebox": [":7745", "/etc"]},
+                        {"homebox": [":7745", "/srv/a/../b"]}, {"homebox": [":7745", "/srv/a%H"]},
+                        {"homebox_version": "../../evil"}, {"homebox_version": "v0.22.1"},
+                        {"homebox_port": 8000}, {"enable_cloudflare": True},
+                        {"machine_type": "oci"}, {"custom_steps": "setup_homebox"},
+                        {"homebox": [":7745", "/srv/data"], "storage_mounts": [["data", "/srv/data", "ext4", "empty"]]}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                validate_homebox_settings(config(**options))
+
+    def test_conflicts_and_storage_overlap(self):
+        for options in ({"gogs": [":7745"]}, {"web_panel_port": 7745},
+                        {"antistatic_server": ":7745"},
+                        {"samba_shares": [["write", "inventory", "/var/lib/homebox/photos", "user"]]},
+                        {"homebox": ["a.test"], "enable_ssl": True, "gogs": ["a.test:3000"]}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                validate_homebox_settings(config(**options))
+        validate_homebox_settings(config(homebox=["a.test"], enable_ssl=True, gogs=["git.test:3000"]))
+
+    def test_cli_remote_cache_and_patch_roundtrip(self):
+        parser, _, _ = create_infra_tools_parser()
+        args = parser.parse_args(["setup", "server_lite", "inventory.example.com", "operator", "--homebox",
+                                  "items.example.com:9443", "/srv/items", "--homebox-port", "7746", "--ssl",
+                                  "--homebox-admin", "owner@example.com", "--homebox-version", "v0.26.2"])
+        original = SetupConfig.from_args(args, args.system_type)
+        validate_homebox_settings(original)
+        cached = SetupConfig.from_dict(original.host, original.system_type, original.to_dict())
+        remote = create_setup_argument_parser("remote", for_remote=True)
+        remote_args = remote.parse_args(shlex.split(" ".join(cached.to_remote_args())))
+        self.assertEqual(remote_args.homebox, original.homebox)
+        self.assertEqual(remote_args.homebox_admin, original.homebox_admin)
+        self.assertEqual(remote_args.homebox_port, 7746)
+        rebuilt = parser.parse_args(shlex.split(" ".join(cached.to_setup_command()))[1:])
+        self.assertEqual(rebuilt.homebox, original.homebox)
+        patch_args = parser.parse_args(["patch", original.host, "--homebox-version", "v0.26.3"])
+        merged = merge_setup_configs(cached, SetupConfig.from_args(patch_args, cached.system_type),
+                                     preserve_keys=_patch_preserve_keys(patch_args))
+        validate_homebox_settings(merged)
+        self.assertEqual(merged.homebox_version, "v0.26.3")
+        self.assertEqual(merged.homebox_admin, "owner@example.com")
+        disable_args = parser.parse_args(["patch", original.host, "--no-homebox"])
+        disabled = merge_setup_configs(cached, SetupConfig.from_args(disable_args, cached.system_type),
+                                       preserve_keys=_patch_preserve_keys(disable_args))
+        self.assertEqual(disabled.homebox, [])
+        self.assertEqual(disabled._homebox_args(), ["--no-homebox"])
+
+    def test_plugin_and_dry_run(self):
+        from plugins.server import build_server_steps
+        funcs = [func.__name__ for _, func in build_server_steps(config())]
+        self.assertEqual(funcs.count("setup_homebox"), 1)
+        with patch.object(h, "homebox_lock", side_effect=AssertionError("mutation")), contextlib.redirect_stdout(io.StringIO()):
+            h.setup_homebox(config(dry_run=True))
+        self.assertNotIn(7745, config().effective_web_ports())
+        self.assertTrue({80, 9443}.issubset(config(homebox=["a.test:9443"], enable_ssl=True).effective_web_ports()))
+
+    def test_panel_excludes_loopback_and_secrets(self):
+        from common.web_panel_steps import build_web_panel_manifest
+        manifest = build_web_panel_manifest(config(), ["inventory.example.com"])
+        self.assertNotIn("HomeBox", json.dumps(manifest))
+        manifest = build_web_panel_manifest(config(homebox=["a.test"], enable_ssl=True), ["inventory.example.com"])
+        self.assertEqual(manifest["services"][0]["url"], "https://a.test/")
+        self.assertNotIn("pepper", json.dumps(manifest))
+
+
+class HomeBoxFixture:
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.stack = contextlib.ExitStack()
+        self.addCleanup(self.stack.close)
+        for name, path in {"ROOT": "opt", "CONFIG": "config", "BACKUPS": "backups", "STATE": "state/homebox.json",
+                           "UNIT": "units/homebox.service", "SITE": "nginx/site", "LINK": "nginx/enabled",
+                           "LOCK": "lock"}.items():
+            self.stack.enter_context(patch.object(h, name, self.root / path))
+        for path in (h.ROOT, h.CONFIG, h.BACKUPS, h.UNIT.parent, h.SITE.parent):
+            path.mkdir(parents=True, exist_ok=True)
+        self.secret = {"pepper": "p" * 64, "password": "s" * 32}
+        self.stack.enter_context(patch.object(h, "_private_file"))
+        self.value = state(data_path=str(self.root / "data"))
+        # Keep production path validation at the configuration boundary; this
+        # fixture uses temporary data rather than a real /srv tree.
+        self.stack.enter_context(patch.object(h, "validate_homebox_path", side_effect=lambda p: p))
+        self.data = Path(self.value["data_path"])
+        self.data.mkdir()
+        with contextlib.closing(sqlite3.connect(self.data / "homebox.db")) as conn:
+            conn.execute("CREATE TABLE users (email TEXT)")
+            conn.execute("INSERT INTO users VALUES ('owner@example.com')")
+            conn.commit()
+        (self.data / "attachments").mkdir()
+        (self.data / "attachments" / "photo.txt").write_text("original attachment")
+        binary = h.release_path(self.value)
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"binary")
+        (h.CONFIG / "secrets.json").write_text(json.dumps(self.secret))
+        h._save_state(self.value)
+
+class HomeBoxFilesTests(HomeBoxFixture, unittest.TestCase):
+    def test_release_checks_publisher_digest_architecture_and_download(self):
+        source = self.root / "release.tar.gz"
+        with tarfile.open(source, "w:gz") as bundle:
+            member = tarfile.TarInfo("homebox")
+            member.size = 6
+            bundle.addfile(member, io.BytesIO(b"binary"))
+        digest = h._digest(source)
+        for arch, filename in (("amd64", "x86_64"), ("arm64", "arm64")):
+            url = f"https://github.com/sysadminsmedia/homebox/releases/download/v0.26.2/homebox_Linux_{filename}.tar.gz"
+            metadata = {"tag_name": "v0.26.2", "assets": [{"name": f"homebox_Linux_{filename}.tar.gz",
+                        "digest": "sha256:" + digest, "browser_download_url": url}]}
+            def download(*args):
+                Path(args[args.index("--output") + 1]).write_bytes(source.read_bytes())
+            with patch.object(h, "detect_release_arch", return_value=arch), \
+                    patch.object(h, "_request_json", return_value=metadata), patch.object(h, "_command", side_effect=download):
+                verified = h.stage_release("v0.26.2")
+                self.assertEqual(verified["archive_sha256"], digest)
+                self.assertEqual(h.release_path(verified).read_bytes(), b"binary")
+                metadata["assets"][0]["digest"] = "sha256:" + "f" * 64
+                with self.assertRaisesRegex(RuntimeError, "checksum"):
+                    h.stage_release("v0.26.2")
+                metadata["assets"][0]["digest"] = None
+                with self.assertRaises((ValueError, RuntimeError)):
+                    h.stage_release("v0.26.2")
+
+    def test_unit_and_proxy_isolation(self):
+        value = state(domain="inventory.example.com", public_port=443, sources=["192.168.1.0/24"])
+        env = h.render_environment(value, self.secret)
+        self.assertIn('HBOX_OPTIONS_ALLOW_REGISTRATION="false"', env)
+        self.assertIn('HBOX_WEB_HOST="127.0.0.1"', env)
+        self.assertIn("HBOX_DATABASE_SQLITE_PATH", env)
+        unit = h.render_unit(value)
+        for setting in ("User=homebox", "ProtectSystem=strict", "ReadWritePaths=/srv/homebox", "RequiresMountsFor=/srv/homebox"):
+            self.assertIn(setting, unit)
+        self.assertNotIn(self.secret["pepper"], unit)
+        proxy = h.render_nginx(value)
+        self.assertIn("proxy_set_header Upgrade", proxy)
+        self.assertIn("allow 192.168.1.0/24", proxy)
+        self.assertIn("maintenance", proxy)
+        challenge = h.render_nginx(value, challenge=True)
+        self.assertNotIn("proxy_pass", challenge)
+        self.assertIn("return 503", challenge)
+
+    def test_archive_roundtrip_and_restoration(self):
+        archive = h.BACKUPS / "snapshot.tar.gz"
+        h.create_backup(self.value, archive)
+        with self.assertRaises(FileExistsError):
+            h.create_backup(self.value, archive)
+        self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
+        extracted = self.root / "unpacked"
+        extracted.mkdir()
+        restored = h.unpack_backup(archive, extracted)
+        (self.data / "attachments" / "photo.txt").write_text("changed by failed migration")
+        (self.data / "new-file").write_text("new schema artefact")
+        h.release_path(self.value).write_bytes(b"damaged executable")
+        with patch.object(h, "_check_storage"), patch.object(h, "_ensure_account", return_value=SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())), \
+                patch.object(h, "_command"), patch.object(h, "wait_ready"), patch.object(h, "_write_site"):
+            h._restore_unpacked(extracted, restored)
+        self.assertEqual((self.data / "attachments" / "photo.txt").read_text(), "original attachment")
+        self.assertFalse((self.data / "new-file").exists())
+        self.assertEqual(h._secrets(), self.secret)
+        self.assertEqual(h.read_state(), self.value)
+        self.assertEqual(h._database(restored)["users"], 1)
+        self.assertEqual(h.release_path(restored).read_bytes(), b"binary")
+
+    def test_explicit_restore_repairs_missing_secrets_and_corrupt_state(self):
+        archive = h.BACKUPS / "snapshot.tar.gz"
+        h.create_backup(self.value, archive)
+        (h.CONFIG / "secrets.json").unlink()
+        h.STATE.write_text("{")
+        with patch.object(h, "_check_storage"), patch.object(h, "_storage", return_value=self.value["mount"]), \
+                patch.object(h, "_private_dir"), patch.object(h, "_stop_service"), \
+                patch.object(h, "_ensure_account", return_value=SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())), \
+                patch.object(h, "_command"), patch.object(h, "wait_ready"), patch.object(h, "_write_site"):
+            result = h.operate_homebox("restore", str(archive), yes=True)
+        self.assertTrue(result["success"])
+        self.assertIn("damaged-before-restore", result["previous_state_archive"])
+        self.assertTrue(Path(result["previous_state_archive"]).exists())
+        self.assertEqual(h._secrets(), self.secret)
+        self.assertEqual(h.read_state(), self.value)
+
+    def test_unsafe_archives_and_symlink_paths(self):
+        for name, kind in (("../escape", tarfile.REGTYPE), ("/absolute", tarfile.REGTYPE),
+                           ("data/link", tarfile.SYMTYPE), ("data/hard", tarfile.LNKTYPE),
+                           ("data/fifo", tarfile.FIFOTYPE)):
+            with self.subTest(name=name):
+                member = tarfile.TarInfo(name)
+                member.type = kind
+                with self.assertRaises(RuntimeError):
+                    h._validate_members([member])
+        with self.assertRaises(RuntimeError):
+            h._validate_members([tarfile.TarInfo("data/file"), tarfile.TarInfo("data/file")])
+        link = self.data / "link"
+        link.symlink_to(self.root)
+        with self.assertRaises(RuntimeError):
+            h.create_backup(self.value, h.BACKUPS / "unsafe.tar.gz")
+        with self.assertRaises(RuntimeError):
+            h._safe_path(link / "nested")
+
+    def test_corrupt_state_and_missing_secrets_fail_closed(self):
+        h.STATE.write_text("{")
+        with self.assertRaisesRegex(RuntimeError, "corrupt"):
+            h.read_state()
+        (h.CONFIG / "secrets.json").unlink()
+        with self.assertRaisesRegex(RuntimeError, "without rotating"):
+            h._secrets()
+
+    def test_maintenance_requires_explicit_recovery(self):
+        h._maintenance(h.BACKUPS / "recovery.tar.gz")
+        with self.assertRaisesRegex(RuntimeError, "interrupted"):
+            h._require_idle()
+
+    def test_ownership_refuses_unmanaged_files(self):
+        h.UNIT.write_text("[Service]\nExecStart=/custom/service")
+        with self.assertRaisesRegex(RuntimeError, "unmanaged"):
+            h._owned_files()
+
+    def test_existing_binary_tampering_rejected_before_activation(self):
+        h.release_path(self.value).write_bytes(b"tampered")
+        with self.assertRaisesRegex(RuntimeError, "digest mismatch"), patch.object(h, "_command") as command:
+            h._activate_files(self.value)
+        command.assert_not_called()
+
+    def test_readiness_checks_actual_homebox_contract(self):
+        with patch.object(h, "_request_json", return_value={"health": True, "allowRegistration": False, "build": {"version": "0.26.2"}}):
+            h.wait_ready(7745, "v0.26.2")
+        with patch.object(h, "_request_json", return_value={"healthy": True}), patch.object(h.time, "sleep"):
+            with self.assertRaises(RuntimeError):
+                h.wait_ready(7745, "v0.26.2")
+
+    def test_health_does_not_expose_credentials(self):
+        with patch.object(h, "_active", return_value=True), patch.object(h, "_check_storage"), \
+                patch.object(h, "_status", return_value={"health": True, "allowRegistration": False, "build": {"version": "0.26.2"}}), \
+                patch.object(h, "_frontend_ready"):
+            health = h.health_homebox()
+        self.assertTrue(health["healthy"])
+        self.assertNotIn(self.secret["password"], json.dumps(health))
+        self.assertNotIn(self.secret["pepper"], json.dumps(health))
+
+    def test_restore_requires_confirmation_and_compatible_path(self):
+        with self.assertRaisesRegex(ValueError, "--yes"):
+            h.operate_homebox("restore", "/srv/snapshot.tar.gz")
+        with patch.object(h, "homebox_lock", side_effect=AssertionError("mutation")):
+            self.assertTrue(h.operate_homebox("backup", "/srv/snapshot.tar.gz", dry_run=True)["dry_run"])
+
+    def test_bootstrap_never_enables_registration_in_permanent_environment(self):
+        calls = []
+        def command(*args):
+            calls.append(args)
+            if args[0] == "systemd-run":
+                text = (h.CONFIG / "bootstrap.env").read_text()
+                self.assertIn('HBOX_OPTIONS_ALLOW_REGISTRATION="true"', text)
+                self.assertIn("--property=RuntimeMaxSec=90", args)
+        with patch.object(h, "_command", side_effect=command), patch.object(h, "wait_ready"), \
+                patch.object(h, "_database", side_effect=[{"users": 0}, {"users": 1}]), \
+                patch.object(h, "_request_json", side_effect=[None, {"token": "private-token"}]):
+            h._bootstrap(self.value)
+        self.assertFalse((h.CONFIG / "bootstrap.env").exists())
+        self.assertEqual(calls[-1], ("systemctl", "stop", "infra-tools-homebox-bootstrap.service"))
+        self.assertNotIn(self.secret["password"], str(calls))
+
+
+class HomeBoxTransactionTests(HomeBoxFixture, unittest.TestCase):
+    def fixture_setup(self, failure=None):
+        desired_config = config(homebox=[":7745", self.value["data_path"]], homebox_version="v0.26.3")
+        self.stack.enter_context(patch.object(h, "validate_homebox_settings"))
+        self.stack.enter_context(patch.object(h, "can_manage_system_services", return_value=True))
+        self.stack.enter_context(patch.object(h, "_storage", return_value=self.value["mount"]))
+        self.stack.enter_context(patch.object(h, "_check_storage"))
+        self.stack.enter_context(patch.object(h, "_private_dir"))
+        self.stack.enter_context(patch.object(h, "_ensure_account", return_value=SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())))
+        self.stack.enter_context(patch.object(h, "install_package", return_value=True))
+        self.stack.enter_context(patch.object(h, "_active", return_value=True))
+        self.stack.enter_context(patch.object(h, "_owned_files"))
+        self.stack.enter_context(patch.object(h, "_command"))
+        self.stack.enter_context(patch.object(h, "_stop_service"))
+        self.stack.enter_context(patch.object(h, "_remove_acme_rule"))
+        self.stack.enter_context(patch.object(h, "stage_release", return_value={k: {**self.value, "version": "v0.26.3"}[k] for k in ("version", "archive_sha256", "binary_sha256")}))
+        self.stack.enter_context(patch.object(h, "_activate_files"))
+        self.stack.enter_context(patch.object(h, "_write_site"))
+        self.stack.enter_context(patch.object(h, "wait_ready", side_effect=failure))
+        self.stack.enter_context(patch.object(h, "_frontend_ready"))
+        h.UNIT.write_text(h.MARKER)
+        return desired_config
+
+    def test_failed_activation_restores_full_snapshot_before_clearing_marker(self):
+        cfg = self.fixture_setup(RuntimeError("bad migration"))
+        events = []
+        def recover(archive):
+            self.assertTrue((h.CONFIG / "maintenance").exists())
+            self.assertTrue(archive.exists())
+            events.append("recover")
+        with patch.object(h, "_recover", side_effect=recover), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, "bad migration"):
+                h.setup_homebox(cfg)
+        self.assertEqual(events, ["recover"])
+        self.assertFalse((h.CONFIG / "maintenance").exists())
+        self.assertEqual(h.read_state()["version"], "v0.26.2")
+
+    def test_failed_recovery_retains_marker_and_archive(self):
+        cfg = self.fixture_setup(RuntimeError("bad migration"))
+        with patch.object(h, "_recover", side_effect=RuntimeError("disk failed")), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, "recovery failed"):
+                h.setup_homebox(cfg)
+        marker = json.loads((h.CONFIG / "maintenance").read_text())
+        self.assertTrue(Path(marker["backup"]).exists())
+
+    def test_failure_after_reopening_ingress_does_not_roll_back_inventory(self):
+        cfg = self.fixture_setup()
+        with patch.object(h, "_frontend_ready", side_effect=[None, RuntimeError("TLS probe failed")]), \
+                patch.object(h, "_recover") as recover, contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, "TLS probe failed"):
+                h.setup_homebox(cfg)
+        recover.assert_not_called()
+        self.assertEqual(h.read_state()["version"], "v0.26.3")
+
+    def test_failed_tls_before_ingress_restores_snapshot(self):
+        cfg = self.fixture_setup()
+        with patch.object(h, "_frontend_ready", side_effect=RuntimeError("invalid certificate")), \
+                patch.object(h, "_recover") as recover:
+            with self.assertRaisesRegex(RuntimeError, "invalid certificate"):
+                h.setup_homebox(cfg)
+        recover.assert_called_once()
+        self.assertEqual(h.read_state()["version"], "v0.26.2")
+
+    def test_healthy_rerun_retains_version_without_release_lookup(self):
+        cfg = self.fixture_setup()
+        cfg.homebox_version = None
+        with patch.object(h, "_files_match", return_value=True), patch.object(h, "stage_release") as stage, \
+                patch.object(h, "create_backup") as backup, contextlib.redirect_stdout(io.StringIO()):
+            h.setup_homebox(cfg)
+        stage.assert_not_called()
+        backup.assert_not_called()
+        self.assertEqual(h._secrets(), self.secret)
+
+    def test_downgrade_requires_full_restore(self):
+        cfg = self.fixture_setup()
+        h._save_state({**self.value, "version": "v0.26.3"})
+        cfg.homebox_version = "v0.26.2"
+        with patch.object(h, "stage_release") as stage, self.assertRaisesRegex(ValueError, "downgrades"):
+            h.setup_homebox(cfg)
+        stage.assert_not_called()
+
+    def test_disable_can_be_repeated_after_unit_removal(self):
+        cfg = self.fixture_setup()
+        cfg.homebox = []
+        with patch.object(h, "_command") as command, contextlib.redirect_stdout(io.StringIO()):
+            h.setup_homebox(cfg)
+            self.assertFalse(h.UNIT.exists())
+            command.reset_mock()
+            h.setup_homebox(cfg)
+        self.assertNotIn(("systemctl", "disable", h.SERVICE), [call.args for call in command.call_args_list])
+        self.assertEqual(h.read_state()["status"], "disabled")
+        self.assertTrue((self.data / "homebox.db").exists())
+
+    def test_snapshot_failure_does_not_run_new_binary(self):
+        cfg = self.fixture_setup()
+        with patch.object(h, "create_backup", side_effect=OSError("disk full")), patch.object(h, "_activate_files") as activate:
+            with self.assertRaises(OSError):
+                h.setup_homebox(cfg)
+        activate.assert_not_called()
+        self.assertFalse((h.CONFIG / "maintenance").exists())
+
+
+class HomeBoxCLITests(unittest.TestCase):
+    def test_health_json_and_unhealthy_exit_code(self):
+        args = argparse.Namespace(host="inventory.example.com", username="operator", ssh_key=None,
+                                  homebox_command="health", json=True)
+        with patch("lib.homebox_cli.load_setup_command", return_value=None), \
+                patch("lib.homebox_cli.build_ssh_command", return_value=["ssh", "host"]) as ssh, \
+                patch("lib.homebox_cli.subprocess.run", return_value=subprocess.CompletedProcess([], 1, '{"healthy":false}', "")), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(run_homebox_command(args), 1)
+        self.assertFalse(json.loads(output.getvalue())["healthy"])
+        self.assertIn("sudo -n python3 -m web.homebox_steps health", ssh.call_args.kwargs["remote_command"])
+
+    def test_backup_dry_run_and_restore_consent_do_not_connect(self):
+        for action, dry_run, expected in (("backup", True, 0), ("restore", False, 1)):
+            args = argparse.Namespace(host="inventory.example.com", username=None, ssh_key=None, homebox_command=action,
+                                      path="/srv/backup.tar.gz", dry_run=dry_run, yes=False, json=False)
+            with patch("lib.homebox_cli.load_setup_command", return_value=None), patch("lib.homebox_cli.subprocess.run") as remote, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(run_homebox_command(args), expected)
+                remote.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
+from lib.homebox_config import validate_homebox_settings
 from lib.display import print_setup_summary
 from lib.machine_state import (
     STATE_DIR,
@@ -353,6 +354,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     validate_samba_share_credentials(config)
     validate_smb_mount_specs(config.smb_mounts)
     validate_gogs_settings(config)
+    validate_homebox_settings(config)
     validate_swap_settings(config)
     validate_vm_storage_settings(config, require_provisioning=False)
     validate_network_setup_settings(config)

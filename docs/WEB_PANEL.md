@@ -165,6 +165,10 @@ The panel renders configured access from saved setup state and discovers live
 `infra-web` forwards and static sites at page load. When the shared gateway is
 installed, its landing page is linked before individual sites are published.
 
+Hostname-based [HomeBox](HOMEBOX.md) installations add an inventory link.
+Loopback-only HomeBox installations do not add an unusable remote link. The
+panel contains no HomeBox credentials or inventory administration actions.
+
 T3 Code machines receive an **Update to latest** action. The action runs the
 supported user-service updater and readiness checks for the service, runtime,
 endpoint, pairing, and managed skills. Git identity and GitHub authentication

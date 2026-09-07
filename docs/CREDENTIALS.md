@@ -6,6 +6,7 @@ they have different storage, rotation, and sharing rules.
 | Credential | Used for | Manage it with |
 | --- | --- | --- |
 | Workspace password | Syncthing administration, initial Gogs administration, Samba, SMB mounts, and managed non-GitHub Git origins | `infra-tools credentials` |
+| HomeBox initial password and API-key pepper | Inventory login and API-key verification | Target-only `/etc/homebox/secrets.json`; see [HomeBox](HOMEBOX.md) for recovery |
 | GitHub CLI authentication | Private GitHub repositories and `gh` | Git or agent auth options |
 | Coding-agent authentication | Codex, Claude Code, and OpenCode | Agent auth options |
 | Target account password | Unix login and optional RDP login | `--password` or a hidden setup prompt |

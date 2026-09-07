@@ -62,6 +62,9 @@ infra-tools agent maintenance <hold|status|release> [HOST USER] [options]
 infra-tools agent support-bundle [--output PATH] [--browser-smoke]
 infra-tools gogs health HOST [--json] [--min-free-bytes N] [--min-free-inodes N]
 infra-tools gogs repo-configure [REPOSITORY] --github-url URL --gogs-url URL [options]
+infra-tools homebox health HOST [--json]
+infra-tools homebox backup HOST /absolute/target/archive.tar.gz [--dry-run]
+infra-tools homebox restore HOST /absolute/target/archive.tar.gz --yes [--dry-run]
 infra-tools cicd connect BUILD APP [options]
 infra-tools cicd status BUILD [--json]
 infra-tools cicd test BUILD TARGET
@@ -1138,6 +1141,28 @@ repositories, or configures credentials. `--no-combined-push` configures only
 GitHub as the `origin` push URL so the Gogs Git remote can be updated
 explicitly. See [Gogs Git service](./GOGS.md) for the storage, credential, and
 off-network clone boundaries.
+
+## HomeBox
+
+See [HomeBox inventory](HOMEBOX.md) for onboarding, storage, credentials,
+updates, and recovery. One native systemd instance is supported per server.
+
+| Flag | Description |
+| --- | --- |
+| `--homebox DOMAIN[:PORT] [DATA_PATH]` | HTTPS hostname (frontend default 443; requires `--ssl`), or `:PORT` for SSH-tunnel access; data defaults to `/var/lib/homebox` |
+| `--homebox-port PORT` | Hostname mode's loopback backend port, default 7745 |
+| `--homebox-admin EMAIL` | Initial owner email, default `admin@homebox.local`; target generates the password |
+| `--homebox-version TAG` | Explicit stable release, minimum/default `v0.26.2`; ordinary reruns retain the installed release |
+| `--no-homebox` | Disable service and remove its ingress while retaining data, secrets, releases, and backups |
+
+Health, backup, and restore accept `--username`, `--key`, `--workspace`, and
+`--json`. They inherit saved SSH settings; use `--username root` unless the
+selected user has non-interactive sudo. Archive paths refer to the target.
+Backup and restore stop the service; restore requires `--yes`. A dry run
+validates command intent without connecting. Health exits nonzero for an
+unhealthy or incomplete installation and probes HTTPS locally, so it does not
+verify external DNS or routing. Automatic updates and Cloudflare ingress are
+not supported in this initial version.
 
 ## Storage and data movement
 
