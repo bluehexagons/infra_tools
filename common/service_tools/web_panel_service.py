@@ -35,6 +35,7 @@ from common.service_tools.web_panel_diagnostics import (
     parse_query as parse_diagnostic_query,
     render_diagnostics,
 )
+from common.service_tools.web_panel_jobs import parse_job_query, render_jobs
 from common.web_panel_events import (
     WEB_PANEL_AUDIT_SNAPSHOT,
     WEB_PANEL_INGEST_TOKEN,
@@ -890,6 +891,11 @@ select, .diagnostic-filters input { display: block; width: 100%; min-height: 44p
 select:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .sidebar a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
 .metric a { display: inline-block; min-height: 44px; padding-top: 10px; color: var(--accent); font-size: .85rem; }
+.job-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; }
+.job-facts dt { color: var(--muted); font-size: .85rem; }
+.job-facts dd { margin: 4px 0 0; }
+.job-load { margin-bottom: 14px; }
+.badge.success { color: var(--ok); }
 header { margin-bottom: 36px; }
 .eyebrow, .section-kicker {
   margin: 0 0 6px;
@@ -1660,6 +1666,7 @@ def render_page(state: WebPanelState) -> str:
         navigation.append(("maintenance-heading", "Maintenance"))
     nav_links = "".join(f'<a href="#{target}">{label}</a>' for target, label in navigation)
     nav_links += '<a href="/logs">Service diagnostics</a>'
+    nav_links += '<a href="/jobs">Scheduled jobs</a>'
 
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -1741,6 +1748,18 @@ class WebPanelHandler(BaseHTTPRequestHandler):
             self._send(
                 HTTPStatus.OK,
                 render_diagnostics(query, _PAGE_STYLE, self.state.manifest["host"]),
+                "text/html",
+            )
+            return
+        if path == "/jobs":
+            try:
+                load = parse_job_query(parsed.query)
+            except ValueError:
+                self._send(HTTPStatus.BAD_REQUEST, "Invalid scheduled job query\n", "text/plain")
+                return
+            self._send(
+                HTTPStatus.OK,
+                render_jobs(load, _PAGE_STYLE, self.state.manifest["host"]),
                 "text/html",
             )
             return

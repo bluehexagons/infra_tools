@@ -11,6 +11,7 @@ not installed unless `--web-panel` is selected.
 | Notifications | Events accepted from other machines when ingest is enabled |
 | Maintenance | Only fixed actions supported by software on that machine |
 | Service diagnostics | On-demand runtime details and filtered local journal entries |
+| Scheduled jobs | On-demand maintenance schedules, last runs, and job-log links |
 
 Section links form a sidebar on desktop and wrap above the dashboard on mobile.
 The overview comes first; **Refresh dashboard** requests a new page (host and
@@ -182,6 +183,29 @@ data, or credentials, and do not prove public connectivity or application
 readiness. Services owned by other users are outside the user-service snapshot.
 The panel's own service is included, and **Inspect service** opens its
 diagnostics form without starting a log query.
+
+### Inspect scheduled maintenance
+
+Open **Scheduled jobs** (`/jobs`) and select **Load scheduled jobs** to inspect
+the installed managed timers. Opening the page itself does no collection.
+The screen covers package and application updates, security monitoring, the
+audit exporter, restart checks, cleanup, and storage operations. It shows timer
+state, boot enablement, next and previous triggers, process start and finish,
+last service result, exit status, and whether missed calendar runs are caught up.
+
+Failed jobs and inactive timers appear first. An inactive job service is normal
+between runs; a default `success` value without a recorded start is shown as
+**No run recorded**. Missing timers are counted separately from unreadable
+timer information. This is current systemd state, not durable job history or
+proof that a backup or update completed its intended work. Times use the host
+timezone, and interval-based deadlines are approximate. Results may reset after
+a reboot or service-manager reload.
+
+**Inspect job logs** opens diagnostics with that job and all priorities over
+the last 24 hours selected; logs still load only after submission. Scheduled
+job collection uses one fixed, read-only `systemctl show` request, limited to
+five seconds and 64 KiB. One collection can run at a time. Arbitrary timers,
+cron jobs, and timers owned by other users are outside this view.
 
 ### Inspect service logs
 

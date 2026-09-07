@@ -28,10 +28,23 @@ SYSTEM_UNITS = {
     "auditd.service": "System audit",
     "infra-tools-web-panel.service": "Web panel",
 }
-SOURCES = {
-    **SYSTEM_UNITS,
+JOB_SERVICES = {
     "infra-tools-web-panel-audit.service": "Audit snapshot exporter",
     "auto-update-apt.service": "Package updates",
+    "auto-update-uv.service": "uv updates",
+    "auto-update-node.service": "Node.js updates",
+    "auto-update-gogs.service": "Gogs updates",
+    "auto-update-homebox.service": "HomeBox updates",
+    "auto-update-godot.service": "Godot updates",
+    "security-monitor.service": "Security monitoring",
+    "auto-restart-if-needed.service": "Automatic restart check",
+    "cleanup-maintenance.service": "System cleanup",
+    "user-cache-maintenance.service": "User cache cleanup",
+    "storage-ops.service": "Storage operations",
+}
+SOURCES = {
+    **SYSTEM_UNITS,
+    **JOB_SERVICES,
     "t3code.service": "T3 Code (current user)",
 }
 WINDOWS = {"1h": "Last hour", "24h": "Last 24 hours", "boot": "Current boot"}
@@ -245,7 +258,7 @@ def render_diagnostics(query: DiagnosticQuery, style: str, host: str) -> str:
 <title>Service diagnostics · {html.escape(host)}</title><style>{style}</style></head><body>
 <a class="skip-link" href="#main">Skip to content</a>
 <nav class="sidebar" aria-label="Panel sections"><strong>infra-tools</strong><div class="nav-links">
-<a href="/">Dashboard</a><a href="/#services-heading">Services</a><a href="/#audit-heading">Security activity</a><a href="/logs" aria-current="page">Service diagnostics</a></div></nav>
+<a href="/">Dashboard</a><a href="/#services-heading">Services</a><a href="/#audit-heading">Security activity</a><a href="/jobs">Scheduled jobs</a><a href="/logs" aria-current="page">Service diagnostics</a></div></nav>
 <main id="main" tabindex="-1"><header><p class="eyebrow">infra-tools web panel</p><h1>Service diagnostics</h1>
 <p class="lede">Inspect runtime details and recent logs on <code>{html.escape(host)}</code>.</p></header>
 <form class="diagnostic-filters" method="get" action="/logs">
