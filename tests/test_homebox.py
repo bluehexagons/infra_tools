@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import sqlite3
 import subprocess
 import tarfile
@@ -149,8 +150,85 @@ class HomeBoxFixture:
         binary.write_bytes(b"binary")
         (h.CONFIG / "secrets.json").write_text(json.dumps(self.secret))
         h._save_state(self.value)
+        with patch.object(h, "_command"):
+            h._activate_files(self.value)
 
 class HomeBoxFilesTests(HomeBoxFixture, unittest.TestCase):
+    def test_database_probe_uses_owner_identity_for_wal_sidecars(self):
+        owner = (self.data / "homebox.db").stat()
+        with patch.object(h.os, "geteuid", return_value=owner.st_uid + 1), \
+                patch.object(h.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, '{"integrity":"ok","users":1}', "")) as probe, \
+                patch.object(h.sqlite3, "connect") as root_probe:
+            self.assertEqual(h._database(self.value)["users"], 1)
+        root_probe.assert_not_called()
+        self.assertEqual(probe.call_args.kwargs["user"], owner.st_uid)
+        self.assertEqual(probe.call_args.kwargs["group"], owner.st_gid)
+        self.assertEqual(probe.call_args.kwargs["extra_groups"], [])
+        self.assertEqual(probe.call_args.kwargs["umask"], 0o077)
+        self.assertEqual(set(probe.call_args.kwargs["env"]), {"PATH", "LANG"})
+
+    def test_backup_refuses_damaged_binary_or_database(self):
+        archive = h.BACKUPS / "damaged.tar.gz"
+        h.release_path(self.value).write_bytes(b"damaged")
+        with self.assertRaisesRegex(RuntimeError, "damaged HomeBox executable"):
+            h.create_backup(self.value, archive)
+        h.release_path(self.value).write_bytes(b"binary")
+        (self.data / "homebox.db").write_bytes(b"damaged database")
+        with self.assertRaises(sqlite3.DatabaseError):
+            h.create_backup(self.value, archive)
+        self.assertFalse(archive.exists())
+
+    def test_stopped_backup_repairs_legacy_root_owned_sidecars(self):
+        sidecars = [self.data / "homebox.db-wal", self.data / "homebox.db-shm"]
+        for path in sidecars:
+            path.touch()
+        original_stat = Path.stat
+        owner = (self.data / "homebox.db").stat()
+        def observed_stat(path, *args, **kwargs):
+            info = original_stat(path, *args, **kwargs)
+            fields = list(info)
+            if path in sidecars:
+                fields[4] = 0
+            elif path == self.data / "homebox.db":
+                fields[4] = 1234
+            return os.stat_result(fields)
+        with patch.object(Path, "stat", observed_stat), patch.object(h.os, "chown") as chown, \
+                patch.object(h, "_database", return_value={"users": 1, "integrity": "ok"}):
+            h.create_backup(self.value, h.BACKUPS / "repaired.tar.gz")
+        self.assertEqual([call.args for call in chown.call_args_list],
+                         [(path, 1234, owner.st_gid) for path in sidecars])
+
+    def test_hardlinked_attachments_produce_restorable_regular_members(self):
+        os.link(self.data / "attachments/photo.txt", self.data / "attachments/copy.txt")
+        archive = h.BACKUPS / "hardlinks.tar.gz"
+        h.create_backup(self.value, archive)
+        extracted = self.root / "unpacked"
+        extracted.mkdir()
+        h.unpack_backup(archive, extracted)
+        self.assertEqual((extracted / "data/attachments/copy.txt").read_text(), "original attachment")
+
+    def test_restore_keeps_maintenance_when_https_verification_fails(self):
+        value = {**self.value, "domain": "inventory.example.com", "public_port": 443}
+        archive = h.BACKUPS / "snapshot.tar.gz"
+        h.create_backup(value, archive)
+        with patch.object(h, "_check_storage"), patch.object(h, "_private_dir"), patch.object(h, "_stop_service"), \
+                patch.object(h, "_ensure_account", return_value=SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())), \
+                patch.object(h, "_command"), patch.object(h, "wait_ready"), patch.object(h, "_write_site"), \
+                patch.object(h, "_frontend_ready", side_effect=RuntimeError("TLS failed")) as frontend:
+            with self.assertRaisesRegex(RuntimeError, "TLS failed"):
+                h.operate_homebox("restore", str(archive), yes=True)
+        self.assertTrue((h.CONFIG / "maintenance").exists())
+        self.assertTrue(frontend.call_args.kwargs["maintenance"])
+
+    def test_health_detects_configuration_drift_without_exposing_environment(self):
+        with patch.object(h, "_active", return_value=True), patch.object(h, "_check_storage"):
+            h.UNIT.write_text(h.render_unit(self.value) + "# unexpected change\n")
+            health = h.health_homebox()
+        self.assertFalse(health["healthy"])
+        self.assertFalse(health["configuration_matches"])
+        self.assertIn("drifted", health["error"])
+        self.assertNotIn(self.secret["pepper"], json.dumps(health))
+
     def test_release_checks_publisher_digest_architecture_and_download(self):
         source = self.root / "release.tar.gz"
         with tarfile.open(source, "w:gz") as bundle:
@@ -231,6 +309,30 @@ class HomeBoxFilesTests(HomeBoxFixture, unittest.TestCase):
         self.assertTrue(Path(result["previous_state_archive"]).exists())
         self.assertEqual(h._secrets(), self.secret)
         self.assertEqual(h.read_state(), self.value)
+
+    def test_restore_recovers_a_deleted_data_directory(self):
+        archive = h.BACKUPS / "snapshot.tar.gz"
+        h.create_backup(self.value, archive)
+        shutil.rmtree(self.data)
+        with patch.object(h, "_storage", return_value=self.value["mount"]), \
+                patch.object(h, "_private_dir"), patch.object(h, "_stop_service"), \
+                patch.object(h, "_ensure_account", return_value=SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())), \
+                patch.object(h, "_command"), patch.object(h, "wait_ready"), patch.object(h, "_write_site"):
+            result = h.operate_homebox("restore", str(archive), yes=True)
+        self.assertTrue(result["success"])
+        self.assertEqual(h._database(self.value)["users"], 1)
+
+    def test_restore_refuses_archive_that_replacement_would_delete(self):
+        archive = h.BACKUPS / "snapshot.tar.gz"
+        h.create_backup(self.value, archive)
+        inside = self.data / "snapshot.tar.gz"
+        shutil.copyfile(archive, inside)
+        with patch.object(h, "_check_storage"), patch.object(h, "_private_dir"), \
+                patch.object(h, "_stop_service") as stop:
+            with self.assertRaisesRegex(ValueError, "outside HomeBox live data"):
+                h.operate_homebox("restore", str(inside), yes=True)
+        stop.assert_not_called()
+        self.assertTrue(inside.exists())
 
     def test_unsafe_archives_and_symlink_paths(self):
         for name, kind in (("../escape", tarfile.REGTYPE), ("/absolute", tarfile.REGTYPE),
@@ -405,6 +507,22 @@ class HomeBoxTransactionTests(HomeBoxFixture, unittest.TestCase):
         self.assertNotIn(("systemctl", "disable", h.SERVICE), [call.args for call in command.call_args_list])
         self.assertEqual(h.read_state()["status"], "disabled")
         self.assertTrue((self.data / "homebox.db").exists())
+
+    def test_disabling_incomplete_installation_preserves_bootstrap_on_reenable(self):
+        cfg = self.fixture_setup()
+        h._save_state({**self.value, "status": "prepared"})
+        (self.data / "homebox.db").unlink()
+        cfg.homebox = []
+        with contextlib.redirect_stdout(io.StringIO()):
+            h.setup_homebox(cfg)
+        self.assertTrue(h.read_state()["bootstrap_pending"])
+        cfg.homebox = [":7745", self.value["data_path"]]
+        with patch.object(h, "_bootstrap") as bootstrap, \
+                patch.object(h, "_database", return_value={"users": 1}), contextlib.redirect_stdout(io.StringIO()):
+            h.setup_homebox(cfg)
+        bootstrap.assert_called_once()
+        self.assertEqual(h.read_state()["status"], "ready")
+        self.assertFalse(h._needs_bootstrap(h.read_state()))
 
     def test_snapshot_failure_does_not_run_new_binary(self):
         cfg = self.fixture_setup()

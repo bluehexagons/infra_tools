@@ -90,7 +90,11 @@ enrolled through the normal infra-tools workflow.
 
 Health checks service activity, maintenance state, mount identity, free space,
 SQLite integrity and users, secrets, executable digest, API version,
-registration policy, and the configured HTTPS frontend. The HTTPS probe runs
+registration policy, generated configuration and environment permissions, and
+the configured HTTPS frontend. SQLite probes run as the database owner so they
+cannot leave root-owned WAL files that prevent the application from restarting.
+Rerun setup to reconcile configuration drift; a stopped-service backup also
+repairs root-owned SQLite sidecars left by earlier probes. The HTTPS probe runs
 on the target and verifies its certificate; it does not prove public DNS,
 external firewall reachability, or an authenticated browser session.
 
@@ -125,8 +129,10 @@ infra-tools homebox restore inventory-host \
 ```
 
 The destination directory must already exist. Backup refuses to overwrite a
-file or write inside live data. It publishes the final archive only after
-writing and syncing it. Archives contain SQLite and its sidecars, attachments,
+file or write inside live data. It verifies the executable digest and initialized
+database before publishing an archive. Hard-linked attachments are stored as
+independent regular files so the archive remains restorable. It publishes the
+final archive only after writing and syncing it. Archives contain SQLite and its sidecars, attachments,
 secrets, non-secret configuration metadata, and the matching binary. Generated
 environment, unit, and proxy configuration are rebuilt during restore.
 Certificates remain under Certbot rather than in these archives.
@@ -150,7 +156,11 @@ Restore validates the archive before replacing data and preserves a
 it instead preserves a `damaged-before-restore` archive of raw files for manual
 recovery; that archive is not a validated input to the restore command.
 Use `--json` to see the preserved archive path. Restore can repair corrupt
-management state, missing secrets, or a damaged binary from a valid backup.
+management state, missing secrets, a deleted data directory, or a damaged binary
+from a valid backup. The input archive must be outside the live data directory
+so replacing inventory cannot delete the recovery source. Restore and upgrade
+rollback verify HTTPS while the maintenance gate still blocks public requests;
+a failed TLS probe keeps that gate in place.
 
 An interrupted mutation leaves `/etc/homebox/maintenance` with the recovery
 archive path. Inspect it and explicitly restore that archive before retrying
@@ -182,7 +192,9 @@ infra-tools patch inventory-host --no-homebox
 
 Disabling stops the application and removes its unit and Nginx ingress while
 retaining inventory, credentials, releases, and archives. Re-enable by
-supplying the original `--homebox` settings. Shared Nginx/Certbot packages and
+supplying the original `--homebox` settings. If initial onboarding had not
+completed before disabling, re-enabling still performs the private bootstrap.
+Shared Nginx/Certbot packages and
 certificates remain installed. Permanent deletion is a separate manual task.
 
 This initial support excludes Cloudflare, containers, PostgreSQL, external

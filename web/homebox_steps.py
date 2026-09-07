@@ -23,6 +23,7 @@ import shutil
 import socket
 import sqlite3
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -138,6 +139,10 @@ def validate_state(value: Any) -> dict:
         raise ValueError("Invalid HomeBox backend port")
     if value.get("status") not in {"prepared", "ready", "disabled"}:
         raise ValueError("Invalid HomeBox lifecycle state")
+    if type(value.get("bootstrap_pending", False)) is not bool:
+        raise ValueError("Invalid HomeBox bootstrap state")
+    if value.get("bootstrap_pending") and value["status"] != "disabled":
+        raise ValueError("Pending disabled bootstrap has an invalid lifecycle state")
     validate_ssl_email(value.get("email"))
     if not isinstance(value.get("email"), str) or not value["email"]:
         raise ValueError("Missing HomeBox initial email")
@@ -269,6 +274,8 @@ def _check_storage(value: dict) -> None:
     path = Path(value["data_path"])
     if _storage(path) != value["mount"]:
         raise RuntimeError("HomeBox backing mount changed or is missing; restore the expected mount")
+    while not path.exists():
+        path = path.parent
     if shutil.disk_usage(path).free < 256 * 1024 * 1024:
         raise RuntimeError("HomeBox requires at least 256 MiB free on its data filesystem")
 
@@ -482,6 +489,27 @@ def wait_ready(port: int, version: str, *, registration: bool = False) -> None:
 def _database(value: dict) -> dict:
     database = Path(value["data_path"]) / "homebox.db"
     _safe_path(database)
+    owner = database.stat()
+    if owner.st_uid != os.geteuid():
+        # SQLite mode=ro can still create WAL/SHM files. Probe live inventory
+        # as its owner so observing a stopped service cannot break its restart.
+        result = subprocess.run([
+            sys.executable, "-I", "-c",
+            "import json,sqlite3,sys; from pathlib import Path; "
+            "c=sqlite3.connect(Path(sys.argv[1]).as_uri()+'?mode=ro',uri=True,timeout=5); "
+            "integrity=c.execute('PRAGMA quick_check').fetchone()[0]; "
+            "users=c.execute('SELECT count(*) FROM users').fetchone()[0]; c.close(); "
+            "print(json.dumps({'integrity':integrity,'users':users}))",
+            str(database),
+        ], user=owner.st_uid, group=owner.st_gid, extra_groups=[], umask=0o077, cwd="/",
+            env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+            capture_output=True, text=True, check=False, timeout=15)
+        if result.returncode:
+            raise RuntimeError("HomeBox database could not be checked as its owner")
+        observed = json.loads(result.stdout)
+        if observed.get("integrity") != "ok":
+            raise RuntimeError("HomeBox database integrity check failed")
+        return observed
     with contextlib.closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=5)) as connection:
         if connection.execute("PRAGMA quick_check").fetchone() != ("ok",):
             raise RuntimeError("HomeBox database integrity check failed")
@@ -537,6 +565,10 @@ def _archive_add(bundle: tarfile.TarFile, name: str, value: dict) -> None:
     bundle.addfile(member, io.BytesIO(body))
 
 
+def _needs_bootstrap(value: dict) -> bool:
+    return value["status"] == "prepared" or value.get("bootstrap_pending", False)
+
+
 def create_backup(value: dict, destination: Path) -> None:
     """Archive stopped state; callers hold the lock and stop the service."""
     _safe_path(destination)
@@ -544,6 +576,26 @@ def create_backup(value: dict, destination: Path) -> None:
     validate_filesystem_path(str(destination))
     if not destination.is_absolute() or paths_overlap(str(destination), value["data_path"]):
         raise ValueError("HomeBox backup must be an absolute path outside live data")
+    validate_state(value)
+    secret = _secrets()
+    if _digest(release_path(value)) != value["binary_sha256"]:
+        raise RuntimeError("Cannot back up a damaged HomeBox executable")
+    database = Path(value["data_path"]) / "homebox.db"
+    _safe_path(database)
+    if database.exists():
+        owner = database.stat()
+        for suffix in ("-wal", "-shm"):
+            sidecar = database.with_name(database.name + suffix)
+            _safe_path(sidecar)
+            if sidecar.exists() and sidecar.stat().st_uid == 0 and owner.st_uid != 0:
+                # Repair sidecars left by older root-run health probes, only
+                # while the service is stopped under the operation lock.
+                if not sidecar.is_file():
+                    raise RuntimeError("Invalid HomeBox SQLite sidecar")
+                os.chown(sidecar, owner.st_uid, owner.st_gid)
+                sidecar.chmod(0o600)
+    if not _needs_bootstrap(value) and _database(value)["users"] < 1:
+        raise RuntimeError("Cannot back up HomeBox without an initialized user database")
     data = Path(value["data_path"])
     paths = [data, *data.rglob("*")]
     if any(p.is_symlink() or not (p.is_file() or p.is_dir()) for p in paths):
@@ -556,9 +608,9 @@ def create_backup(value: dict, destination: Path) -> None:
     descriptor, staging = tempfile.mkstemp(prefix=".homebox-backup-", dir=destination.parent)
     try:
         with os.fdopen(descriptor, "wb") as stream:
-            with tarfile.open(fileobj=stream, mode="w:gz") as bundle:
+            with tarfile.open(fileobj=stream, mode="w:gz", dereference=True) as bundle:
                 _archive_add(bundle, "state.json", value)
-                _archive_add(bundle, "secrets.json", _secrets())
+                _archive_add(bundle, "secrets.json", secret)
                 bundle.add(release_path(value), arcname="homebox", recursive=False)
                 for path in paths:
                     bundle.add(path, arcname=str(Path("data") / path.relative_to(data)), recursive=False)
@@ -602,7 +654,7 @@ def unpack_backup(archive: Path, destination: Path) -> dict:
         raise RuntimeError("Backup HomeBox secrets are invalid")
     if not (destination / "data").is_dir():
         raise RuntimeError("Backup is missing HomeBox data")
-    if value["status"] != "prepared":
+    if not _needs_bootstrap(value):
         _database({**value, "data_path": str(destination / "data")})
     return value
 
@@ -611,6 +663,8 @@ def _restore_unpacked(directory: Path, value: dict) -> None:
     data = Path(value["data_path"])
     _check_storage(value)
     account = _ensure_account()
+    _safe_path(data)
+    data.mkdir(mode=0o700, parents=True, exist_ok=True)
     required = sum(p.stat().st_size for p in (directory / "data").rglob("*") if p.is_file())
     if shutil.disk_usage(data).free < required + 256 * 1024 * 1024:
         raise RuntimeError("Insufficient space to restore HomeBox data")
@@ -640,6 +694,7 @@ def _restore_unpacked(directory: Path, value: dict) -> None:
         _command("systemctl", "enable", "--now", SERVICE)
         wait_ready(value["port"], value["version"])
         _write_site(render_nginx(value) if value["domain"] else None)
+        _frontend_ready(value, maintenance=True)
     else:
         _command("systemctl", "disable", "--now", SERVICE)
         _write_site(None)
@@ -710,6 +765,10 @@ def _frontend_ready(value: dict, *, maintenance: bool = False) -> None:
 
 def _files_match(value: dict) -> bool:
     """A healthy process is insufficient if managed configuration has drifted."""
+    try:
+        _private_file(CONFIG / "homebox.env")
+    except (OSError, ValueError, RuntimeError):
+        return False
     expected = {UNIT: render_unit(value), CONFIG / "homebox.env": render_environment(value, _secrets())}
     if value["domain"]:
         expected[SITE] = render_nginx(value)
@@ -746,7 +805,7 @@ def setup_homebox(config) -> None:
                 _remove_acme_rule()
             UNIT.unlink(missing_ok=True)
             _command("systemctl", "daemon-reload")
-            _save_state({**previous, "status": "disabled"})
+            _save_state({**previous, "status": "disabled", "bootstrap_pending": _needs_bootstrap(previous)})
             remove_file_durable(str(CONFIG / "maintenance"))
             print("  HomeBox disabled; inventory, secrets, backups, and releases retained")
             return
@@ -815,7 +874,7 @@ def setup_homebox(config) -> None:
         exposed = False
         try:
             _activate_files(desired)
-            if previous["status"] == "prepared":
+            if _needs_bootstrap(previous):
                 _bootstrap(desired)
             if desired["domain"]:
                 from web.ssl_steps import install_certbot, obtain_letsencrypt_certificate, setup_certificate_renewal
@@ -872,6 +931,11 @@ def health_homebox() -> dict:
         result["free_bytes"] = shutil.disk_usage(value["data_path"]).free
         result["database"] = _database(value)
         _secrets()
+        _owned_files()
+        _private_file(CONFIG / "homebox.env")
+        result["configuration_matches"] = _files_match(value)
+        if not result["configuration_matches"]:
+            raise RuntimeError("HomeBox managed configuration has drifted; rerun setup")
         if _digest(release_path(value)) != value["binary_sha256"]:
             raise RuntimeError("HomeBox binary digest mismatch")
         status = _status(value["port"])
@@ -880,7 +944,7 @@ def health_homebox() -> dict:
         _frontend_ready(value)
         result["healthy"] = bool(result["service_active"] and not result["maintenance"] and result["registration_closed"]
                                  and result["version_matches"] and result["database"]["users"] > 0 and value["status"] == "ready")
-    except (OSError, ValueError, RuntimeError, sqlite3.Error, urllib.error.URLError) as exc:
+    except (OSError, ValueError, RuntimeError, sqlite3.Error, urllib.error.URLError, subprocess.SubprocessError) as exc:
         result["error"] = str(exc)
     return result
 
@@ -925,6 +989,8 @@ def operate_homebox(action: str, path: str, *, yes: bool = False, dry_run: bool 
         else:
             with tempfile.TemporaryDirectory(prefix="restore-", dir=BACKUPS) as temporary:
                 restored = unpack_backup(destination, Path(temporary))
+                if paths_overlap(str(destination), restored["data_path"]):
+                    raise ValueError("Restore archive must be outside HomeBox live data")
                 if value is None:
                     value = {**restored, "mount": _storage(Path(restored["data_path"]))}
                     _check_storage(value)
@@ -940,7 +1006,7 @@ def operate_homebox(action: str, path: str, *, yes: bool = False, dry_run: bool 
                     if _digest(release_path(value)) != value["binary_sha256"]:
                         raise RuntimeError("Damaged binary")
                     create_backup(value, safeguard)
-                except (OSError, ValueError, RuntimeError):
+                except (OSError, ValueError, RuntimeError, sqlite3.Error, subprocess.SubprocessError):
                     safeguard = BACKUPS / f"{time.time_ns()}-damaged-before-restore.tar.gz"
                     _preserve_damaged(value, safeguard)
                 _restore_unpacked(Path(temporary), restored)
