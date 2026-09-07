@@ -3,7 +3,7 @@
 Install one native [HomeBox](https://github.com/sysadminsmedia/homebox) instance
 per Debian server. It uses a dedicated `homebox` system account, systemd,
 SQLite, and local attachments. Initial installations use the verified
-`v0.26.2` release; amd64 and arm64 assets are supported.
+`v0.26.2` release; amd64 hosts are supported.
 
 ## Set up and sign in
 
@@ -35,6 +35,10 @@ Loopback mode never opens a public application listener.
 The supported profiles are `server_lite`, `server_web`, `server_dev`,
 `agent_vm`, and `control_plane`. OCI and `--steps` are rejected. Add `--dry-run`
 to validate and preview setup before changing a target.
+
+HomeBox support is intentionally limited to amd64. ARM64 hosts are rejected
+before HomeBox setup makes target-side changes, even though upstream publishes
+an ARM64 binary.
 
 Setup creates the first owner through a temporary loopback-only service and
 verifies login before starting the permanent service with registration off.
@@ -143,9 +147,8 @@ and restore them as root-owned mode-`0600` regular files. Reserve space for the
 archive, its unpacked contents, and restoration on the data filesystem. No
 automatic retention or pruning is installed.
 
-For a clean replacement server of the same CPU architecture, set up HomeBox at
-the same data path, hostname, and version first so accounts, dependencies, TLS,
-and mounts exist. Copy the
+For a clean amd64 replacement server, set up HomeBox at the same data path,
+hostname, and version first so accounts, dependencies, TLS, and mounts exist. Copy the
 archive there, set root ownership and mode `0600`, and run restore. Restored
 settings replace the temporary instance, while retaining the replacement
 server's validated mount identity. Reconcile the controller's saved setup
@@ -200,5 +203,5 @@ certificates remain installed. Permanent deletion is a separate manual task.
 This initial support excludes Cloudflare, containers, PostgreSQL, external
 object storage, multiple instances, OIDC, and adoption of unmanaged installs.
 The native amd64 lifecycle has been smoke-tested; full Debian VM reboot/TLS
-and arm64 runtime qualification remain outstanding. See the
+qualification remains outstanding. ARM64 is intentionally unsupported. See the
 [implementation record](plans/HOMEBOX_SUPPORT.md) for validation evidence.

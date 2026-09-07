@@ -229,30 +229,35 @@ class HomeBoxFilesTests(HomeBoxFixture, unittest.TestCase):
         self.assertIn("drifted", health["error"])
         self.assertNotIn(self.secret["pepper"], json.dumps(health))
 
-    def test_release_checks_publisher_digest_architecture_and_download(self):
+    def test_release_checks_publisher_digest_and_rejects_non_amd64_hosts(self):
         source = self.root / "release.tar.gz"
         with tarfile.open(source, "w:gz") as bundle:
             member = tarfile.TarInfo("homebox")
             member.size = 6
             bundle.addfile(member, io.BytesIO(b"binary"))
         digest = h._digest(source)
-        for arch, filename in (("amd64", "x86_64"), ("arm64", "arm64")):
-            url = f"https://github.com/sysadminsmedia/homebox/releases/download/v0.26.2/homebox_Linux_{filename}.tar.gz"
-            metadata = {"tag_name": "v0.26.2", "assets": [{"name": f"homebox_Linux_{filename}.tar.gz",
-                        "digest": "sha256:" + digest, "browser_download_url": url}]}
-            def download(*args):
-                Path(args[args.index("--output") + 1]).write_bytes(source.read_bytes())
-            with patch.object(h, "detect_release_arch", return_value=arch), \
-                    patch.object(h, "_request_json", return_value=metadata), patch.object(h, "_command", side_effect=download):
-                verified = h.stage_release("v0.26.2")
-                self.assertEqual(verified["archive_sha256"], digest)
-                self.assertEqual(h.release_path(verified).read_bytes(), b"binary")
-                metadata["assets"][0]["digest"] = "sha256:" + "f" * 64
-                with self.assertRaisesRegex(RuntimeError, "checksum"):
-                    h.stage_release("v0.26.2")
-                metadata["assets"][0]["digest"] = None
-                with self.assertRaises((ValueError, RuntimeError)):
-                    h.stage_release("v0.26.2")
+        filename = "x86_64"
+        url = f"https://github.com/sysadminsmedia/homebox/releases/download/v0.26.2/homebox_Linux_{filename}.tar.gz"
+        metadata = {"tag_name": "v0.26.2", "assets": [{"name": f"homebox_Linux_{filename}.tar.gz",
+                    "digest": "sha256:" + digest, "browser_download_url": url}]}
+        def download(*args):
+            Path(args[args.index("--output") + 1]).write_bytes(source.read_bytes())
+        with patch.object(h, "detect_release_arch", return_value="amd64"), \
+                patch.object(h, "_request_json", return_value=metadata), patch.object(h, "_command", side_effect=download):
+            verified = h.stage_release("v0.26.2")
+            self.assertEqual(verified["archive_sha256"], digest)
+            self.assertEqual(h.release_path(verified).read_bytes(), b"binary")
+            metadata["assets"][0]["digest"] = "sha256:" + "f" * 64
+            with self.assertRaisesRegex(RuntimeError, "checksum"):
+                h.stage_release("v0.26.2")
+            metadata["assets"][0]["digest"] = None
+            with self.assertRaises((ValueError, RuntimeError)):
+                h.stage_release("v0.26.2")
+        with patch.object(h, "detect_release_arch", return_value="arm64"), \
+                patch.object(h, "_request_json") as request:
+            with self.assertRaisesRegex(RuntimeError, "only on amd64"):
+                h.stage_release("v0.26.2")
+        request.assert_not_called()
 
     def test_unit_and_proxy_isolation(self):
         value = state(domain="inventory.example.com", public_port=443, sources=["192.168.1.0/24"])
@@ -420,6 +425,7 @@ class HomeBoxTransactionTests(HomeBoxFixture, unittest.TestCase):
         desired_config = config(homebox=[":7745", self.value["data_path"]], homebox_version="v0.26.3")
         self.stack.enter_context(patch.object(h, "validate_homebox_settings"))
         self.stack.enter_context(patch.object(h, "can_manage_system_services", return_value=True))
+        self.stack.enter_context(patch.object(h, "require_amd64"))
         self.stack.enter_context(patch.object(h, "_storage", return_value=self.value["mount"]))
         self.stack.enter_context(patch.object(h, "_check_storage"))
         self.stack.enter_context(patch.object(h, "_private_dir"))
@@ -531,6 +537,14 @@ class HomeBoxTransactionTests(HomeBoxFixture, unittest.TestCase):
                 h.setup_homebox(cfg)
         activate.assert_not_called()
         self.assertFalse((h.CONFIG / "maintenance").exists())
+
+    def test_non_amd64_setup_stops_before_target_mutation(self):
+        cfg = config()
+        with patch.object(h, "can_manage_system_services", return_value=True), \
+                patch.object(h, "require_amd64", side_effect=RuntimeError("amd64")), \
+                patch.object(h, "homebox_lock", side_effect=AssertionError("mutation")):
+            with self.assertRaisesRegex(RuntimeError, "amd64"):
+                h.setup_homebox(cfg)
 
 
 class HomeBoxCLITests(unittest.TestCase):

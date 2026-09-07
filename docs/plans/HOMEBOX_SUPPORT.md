@@ -28,6 +28,9 @@ the original scope and acceptance targets.
   Downgrades require full restore. Public HTTPS is checked through a local-only
   readiness route while normal ingress is blocked. Local/tunnel clients must
   be quiesced by the operator during maintenance.
+- HomeBox intentionally supports amd64 only. The target rejects other release
+  architectures before HomeBox setup mutations begin; upstream ARM64 assets
+  are out of scope.
 - Tests exercise configuration/cache/remote/patch round trips, conflicts,
   dry runs, release integrity, archive traversal, bootstrap policy, complete
   restore, damaged-state repair, idempotency, and failures before/after ingress.
@@ -39,8 +42,8 @@ the original scope and acceptance targets.
   certificates and unprivileged fixture ports; the systemd unit passed
   `systemd-analyze verify` with a fixture
   executable. The full default suite passed 3,425 tests with one live test
-  skipped. Full Debian VM restart/reboot, public TLS, WebSocket browser behavior,
-  and arm64 runtime qualification remain follow-up validation. Unit tests mock
+  skipped. Full Debian VM restart/reboot, public TLS, and WebSocket browser behavior
+  remain follow-up validation. ARM64 was deliberately removed from scope. Unit tests mock
   system mutations; no production service was installed during development.
 - Scheduled updates, automatic retention, monitoring integration, and
   Cloudflare ingress remain outside this initial delivery.
@@ -50,8 +53,8 @@ the original scope and acceptance targets.
 Support one HomeBox inventory instance per Debian server through the existing
 server setup pipeline, following Gogs' service composition pattern:
 
-- A verified native Linux binary, dedicated `homebox` system account, and
-  hardened systemd service; initially amd64 and arm64.
+- A verified native Linux amd64 binary, dedicated `homebox` system account,
+  and hardened systemd service.
 - SQLite and local attachment storage beneath `/var/lib/homebox`, with an
   optional validated absolute data path and required-mount guards.
 - A loopback backend, with either SSH-tunnel access or a dedicated hostname
@@ -75,7 +78,7 @@ release and security notes before implementation.
 
 | Finding | Consequence |
 | --- | --- |
-| Linux x86_64 and arm64 archives and `checksums.txt` are published | Reuse release validation and record the exact version and SHA-256; check archive layout and runtime dependencies in the first spike |
+| Linux x86_64 archives and `checksums.txt` are published | Use the x86_64 asset only, record its exact version and SHA-256, and reject non-amd64 machines before downloading |
 | Native HTTP defaults to port 7745; host binding is configurable | Set `HBOX_WEB_HOST=127.0.0.1` explicitly and validate the port |
 | Current SQLite and storage settings are `HBOX_DATABASE_SQLITE_PATH`, `HBOX_STORAGE_CONN_STRING`, and `HBOX_STORAGE_PREFIX_PATH` | Render explicit absolute paths; do not copy obsolete `HBOX_STORAGE_DATA` examples |
 | Registration defaults to enabled | Bootstrap privately, then disable registration before enabling normal ingress |
@@ -175,7 +178,7 @@ or unsafe overlap with other services and exported writable shares.
 
 | Slice | Likely owning files | Completion boundary |
 | --- | --- | --- |
-| 0. Native lifecycle spike | Upstream tagged source and disposable VM notes | Verify binary layout/dependencies on both architectures, readiness endpoint and expected response, account/group bootstrap, invitation policy, password recovery, and migration/restore behavior |
+| 0. Native lifecycle spike | Upstream tagged source and disposable VM notes | Verify amd64 binary layout/dependencies, readiness endpoint and expected response, account/group bootstrap, invitation policy, password recovery, and migration/restore behavior |
 | 1. Configuration and planning | `lib/arg_parser.py`, `lib/config.py`, `lib/validation.py`, `lib/setup_common.py`, `plugins/server.py` | Parse, validate, serialize, reconstruct, patch, and dry-run the proposed options; reject unsupported system types before target mutation |
 | 2. Initial setup | New `web/homebox_steps.py`; reuse `lib/release_management.py` and existing Nginx/TLS, machine capability, and state helpers | Install verified release, configure isolated service/storage, complete private bootstrap, and health-gate ingress and successful state |
 | 3. Operations and recovery | New `lib/homebox_cli.py`, CLI registration, `common/web_panel_steps.py`, service-owned backup/upgrade helpers | Health text/JSON, panel facts, explicit upgrades, complete backup/restore, and documented disable/removal that preserves data |
@@ -202,12 +205,12 @@ each package, service, or filesystem operation.
   the old database, attachments, secrets, binary, unit, proxy, and state.
 - All unit tests mock system calls and use temporary directories. Run focused
   suites and relevant wider checks following the contributor guide.
-- Disposable Debian VM validation exercises native install on amd64/arm64,
+- Disposable Debian VM validation exercises native install on amd64,
   restart/reboot, TLS, login, item creation, attachment upload/download,
   WebSocket events, repeat setup, and backup/restore to a clean instance.
 - Update CLI/reference docs and add `docs/HOMEBOX.md`; update backup,
   credential, web-panel, and maintenance docs as their behavior lands.
 
-Remaining qualification should exercise both architectures on disposable
-Debian VMs before widening the native support claim or enabling scheduled
-updates. The larger monitoring project can consume HomeBox health facts later.
+Remaining qualification should exercise amd64 on a disposable Debian VM before
+enabling scheduled updates. The larger monitoring project can consume HomeBox
+health facts later.

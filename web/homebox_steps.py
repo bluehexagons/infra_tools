@@ -198,17 +198,23 @@ def _request_json(url: str, payload: dict | None = None) -> Any:
         return json.loads(body) if body else None
 
 
+def require_amd64() -> None:
+    """Reject architectures outside the intentionally narrow HomeBox support scope."""
+    if detect_release_arch() != "amd64":
+        raise RuntimeError("HomeBox is supported only on amd64 machines")
+
+
 def stage_release(version: str) -> dict:
-    """Verify the exact publisher asset and extract only its regular binary."""
+    """Verify the exact amd64 publisher asset and extract its regular binary."""
     validate_homebox_version(version)
-    arch = detect_release_arch()
-    asset_name = f"homebox_Linux_{'x86_64' if arch == 'amd64' else arch}.tar.gz"
+    require_amd64()
+    asset_name = "homebox_Linux_x86_64.tar.gz"
     release = _request_json(f"https://api.github.com/repos/{REPO}/releases/tags/{version}")
     if release.get("tag_name") != version or release.get("draft") or release.get("prerelease"):
         raise RuntimeError("HomeBox requires an exact stable upstream release")
     assets = [a for a in release.get("assets", []) if a.get("name") == asset_name]
     if len(assets) != 1:
-        raise RuntimeError("HomeBox release is missing the requested architecture")
+        raise RuntimeError("HomeBox release is missing the required amd64 asset")
     asset = assets[0]
     digest = validate_release_sha256_digest(asset.get("digest"))
     url = f"https://github.com/{REPO}/releases/download/{version}/{asset_name}"
@@ -789,6 +795,7 @@ def setup_homebox(config) -> None:
         return
     if not can_manage_system_services(config.machine_type):
         raise RuntimeError("HomeBox requires systemd service management")
+    require_amd64()
     with homebox_lock():
         _owned_files()
         _require_idle()
