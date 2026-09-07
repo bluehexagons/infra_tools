@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import http.client
 import ipaddress
 import json
 import os
@@ -46,6 +47,8 @@ _MAX_CONFIG_BYTES = 256 * 1024
 _MAX_REQUEST_BYTES = 16 * 1024
 _MAX_INGEST_REQUEST_BYTES = 64 * 1024
 _MAX_OUTPUT_BYTES = 24 * 1024
+_MAX_SERVICE_PROBE_BYTES = 8 * 1024
+_SERVICE_PROBE_TIMEOUT_SECONDS = 1
 _SYSTEM_OVERVIEW_CACHE_SECONDS = 30
 _INTERNAL_WEB_URL_FILE = "/etc/infra-tools/internal-web/base-url"
 _T3_UPDATE_TIMEOUT_SECONDS = 30 * 60
@@ -409,10 +412,54 @@ def collect_system_overview() -> list[dict[str, str]]:
     ]
 
 
+def _homebox_probe_port(record: dict[str, Any]) -> int | None:
+    """Return a validated local HomeBox probe port from a service record."""
+
+    probe = record.get("probe")
+    if not isinstance(probe, dict) or probe.get("kind") != "homebox":
+        return None
+    port = probe.get("port")
+    if isinstance(port, bool) or not isinstance(port, int):
+        return None
+    return port if 1024 <= port <= 65535 else None
+
+
+def _probe_homebox(port: int) -> tuple[str, str]:
+    """Read the bounded public HomeBox status endpoint over loopback."""
+
+    connection = http.client.HTTPConnection(
+        "127.0.0.1", port, timeout=_SERVICE_PROBE_TIMEOUT_SECONDS
+    )
+    try:
+        connection.request("GET", "/api/v1/status")
+        response = connection.getresponse()
+        body = response.read(_MAX_SERVICE_PROBE_BYTES + 1)
+        if response.status != HTTPStatus.OK or len(body) > _MAX_SERVICE_PROBE_BYTES:
+            return "unavailable", "HomeBox is not responding"
+        status = json.loads(body)
+    except (
+        OSError,
+        UnicodeDecodeError,
+        http.client.HTTPException,
+        json.JSONDecodeError,
+    ):
+        return "unavailable", "HomeBox is not responding"
+    finally:
+        connection.close()
+
+    if not isinstance(status, dict) or status.get("health") is not True:
+        return "unavailable", "HomeBox is not responding"
+    if status.get("allowRegistration") is True:
+        return "attention", "Registration is open"
+    if status.get("allowRegistration") is False:
+        return "ready", "HomeBox is ready"
+    return "unavailable", "HomeBox is not responding"
+
+
 def _deduplicate_services(
     configured: list[object], dynamic: list[dict[str, str]]
-) -> list[dict[str, str]]:
-    services: list[dict[str, str]] = []
+) -> list[dict[str, Any]]:
+    services: list[dict[str, Any]] = []
     seen: set[str] = set()
     for record in [*configured, *dynamic]:
         if not isinstance(record, dict):
@@ -422,13 +469,14 @@ def _deduplicate_services(
         if not url or not isinstance(label, str) or not label or url in seen:
             continue
         description = record.get("description")
-        services.append(
-            {
-                "label": label,
-                "url": url,
-                "description": description if isinstance(description, str) else "",
-            }
-        )
+        service: dict[str, Any] = {
+            "label": label,
+            "url": url,
+            "description": description if isinstance(description, str) else "",
+        }
+        if (probe_port := _homebox_probe_port(record)) is not None:
+            service["probe"] = {"kind": "homebox", "port": probe_port}
+        services.append(service)
         seen.add(url)
     return services
 
@@ -805,6 +853,9 @@ h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.015em; }
   outline-offset: 3px;
 }
 .card-description { color: var(--muted); font-size: .9rem; }
+.card-status { font-size: .8rem; font-weight: 700; }
+.card-status.ready { color: var(--ok); }
+.card-status.attention, .card-status.unavailable { color: var(--bad); }
 .card-url {
   margin-top: auto;
   color: var(--accent);
@@ -1360,19 +1411,28 @@ def render_page(state: WebPanelState) -> str:
     services = _deduplicate_services(
         manifest["services"], discover_infra_web_services()
     )
-    service_cards = "".join(
-        (
+    service_cards = ""
+    for record in services:
+        status_html = ""
+        if (probe_port := _homebox_probe_port(record)) is not None:
+            status_class, status_text = _probe_homebox(probe_port)
+            status_html = '<span class="card-status {}">{}</span>'.format(
+                status_class, html.escape(status_text)
+            )
+        service_cards += (
             '<a class="card" href="{}"><strong>{}</strong>'
-            '<span class="card-description">{}</span>'
+            '<span class="card-description">{}</span>{}'
             '<span class="card-url">{} &#8599;</span></a>'
         ).format(
             html.escape(record["url"], quote=True),
             html.escape(record["label"]),
             html.escape(record["description"] or "Open this service"),
+            status_html,
             html.escape(record["url"]),
         )
-        for record in services
-    ) or '<p class="empty">No hosted web services are available on this machine.</p>'
+    service_cards = service_cards or (
+        '<p class="empty">No hosted web services are available on this machine.</p>'
+    )
 
     access_rows = "".join(
         "<li><strong>{}</strong><code>{}</code><span>{}</span></li>".format(

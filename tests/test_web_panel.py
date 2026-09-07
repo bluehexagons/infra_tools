@@ -39,6 +39,8 @@ from common.service_tools.web_panel_service import (
     _internal_web_landing_service,
     _linux_trust_script,
     _macos_trust_script,
+    _homebox_probe_port,
+    _probe_homebox,
     _safe_url,
     collect_system_overview,
     discover_certificate_trust,
@@ -1040,6 +1042,81 @@ class WebPanelRenderingTest(unittest.TestCase):
 
         self.assertTrue(manifest["features"]["t3_github_readiness"])
         self.assertTrue(manifest["features"]["t3_git_identity_readiness"])
+
+    def test_homebox_probe_uses_only_the_local_status_endpoint(self) -> None:
+        response = SimpleNamespace(
+            status=200,
+            read=lambda _limit: b'{"health": true, "allowRegistration": false}',
+        )
+        with patch(
+            "common.service_tools.web_panel_service.http.client.HTTPConnection"
+        ) as connection_type:
+            connection_type.return_value.getresponse.return_value = response
+            status = _probe_homebox(7745)
+
+        self.assertEqual(status, ("ready", "HomeBox is ready"))
+        connection_type.assert_called_once_with("127.0.0.1", 7745, timeout=1)
+        connection_type.return_value.request.assert_called_once_with(
+            "GET", "/api/v1/status"
+        )
+        connection_type.return_value.close.assert_called_once_with()
+
+    def test_homebox_probe_reports_open_registration_and_rejects_bad_ports(self) -> None:
+        response = SimpleNamespace(
+            status=200,
+            read=lambda _limit: b'{"health": true, "allowRegistration": true}',
+        )
+        with patch(
+            "common.service_tools.web_panel_service.http.client.HTTPConnection"
+        ) as connection_type:
+            connection_type.return_value.getresponse.return_value = response
+            self.assertEqual(
+                _probe_homebox(7745), ("attention", "Registration is open")
+            )
+
+        self.assertEqual(
+            _homebox_probe_port({"probe": {"kind": "homebox", "port": 7745}}),
+            7745,
+        )
+        self.assertIsNone(
+            _homebox_probe_port({"probe": {"kind": "homebox", "port": 80}})
+        )
+        self.assertIsNone(
+            _homebox_probe_port({"probe": {"kind": "homebox", "port": True}})
+        )
+
+    def test_page_renders_homebox_readiness_without_exposing_probe_data(self) -> None:
+        state = WebPanelState(
+            {
+                **self._t3_manifest(),
+                "services": [
+                    {
+                        "label": "HomeBox",
+                        "url": "https://inventory.example.test/",
+                        "description": "Inventory and attachments",
+                        "probe": {"kind": "homebox", "port": 7745},
+                    }
+                ],
+                "features": {"t3_update": False},
+            }
+        )
+        with (
+            patch(
+                "common.service_tools.web_panel_service.discover_infra_web_services",
+                return_value=[],
+            ),
+            patch(
+                "common.service_tools.web_panel_service._probe_homebox",
+                return_value=("ready", "HomeBox is ready"),
+            ),
+            patch.object(state, "system_overview", return_value=[]),
+        ):
+            rendered = render_page(state)
+
+        self.assertIn("HomeBox is ready", rendered)
+        self.assertIn('class="card-status ready"', rendered)
+        self.assertNotIn('"probe"', rendered)
+        self.assertNotIn("7745", rendered)
 
     def test_nginx_requires_basic_auth_and_can_share_tls_certificate(self) -> None:
         rendered = render_web_panel_nginx(

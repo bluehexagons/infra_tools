@@ -118,6 +118,10 @@ class HomeBoxConfigTests(unittest.TestCase):
         self.assertNotIn("HomeBox", json.dumps(manifest))
         manifest = build_web_panel_manifest(config(homebox=["a.test"], enable_ssl=True), ["inventory.example.com"])
         self.assertEqual(manifest["services"][0]["url"], "https://a.test/")
+        self.assertEqual(
+            manifest["services"][0]["probe"],
+            {"kind": "homebox", "port": 7745},
+        )
         self.assertNotIn("pepper", json.dumps(manifest))
 
     def test_auto_update_timer_uses_the_managed_binary(self):
@@ -623,7 +627,9 @@ class HomeBoxTransactionTests(HomeBoxFixture, unittest.TestCase):
     def test_disable_can_be_repeated_after_unit_removal(self):
         cfg = self.fixture_setup()
         cfg.homebox = []
-        with patch.object(h, "_command") as command, contextlib.redirect_stdout(io.StringIO()):
+        with patch.object(h, "_command") as command, \
+                patch.object(h, "run", return_value=subprocess.CompletedProcess([], 0)), \
+                contextlib.redirect_stdout(io.StringIO()):
             h.setup_homebox(cfg)
             self.assertFalse(h.UNIT.exists())
             command.reset_mock()
@@ -637,7 +643,8 @@ class HomeBoxTransactionTests(HomeBoxFixture, unittest.TestCase):
         h._save_state({**self.value, "status": "prepared"})
         (self.data / "homebox.db").unlink()
         cfg.homebox = []
-        with contextlib.redirect_stdout(io.StringIO()):
+        with patch.object(h, "run", return_value=subprocess.CompletedProcess([], 0)), \
+                contextlib.redirect_stdout(io.StringIO()):
             h.setup_homebox(cfg)
         self.assertTrue(h.read_state()["bootstrap_pending"])
         cfg.homebox = [":7745", self.value["data_path"]]

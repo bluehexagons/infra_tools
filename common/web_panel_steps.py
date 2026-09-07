@@ -113,7 +113,7 @@ def build_web_panel_manifest(
     """Build non-secret configured service and access metadata."""
 
     host = _preferred_host(config, identities)
-    services: list[dict[str, str]] = []
+    services: list[dict[str, Any]] = []
     access: list[dict[str, str]] = [
         {
             "label": "SSH",
@@ -155,6 +155,7 @@ def build_web_panel_manifest(
                 "label": "HomeBox",
                 "url": _http_url(homebox["domain"], homebox["public_port"], "https"),
                 "description": "Inventory and attachments",
+                "probe": {"kind": "homebox", "port": homebox["port"]},
             })
 
     for label, spec, default_port, description in (

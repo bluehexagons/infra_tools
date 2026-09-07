@@ -6,7 +6,7 @@ not installed unless `--web-panel` is selected.
 | Panel area | Shows |
 | --- | --- |
 | Overview | Uptime, memory, root-disk use, reboot status, and update timer state |
-| Services | Configured and discovered web, SSH, RDP, Samba, Gogs, and Antistatic access |
+| Services | Configured and discovered web, SSH, RDP, Samba, Gogs, HomeBox, and Antistatic access |
 | Audit activity | A sanitized snapshot of current auditd events and collection health |
 | Notifications | Events accepted from other machines when ingest is enabled |
 | Maintenance | Only fixed actions supported by software on that machine |
@@ -165,9 +165,12 @@ The panel renders configured access from saved setup state and discovers live
 `infra-web` forwards and static sites at page load. When the shared gateway is
 installed, its landing page is linked before individual sites are published.
 
-Hostname-based [HomeBox](HOMEBOX.md) installations add an inventory link.
-Loopback-only HomeBox installations do not add an unusable remote link. The
-panel contains no HomeBox credentials or inventory administration actions.
+Hostname-based [HomeBox](HOMEBOX.md) installations add an inventory link and a
+readiness status from a loopback-only probe. It checks the local HomeBox status
+API and reports whether initial registration is open; it does not verify public DNS,
+TLS, or browser access. Loopback-only installations do not add an unusable
+remote link. The panel contains no HomeBox credentials or inventory
+administration actions.
 
 T3 Code machines receive an **Update to latest** action. The action runs the
 supported user-service updater and readiness checks for the service, runtime,
