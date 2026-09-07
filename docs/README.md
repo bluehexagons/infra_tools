@@ -73,7 +73,7 @@ automation, T3 Code, skills, and hardening.
 | [CI/CD webhook system](CICD.md) | Webhook jobs, build/app servers, and executor behavior |
 | [Cloudflare tunnels](CLOUDFLARE.md) | Tunnel preconfiguration, ingress refresh, firewall policy, and webhooks |
 | [Gogs Git service](GOGS.md) | Self-hosted Git, SSH access, storage, and release updates |
-| [HomeBox inventory](HOMEBOX.md) | Native setup, private onboarding, explicit updates, health, and complete backup/restore |
+| [HomeBox inventory](HOMEBOX.md) | Native setup, private onboarding, recurring updates, health, and complete backup/restore |
 | [Antistatic services](ANTISTATIC.md) | Lobby server, report administration, STUN, and antistatic-db |
 | [XRDP](XRDP.md) | Desktop RDP architecture, compatibility, and troubleshooting |
 | [Samba shares](SAMBA_SHARES.md) | Authenticated shares, credentials, access changes, removals, and SMB mounts |

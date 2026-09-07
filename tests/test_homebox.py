@@ -324,6 +324,22 @@ class HomeBoxFilesTests(HomeBoxFixture, unittest.TestCase):
         self.assertTrue(health["timer"]["scheduled"])
         self.assertFalse(health["check"]["stale"])
 
+    def test_automatic_update_health_reports_pending_before_first_check(self):
+        update_state = self.root / "state/homebox_update.json"
+        self.stack.enter_context(patch.object(h, "UPDATE_STATE", update_state))
+        job = {"available": True, "ActiveState": "inactive", "Result": "success"}
+        timer = {
+            "available": True,
+            "ActiveState": "active",
+            "NextElapseUSecRealtime": "Sun 2026-09-14 06:00:00 UTC",
+        }
+        with patch.object(h, "_unit_properties", side_effect=(job, timer)):
+            health = h._automatic_update_health()
+        self.assertTrue(health["healthy"])
+        self.assertEqual(health["check"]["status"], "pending")
+        self.assertIsNone(health["check"]["successful"])
+        self.assertFalse(health["check"]["stale"])
+
     def test_unit_and_proxy_isolation(self):
         value = state(domain="inventory.example.com", public_port=443, sources=["192.168.1.0/24"])
         env = h.render_environment(value, self.secret)
@@ -679,6 +695,24 @@ class HomeBoxCLITests(unittest.TestCase):
             self.assertEqual(run_homebox_command(args), 0)
         self.assertIn("automatic update timer: ok", output.getvalue())
         self.assertIn("automatic update check: ok", output.getvalue())
+
+    def test_health_text_reports_pending_automatic_update_check(self):
+        args = argparse.Namespace(host="inventory.example.com", username=None, ssh_key=None,
+                                  homebox_command="health", json=False)
+        result = {
+            "healthy": True,
+            "automatic_update": {
+                "configured": True,
+                "timer": {"active": True, "scheduled": True},
+                "check": {"status": "pending", "stale": False, "successful": None},
+            },
+        }
+        with patch("lib.homebox_cli.load_setup_command", return_value=None), \
+                patch("lib.homebox_cli.build_ssh_command", return_value=["ssh", "host"]), \
+                patch("lib.homebox_cli.subprocess.run", return_value=subprocess.CompletedProcess([], 0, json.dumps(result), "")), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(run_homebox_command(args), 0)
+        self.assertIn("automatic update check: pending", output.getvalue())
 
     def test_backup_dry_run_and_restore_consent_do_not_connect(self):
         for action, dry_run, expected in (("backup", True, 0), ("restore", False, 1)):

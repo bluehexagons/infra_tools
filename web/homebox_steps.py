@@ -952,14 +952,12 @@ def _automatic_update_health() -> dict:
     job_failed = job.get("ActiveState") == "failed" or job.get("Result") not in (None, "", "success")
     timer_active = timer.get("ActiveState") == "active"
     timer_scheduled = timer.get("NextElapseUSecRealtime") not in (None, "", "n/a")
-    source = UPDATE_STATE if UPDATE_STATE.exists() else STATE
+    source = UPDATE_STATE if UPDATE_STATE.exists() else None
     check: dict[str, Any] = {}
-    try:
-        age_seconds: int | None = max(0, int(time.time() - source.stat().st_mtime))
-    except OSError:
-        age_seconds = None
-    if source == UPDATE_STATE:
+    age_seconds: int | None = None
+    if source is not None:
         try:
+            age_seconds = max(0, int(time.time() - source.stat().st_mtime))
             _private_file(UPDATE_STATE)
             loaded = json.loads(UPDATE_STATE.read_text())
             if isinstance(loaded, dict):
@@ -968,16 +966,22 @@ def _automatic_update_health() -> dict:
             pass
     check_successful = (
         check.get("schema_version") == 1 and check.get("successful") is True
-        if source == UPDATE_STATE
-        else True
+        if source is not None
+        else None
     )
-    stale = age_seconds is None or age_seconds > MAX_UPDATE_AGE_SECONDS
+    stale = source is not None and (age_seconds is None or age_seconds > MAX_UPDATE_AGE_SECONDS)
+    if source is None:
+        check["status"] = "pending"
     configured = timer.get("available") is True
     return {
         "configured": configured,
         "healthy": (
-            not configured
-            or (not job_failed and timer_active and timer_scheduled and check_successful and not stale)
+            not configured or (
+                not job_failed
+                and timer_active
+                and timer_scheduled
+                and (source is None or (check_successful and not stale))
+            )
         ),
         "job": {"failed": job_failed, **job},
         "timer": {"active": timer_active, "scheduled": timer_scheduled, **timer},

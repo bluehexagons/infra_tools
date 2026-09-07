@@ -36,9 +36,8 @@ The supported profiles are `server_lite`, `server_web`, `server_dev`,
 `agent_vm`, and `control_plane`. OCI and `--steps` are rejected. Add `--dry-run`
 to validate and preview setup before changing a target.
 
-HomeBox support is intentionally limited to amd64. ARM64 hosts are rejected
-before HomeBox setup makes target-side changes, even though upstream publishes
-an ARM64 binary.
+HomeBox support is limited to amd64 hosts; unsupported architectures are
+rejected before setup makes target-side changes.
 
 Setup creates the first owner through a temporary loopback-only service and
 verifies login before starting the permanent service with registration off.
@@ -96,14 +95,12 @@ enrolled through the normal infra-tools workflow.
 Health checks service activity, maintenance state, mount identity, free space,
 SQLite integrity and users, secrets, executable digest, API version,
 registration policy, generated configuration and environment permissions, and
-the configured HTTPS frontend. When installed, it also reports the HomeBox
-update service, timer, and the age and result of its last check. SQLite probes
-run as the database owner so they cannot leave root-owned WAL files that
-prevent the application from restarting. Rerun setup to reconcile
-configuration drift; a stopped-service backup also repairs root-owned SQLite
-sidecars left by earlier probes. The HTTPS probe runs on the target and
-verifies its certificate; it does not prove public DNS, external firewall
-reachability, or an authenticated browser session.
+the configured HTTPS frontend. When installed, it also reports the updater
+timer and its last check (`pending` before the first run). SQLite probes run as
+the database owner so they cannot leave root-owned WAL files that prevent a
+restart. Rerun setup to reconcile drift; a stopped-service backup also repairs
+sidecars left by earlier probes. The HTTPS probe verifies the target locally,
+not public DNS, external firewall reachability, or an authenticated session.
 
 Select a reviewed stable release explicitly:
 
@@ -143,8 +140,9 @@ The destination directory must already exist. Backup refuses to overwrite a
 file or write inside live data. It verifies the executable digest and initialized
 database before publishing an archive. Hard-linked attachments are stored as
 independent regular files so the archive remains restorable. It publishes the
-final archive only after writing and syncing it. Archives contain SQLite and its sidecars, attachments,
-secrets, non-secret configuration metadata, and the matching binary. Generated
+final archive only after writing and syncing it. Archives contain SQLite and
+its sidecars, attachments, secrets, non-secret configuration metadata, and the
+matching binary. Generated
 environment, unit, and proxy configuration are rebuilt during restore.
 Certificates remain under Certbot rather than in these archives.
 
@@ -211,6 +209,5 @@ performs the private bootstrap. Shared Nginx/Certbot packages and certificates
 remain installed. Permanent deletion is a separate manual task.
 
 This support excludes Cloudflare, containers, PostgreSQL, external object
-storage, multiple instances, OIDC, and adoption of unmanaged installs. ARM64
-is intentionally unsupported. See the [implementation
-record](plans/HOMEBOX_SUPPORT.md) for validation evidence.
+storage, multiple instances, OIDC, and adoption of unmanaged installs. See the
+[implementation record](plans/HOMEBOX_SUPPORT.md) for validation evidence.
