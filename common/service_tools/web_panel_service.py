@@ -30,6 +30,11 @@ if SOURCE_ROOT not in sys.path:
     sys.path.insert(0, SOURCE_ROOT)
 
 from common.t3code_steps import _temporary_t3_loginctl_shim
+from common.service_tools.web_panel_diagnostics import (
+    SYSTEM_UNITS,
+    parse_query as parse_diagnostic_query,
+    render_diagnostics,
+)
 from common.web_panel_events import (
     WEB_PANEL_AUDIT_SNAPSHOT,
     WEB_PANEL_INGEST_TOKEN,
@@ -50,17 +55,6 @@ _MAX_OUTPUT_BYTES = 24 * 1024
 _MAX_SERVICE_PROBE_BYTES = 8 * 1024
 _SERVICE_PROBE_TIMEOUT_SECONDS = 1
 _SYSTEM_OVERVIEW_CACHE_SECONDS = 30
-_HOSTED_UNITS = {
-    "nginx.service": "Web gateway",
-    "ssh.service": "SSH",
-    "gogs.service": "Gogs",
-    "homebox.service": "HomeBox",
-    "docker.service": "Docker",
-    "smbd.service": "File sharing",
-    "xrdp.service": "Remote desktop",
-    "fail2ban.service": "Login protection",
-    "auditd.service": "System audit",
-}
 _INTERNAL_WEB_URL_FILE = "/etc/infra-tools/internal-web/base-url"
 _T3_UPDATE_TIMEOUT_SECONDS = 30 * 60
 _T3_CORE_READINESS_CHECKS = (
@@ -427,7 +421,7 @@ def collect_service_health() -> list[dict[str, str]]:
     """Read only fixed service properties; never expose commands or journals."""
 
     records: list[dict[str, str]] = []
-    scopes = (([], _HOSTED_UNITS), (["--user"], {"t3code.service": "T3 Code"}))
+    scopes = (([], SYSTEM_UNITS), (["--user"], {"t3code.service": "T3 Code"}))
     for scope, units in scopes:
         unavailable = {
             "label": "User services" if scope else "System services",
@@ -470,6 +464,7 @@ def collect_service_health() -> list[dict[str, str]]:
             records.append({
                 "label": units[unit], "value": active,
                 "description": f"{unit} · {substate}",
+                "unit": unit,
             })
         if not recognized:
             records.append(unavailable)
@@ -883,6 +878,18 @@ h2, #trust { scroll-margin-top: 24px; }
 .metric-value.active { color: var(--ok); }
 .metric-value.failed, .metric-value.unavailable { color: var(--bad); }
 .history > summary { margin: 10px 0; }
+.diagnostic-filters {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 14px; align-items: end; padding: 18px; margin-bottom: 18px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+}
+.diagnostic-filters label { min-width: 0; font-weight: 650; }
+.diagnostic-filters > div { min-width: 0; }
+select, .diagnostic-filters input { display: block; width: 100%; min-height: 44px; margin-top: 6px; padding: 8px;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+select:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.sidebar a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
+.metric a { display: inline-block; min-height: 44px; padding-top: 10px; color: var(--accent); font-size: .85rem; }
 header { margin-bottom: 36px; }
 .eyebrow, .section-kicker {
   margin: 0 0 6px;
@@ -1577,10 +1584,13 @@ def render_page(state: WebPanelState) -> str:
     health = state.service_health()
     health_cards = "".join(
         '<div class="metric"><dt>{}</dt><dd><span class="metric-value {}">{}</span>'
-        '<span class="metric-description">{}</span></dd></div>'.format(
+        '<span class="metric-description">{}</span>{}</dd></div>'.format(
             html.escape(record["label"]),
             {"active": "active", "failed": "failed", "Unavailable": "unavailable"}.get(record["value"], ""),
             html.escape(record["value"]), html.escape(record["description"]),
+            '<a href="/logs?service={}">Inspect service</a>'.format(
+                urllib.parse.quote(record["unit"], safe=""),
+            ) if record.get("unit") else "",
         ) for record in health
     )
     health_content = (
@@ -1649,6 +1659,7 @@ def render_page(state: WebPanelState) -> str:
     if action:
         navigation.append(("maintenance-heading", "Maintenance"))
     nav_links = "".join(f'<a href="#{target}">{label}</a>' for target, label in navigation)
+    nav_links += '<a href="/logs">Service diagnostics</a>'
 
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -1716,9 +1727,22 @@ class WebPanelHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:
-        path = urllib.parse.urlsplit(self.path).path
+        parsed = urllib.parse.urlsplit(self.path)
+        path = parsed.path
         if path == "/healthz":
             self._send(HTTPStatus.OK, "ok\n", "text/plain")
+            return
+        if path == "/logs":
+            try:
+                query = parse_diagnostic_query(parsed.query)
+            except ValueError:
+                self._send(HTTPStatus.BAD_REQUEST, "Invalid diagnostic filters\n", "text/plain")
+                return
+            self._send(
+                HTTPStatus.OK,
+                render_diagnostics(query, _PAGE_STYLE, self.state.manifest["host"]),
+                "text/html",
+            )
             return
         if path != "/":
             self._send(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")

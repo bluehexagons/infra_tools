@@ -10,6 +10,7 @@ not installed unless `--web-panel` is selected.
 | Audit activity | A sanitized snapshot of current auditd events and collection health |
 | Notifications | Events accepted from other machines when ingest is enabled |
 | Maintenance | Only fixed actions supported by software on that machine |
+| Service diagnostics | On-demand runtime details and filtered local journal entries |
 
 Section links form a sidebar on desktop and wrap above the dashboard on mobile.
 The overview comes first; **Refresh dashboard** requests a new page (host and
@@ -179,6 +180,39 @@ unavailable. These read-only, fixed-unit checks are bounded to two seconds per
 service manager and cached for 30 seconds. They do not read journals, application
 data, or credentials, and do not prove public connectivity or application
 readiness. Services owned by other users are outside the user-service snapshot.
+The panel's own service is included, and **Inspect service** opens its
+diagnostics form without starting a log query.
+
+### Inspect service logs
+
+Open **Service diagnostics** (`/logs`), choose a service, time window, severity,
+and optional message text, then select **Load diagnostics**. The separate page
+does not query logs or runtime details until submitted and never auto-refreshes.
+Changing filters requires another load. Message search is literal and
+case-insensitive; it searches the selected journal window before taking the
+newest 100 matching entries. Entries show UTC timestamps and severity.
+
+Runtime details include unit availability, process state, boot enablement, last
+activation, automatic restarts, memory, tasks, last result, and process exit
+status where systemd reports them. The source picker also includes the audit
+snapshot exporter and automatic package updater, whose inactive state between
+runs is normal.
+
+Queries use fixed service names and properties, run without elevated privileges,
+and inherit the panel account's journal permissions. The panel does not grant
+itself journal group membership or expose arbitrary files or commands. System
+logs may therefore be unavailable; T3 Code queries use the current user's
+journal. **Continue inspection over SSH** supplies the corresponding command
+for an operator with the appropriate access. The existing sanitized audit
+snapshot remains available on the dashboard independently of journal access.
+
+Each command is limited to five seconds and 64 KiB of captured output; at most
+two diagnostic requests collect concurrently. Timeouts, permission notices,
+unreadable records, and truncation are shown explicitly. Empty results mean no
+matching entries are visible, not that the service is healthy. Journal messages
+come from applications and may contain sensitive operational information; review
+them before sharing. The page retains the panel's authentication, no-store cache
+policy, and script restrictions.
 
 Hostname-based [HomeBox](HOMEBOX.md) installations add an inventory link and a
 readiness status from a loopback-only probe. It checks the local HomeBox status
