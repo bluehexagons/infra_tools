@@ -148,6 +148,13 @@ This work is the foundation for every later apply or rollback feature.
 
 ## P1: One manifest-driven deployment platform
 
+Planning update, 2026-09-07: Coolify evaluation is deferred. Keep the
+infra-tools controller lightweight and independent of Docker, a Coolify
+service, or an external application-management API. The [Coolify integration
+plan](COOLIFY_INTEGRATION.md) records an optional future boundary for complex
+applications such as Akaunting; it does not change the supported deployment
+path or create a dependency.
+
 The direct deployment and webhook paths should converge on `infra.json` as the
 shared application model.
 

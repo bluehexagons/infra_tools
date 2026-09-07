@@ -1,8 +1,10 @@
 # CI/CD Manifest Reuse
 
-Status: verified as needed, P1 after deploy secrets and transactional
-activation. As of 2026-08-09, the webhook CI/CD path still consumes its
-server-side repository/script configuration and does not load `infra.json`.
+Status: queued P1 native path, after deploy secrets and transactional
+activation. Coolify evaluation is deferred; it is an optional future platform
+for complex applications and does not gate this work. As of 2026-08-09, the
+webhook CI/CD path still consumes its server-side repository/script
+configuration and does not load `infra.json`.
 This is the follow-up project for teaching that path to use the shared manifest.
 
 Why it is separate:
