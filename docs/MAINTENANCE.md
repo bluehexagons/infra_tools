@@ -54,14 +54,18 @@ depend on unattended-upgrades and preserves existing package hooks and markers.
 Rerun setup to install or repair it; installing the hook does not itself reboot
 the machine or recreate a marker for an earlier update.
 
-For Proxmox hosts that already have an update without a marker, setup reports
-newer fully configured PVE kernel packages with boot images. The scheduled
+For hosts that already have an update without a marker, setup reports
+newer fully configured Debian/Ubuntu `linux-image-*` or Proxmox kernel packages
+with boot images matching the running kernel flavour (for example `amd64`,
+`cloud-amd64`, `generic`, or `pve`). Versions use Debian's comparison rules.
+The scheduled
 restart check also sends a warning to review boot selection and kernel pins.
 This package comparison is advisory only and cannot trigger an automatic or
 forced restart: an installed image does not establish the next boot selection.
 It continues to warn while a newer installed kernel is present, including when
-the older running kernel is deliberately pinned. Non-PVE running kernels do
-not use this fallback. Marker-based restarts retain the saved restart policy.
+the older running kernel is deliberately pinned. Custom kernels without a
+recognized version/flavour package name do not use this fallback. Marker-based
+restarts retain the saved restart policy.
 
 Restart reminders are eligible once per local calendar day so timer jitter
 does not skip alternate days. Failed deliveries remain eligible on the next

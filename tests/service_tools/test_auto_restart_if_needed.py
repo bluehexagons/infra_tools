@@ -19,13 +19,13 @@ from common.service_tools import auto_restart_if_needed
 class TestAutoRestartIfNeeded(unittest.TestCase):
     @patch("common.service_tools.auto_restart_if_needed.perform_restart")
     @patch("common.service_tools.auto_restart_if_needed.record_deferral")
-    @patch("common.service_tools.auto_restart_if_needed.newer_proxmox_kernel", return_value="7.0.14-16-pve")
+    @patch("common.service_tools.auto_restart_if_needed.newer_installed_kernel", return_value="6.12.44+deb13-amd64")
     @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=False)
     @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
     def test_markerless_kernel_warns_without_scheduling_restart(self, _load, _marker, _kernel, defer, restart):
         self.assertEqual(auto_restart_if_needed.main(), 0)
         self.assertTrue(defer.call_args.kwargs["advisory"])
-        self.assertIn("7.0.14-16-pve", defer.call_args.args[0])
+        self.assertIn("6.12.44+deb13-amd64", defer.call_args.args[0])
         restart.assert_not_called()
 
     def test_reminder_uses_calendar_day_despite_timer_jitter(self):
@@ -55,7 +55,7 @@ class TestAutoRestartIfNeeded(unittest.TestCase):
         send.assert_not_called()
 
     @patch("common.service_tools.auto_restart_if_needed.clear_restart_state")
-    @patch("common.service_tools.auto_restart_if_needed.newer_proxmox_kernel")
+    @patch("common.service_tools.auto_restart_if_needed.newer_installed_kernel")
     @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=False)
     @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=[])
     def test_probe_failure_is_not_an_all_clear_and_success_clears_state(self, _load, _marker, probe, clear):

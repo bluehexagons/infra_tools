@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 from lib.logging_utils import get_service_logger, log_event
 from lib.atomic_io import write_json_atomic
 from lib.agent_maintenance import inspect_agent_maintenance
-from lib.kernel_restart import newer_proxmox_kernel
+from lib.kernel_restart import newer_installed_kernel
 from lib.machine_state import can_restart_system, load_setup_config
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.plugin_registry import get_system_type_definition
@@ -360,13 +360,13 @@ def main() -> int:
 
     if not check_restart_required():
         try:
-            pending_kernel = newer_proxmox_kernel()
-        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            pending_kernel = newer_installed_kernel()
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             log_event(logger, "Could not inspect installed kernels", level=ERROR, error=str(exc))
             return 1
         if pending_kernel:
             record_deferral(
-                f"Newer Proxmox kernel {pending_kernel} is installed, but no reboot "
+                f"Newer kernel {pending_kernel} is installed, but no reboot "
                 "marker exists. Review boot selection and kernel pins, then schedule "
                 "a restart to activate the intended kernel. Automatic restart is "
                 "not scheduled from package comparison alone.",

@@ -60,21 +60,60 @@ class KernelRestartTests(unittest.TestCase):
             "installed proxmox-kernel-7.0\n"
             "installed proxmox-kernel-../../bad\n"
         ))
-        self.assertEqual(kernel_restart.newer_proxmox_kernel(), "7.0.14-16-pve")
+        query = run.return_value
+        run.side_effect = lambda args, **kw: query if args[0] == "dpkg-query" else SimpleNamespace(
+            returncode=0 if args[2] == "7.0.14-16-pve" else 1
+        )
+        self.assertEqual(kernel_restart.newer_installed_kernel(), "7.0.14-16-pve")
         image.return_value = False
-        self.assertIsNone(kernel_restart.newer_proxmox_kernel())
+        self.assertIsNone(kernel_restart.newer_installed_kernel())
         run.return_value.stdout = "installed proxmox-kernel-7.0.14-15-pve-signed\n"
         image.return_value = True
-        self.assertIsNone(kernel_restart.newer_proxmox_kernel())
+        self.assertIsNone(kernel_restart.newer_installed_kernel())
 
     @patch("lib.kernel_restart.subprocess.run")
-    @patch("lib.kernel_restart.os.uname", return_value=SimpleNamespace(release="6.12.0-amd64"))
-    def test_non_proxmox_kernel_does_not_query_packages(self, _uname, run):
-        self.assertIsNone(kernel_restart.newer_proxmox_kernel())
+    @patch("lib.kernel_restart.os.uname", return_value=SimpleNamespace(release="custom"))
+    def test_unrecognized_kernel_does_not_query_packages(self, _uname, run):
+        self.assertIsNone(kernel_restart.newer_installed_kernel())
         run.assert_not_called()
 
+    @patch("lib.kernel_restart.Path.is_file", return_value=True)
+    @patch("lib.kernel_restart.os.uname")
+    @patch("lib.kernel_restart.subprocess.run")
+    def test_debian_ubuntu_and_cloud_kernels_use_dpkg_ordering(self, run, uname, _image):
+        for running, newer in (
+            ("6.1.0-9-amd64", "6.1.0-10-amd64"),
+            ("6.12.43+deb13-amd64", "6.12.44+deb13-amd64"),
+            ("6.12.43+deb13-cloud-amd64", "6.12.44+deb13-cloud-amd64"),
+            ("6.8.0-99-generic", "6.8.0-100-generic"),
+        ):
+            with self.subTest(running=running):
+                uname.return_value = SimpleNamespace(release=running)
+                def command(args, **kwargs):
+                    if args[0] == "dpkg-query":
+                        return SimpleNamespace(stdout=(
+                            f"installed linux-image-{newer}\n"
+                            "installed linux-image-99.0.0-rt-arm64\n"
+                            "installed linux-image-amd64\n"
+                        ))
+                    self.assertEqual(args, ["dpkg", "--compare-versions", newer, "gt", running])
+                    return SimpleNamespace(returncode=0)
+                run.side_effect = command
+                self.assertEqual(kernel_restart.newer_installed_kernel(), newer)
+
+    @patch("lib.kernel_restart.Path.is_file", return_value=True)
+    @patch("lib.kernel_restart.os.uname", return_value=SimpleNamespace(release="6.8.0-99-generic"))
+    @patch("lib.kernel_restart.subprocess.run")
+    def test_unsigned_kernel_and_comparison_failure(self, run, _uname, _image):
+        query = SimpleNamespace(stdout="installed linux-image-unsigned-6.8.0-100-generic\n")
+        run.side_effect = [query, SimpleNamespace(returncode=0)]
+        self.assertEqual(kernel_restart.newer_installed_kernel(), "6.8.0-100-generic")
+        run.side_effect = [query, SimpleNamespace(returncode=2)]
+        with self.assertRaisesRegex(RuntimeError, "compare installed kernel"):
+            kernel_restart.newer_installed_kernel()
+
     @patch("security.security_steps.configure_maintenance_timer", return_value=True)
-    @patch("common.common_steps.newer_proxmox_kernel", return_value="7.0.14-16-pve")
+    @patch("common.common_steps.newer_installed_kernel", return_value="7.0.14-16-pve")
     @patch("security.security_steps.can_modify_kernel", return_value=True)
     @patch("security.security_steps.is_dry_run", return_value=False)
     def test_setup_installs_hook_and_reports_pending_kernel(self, _dry, _kernel, probe, timer):
@@ -95,7 +134,7 @@ class KernelRestartTests(unittest.TestCase):
             timer.assert_called_once()
 
     @patch("security.security_steps.install_kernel_restart_hook")
-    @patch("common.common_steps.newer_proxmox_kernel")
+    @patch("common.common_steps.newer_installed_kernel")
     @patch("security.security_steps.configure_maintenance_timer", return_value=True)
     def test_dry_run_and_container_do_not_install_or_probe(self, _timer, probe, install):
         for dry, capable in ((True, True), (False, False)):

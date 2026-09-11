@@ -14,7 +14,7 @@ from typing import Optional
 
 from lib.atomic_io import write_text_atomic
 from lib.maintenance_systemd import configure_maintenance_timer
-from lib.kernel_restart import newer_proxmox_kernel
+from lib.kernel_restart import newer_installed_kernel
 from lib.apt_sources import ensure_debian_package_sources
 from lib.config import SetupConfig
 from lib.maintenance_defaults import APT_LOCK_OPTIONS
@@ -761,10 +761,10 @@ def check_restart_required(config: SetupConfig) -> None:
         print("  ⚠ System restart recommended (kernel/system updates)")
         print("  Run 'sudo reboot' when convenient")
         return
-    pending_kernel = newer_proxmox_kernel() if can_modify_kernel() else None
+    pending_kernel = newer_installed_kernel() if can_modify_kernel() else None
     if pending_kernel:
         print(
-            f"  ⚠ Newer Proxmox kernel installed: {pending_kernel}; "
+            f"  ⚠ Newer kernel installed: {pending_kernel}; "
             "review boot selection and kernel pins, then schedule a restart"
         )
         return
