@@ -25,6 +25,14 @@ from lib.update_policy import (
 logger = get_service_logger('auto_update_uv', 'common', use_syslog=True)
 
 
+def run_uv_command(command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Bound each direct uv process and preserve the failure notification path."""
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=1800)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr=str(exc))
+
+
 def main() -> int:
     """Update uv to the latest available version for the current user."""
     pw_entry = pwd.getpwuid(os.getuid())
@@ -36,7 +44,7 @@ def main() -> int:
         log_event(logger, "uv not found, skipping update")
         return 0
 
-    result = subprocess.run([uv_path, "self", "update"], capture_output=True, text=True)
+    result = run_uv_command([uv_path, "self", "update"])
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip() or "uv self update failed"
         log_event(logger, "uv update failed", level=ERROR, stderr=details)
@@ -60,10 +68,8 @@ def main() -> int:
         log_event(logger, "uv updated successfully")
         return 0
 
-    result = subprocess.run(
+    result = run_uv_command(
         [uv_path, "tool", "upgrade", "--all"] + uv_exclude_newer_args(),
-        capture_output=True,
-        text=True,
     )
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip() or "uv tool upgrade failed"

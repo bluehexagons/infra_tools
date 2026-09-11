@@ -17,6 +17,25 @@ from lib.update_policy import DEPENDENCY_MIN_AGE_DAYS_ENV, ECOSYSTEM_AUTO_UPGRAD
 
 class TestAutoUpdateUv(unittest.TestCase):
     @patch("common.service_tools.auto_update_uv.send_notification_safe")
+    @patch("common.service_tools.auto_update_uv.load_notification_configs_from_state", return_value=["cfg"])
+    @patch("common.service_tools.auto_update_uv.subprocess.run")
+    @patch("common.service_tools.auto_update_uv.os.path.exists", return_value=True)
+    @patch("common.service_tools.auto_update_uv.pwd.getpwuid")
+    def test_process_errors_notify_in_both_update_phases(self, user, _exists, run, _configs, notify):
+        user.return_value = pwd.struct_passwd(("user", "x", 1000, 1000, "", "/home/user", "/bin/bash"))
+        for phase in (0, 1):
+            for failure in (PermissionError("uv is not executable"), subprocess.TimeoutExpired("uv", 1800)):
+                with self.subTest(phase=phase, failure=failure), patch.dict(os.environ, {ECOSYSTEM_AUTO_UPGRADE_ENV: "1"}):
+                    run.reset_mock()
+                    notify.reset_mock()
+                    run.side_effect = [subprocess.CompletedProcess([], 0, stdout="", stderr="")] * phase + [failure]
+                    self.assertEqual(auto_update_uv.main(), 1)
+                    self.assertEqual(run.call_count, phase + 1)
+                    self.assertEqual(run.call_args.kwargs["timeout"], 1800)
+                    notify.assert_called_once()
+                    self.assertEqual(notify.call_args.kwargs["status"], "error")
+
+    @patch("common.service_tools.auto_update_uv.send_notification_safe")
     @patch("common.service_tools.auto_update_uv.load_notification_configs_from_state", return_value=[])
     @patch("common.service_tools.auto_update_uv.subprocess.run")
     @patch("common.service_tools.auto_update_uv.os.path.exists", return_value=True)

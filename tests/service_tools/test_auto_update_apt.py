@@ -14,6 +14,24 @@ from common.service_tools import auto_update_apt
 
 
 class TestAutoUpdateApt(unittest.TestCase):
+    @patch("common.service_tools.auto_update_apt.ensure_debian_package_sources")
+    @patch("common.service_tools.auto_update_apt.subprocess.run")
+    @patch("common.service_tools.auto_update_apt.send_notification_safe")
+    @patch("common.service_tools.auto_update_apt.load_notification_configs_from_state", return_value=["cfg"])
+    def test_partial_refresh_or_launch_failure_notifies_without_upgrading(self, _configs, notify, run, _sources):
+        for failure in (
+            subprocess.CompletedProcess([], 100, stdout="", stderr="index unavailable"),
+            FileNotFoundError("apt-get unavailable"),
+        ):
+            with self.subTest(failure=failure):
+                run.reset_mock()
+                notify.reset_mock()
+                run.side_effect = [failure]
+                self.assertEqual(auto_update_apt.main(), 1)
+                run.assert_called_once()
+                self.assertIn("APT::Update::Error-Mode=any", run.call_args.args[0])
+                notify.assert_called_once()
+
     @patch("common.service_tools.auto_update_apt.upgrade_packages", return_value=(True, ""))
     @patch("common.service_tools.auto_update_apt.update_package_lists", return_value=True)
     @patch("common.service_tools.auto_update_apt.load_notification_configs_from_state", return_value=[])

@@ -33,6 +33,18 @@ from lib.config import SetupConfig
 class TestUpdateAndUpgradePackages(unittest.TestCase):
     @patch("common.common_steps.check_debian_package_sources")
     @patch("common.common_steps.run")
+    def test_refresh_failure_does_not_upgrade_or_record_completion(self, run, _sources):
+        run.return_value = MagicMock(returncode=100, stderr="mirror unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            marker = os.path.join(directory, "complete")
+            with patch("common.common_steps.PACKAGE_UPDATE_MARKER", marker):
+                with self.assertRaisesRegex(RuntimeError, "mirror unavailable"):
+                    update_and_upgrade_packages(SetupConfig(host="host", username="root", system_type="server_lite"))
+            self.assertFalse(os.path.exists(marker))
+        run.assert_called_once()
+
+    @patch("common.common_steps.check_debian_package_sources")
+    @patch("common.common_steps.run")
     def test_updates_and_upgrades_packages(self, mock_run, mock_check_sources):
         order = []
 
@@ -58,7 +70,8 @@ class TestUpdateAndUpgradePackages(unittest.TestCase):
         mock_check_sources.assert_called_once()
         self.assertEqual(
             order[0],
-            "apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Use-Pty=0 update -q",
+            "apt-get -o DPkg::Lock::Timeout=300 -o APT::Update::Error-Mode=any "
+            "-o Dpkg::Use-Pty=0 update -q",
         )
         expected_dpkg_options = (
             "-o Dpkg::Options::=--force-confdef "

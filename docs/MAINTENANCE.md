@@ -89,6 +89,14 @@ does not run `autoremove` or automatically remove packages. Before each
 scheduled update, infra-tools repairs CD-ROM-only entries and stale official
 Debian suites using the installed release codename. The distro timers
 are disabled only after the replacement timer is enabled, started, and verified.
+Setup and scheduled APT refreshes treat any repository-index error, including
+transient failures, as a failure and do not proceed to the upgrade with stale
+indexes. The scheduled job reports the failure through its notification targets.
+An APT executable launch failure also follows that reporting path.
+
+Each uv self-update or tool-upgrade command has a 30-minute limit. A timeout
+or executable launch failure is logged and notified just like a nonzero exit,
+and a failed self-update prevents the tool-upgrade phase from running.
 
 Node.js and uv use a conservative default policy:
 

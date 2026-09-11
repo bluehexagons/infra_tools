@@ -17,7 +17,7 @@ from lib.maintenance_systemd import configure_maintenance_timer
 from lib.kernel_restart import newer_installed_kernel
 from lib.apt_sources import ensure_debian_package_sources
 from lib.config import SetupConfig
-from lib.maintenance_defaults import APT_LOCK_OPTIONS
+from lib.maintenance_defaults import APT_LOCK_OPTIONS, APT_UPDATE_OPTIONS
 from lib.machine_state import can_manage_time_sync, can_modify_kernel
 from lib.remote_utils import (
     file_contains,
@@ -212,7 +212,10 @@ def update_and_upgrade_packages(config: SetupConfig) -> None:
 
     print("  Updating package lists (APT may wait for another package operation)...")
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    update_result = run(f"{_APT_GET} -o Dpkg::Use-Pty=0 update -q", check=False)
+    update_result = run(
+        f"{_APT_GET} {shlex.join(APT_UPDATE_OPTIONS)} -o Dpkg::Use-Pty=0 update -q",
+        check=False,
+    )
     if update_result.returncode != 0:
         details = getattr(update_result, "stderr", "") or "check network connectivity and APT sources"
         raise RuntimeError(f"APT package list update failed: {str(details).strip()[:300]}")

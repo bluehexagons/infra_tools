@@ -20,6 +20,9 @@ APT_LOCK_OPTIONS = [
     "-o", "DPkg::Lock::Timeout=300",
 ]
 
+# apt-get update otherwise permits some failed indexes and stale metadata.
+APT_UPDATE_OPTIONS = ["-o", "APT::Update::Error-Mode=any"]
+
 # Individual cleanup commands should never block the whole maintenance run forever.
 CLEANUP_COMMAND_TIMEOUT_SECONDS = 600
 

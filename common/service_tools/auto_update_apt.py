@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 from lib.logging_utils import get_service_logger
 from lib.logging_utils import log_event
 from lib.apt_sources import ensure_debian_package_sources
-from lib.maintenance_defaults import APT_LOCK_OPTIONS
+from lib.maintenance_defaults import APT_LOCK_OPTIONS, APT_UPDATE_OPTIONS
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
 
@@ -47,7 +47,12 @@ def run_apt_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env['DEBIAN_FRONTEND'] = 'noninteractive'
     cmd = ['apt-get'] + args
-    return subprocess.run(cmd, capture_output=True, text=True, env=env)
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, env=env)
+    except OSError as exc:
+        # Feed launch failures through the same logging/notification path as
+        # an APT nonzero exit. The systemd unit bounds the whole transaction.
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=str(exc))
 
 
 def update_package_lists() -> bool:
@@ -63,7 +68,7 @@ def update_package_lists() -> bool:
         )
         return False
 
-    result = run_apt_command(['update', '-qq'] + APT_LOCK_OPTIONS)
+    result = run_apt_command(['update', '-qq'] + APT_LOCK_OPTIONS + APT_UPDATE_OPTIONS)
     if result.returncode != 0:
         log_event(logger, "apt-get update failed", level=ERROR, stderr=result.stderr.strip())
         return False
