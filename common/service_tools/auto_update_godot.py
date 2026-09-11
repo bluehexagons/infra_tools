@@ -54,7 +54,7 @@ def main() -> int:
         notification_configs,
         subject="Success: Godot updated",
         job="auto_update_godot",
-        status="success",
+        status="good",
         message=f"Godot tooling updated to {tag_name}",
         logger=logger,
     )

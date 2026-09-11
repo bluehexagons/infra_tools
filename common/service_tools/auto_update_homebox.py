@@ -70,7 +70,7 @@ def _run_update() -> tuple[int, str | None, bool]:
         notification_configs,
         subject="Success: HomeBox updated",
         job="auto_update_homebox",
-        status="success",
+        status="good",
         message=f"HomeBox updated to {version}",
         logger=logger,
     )

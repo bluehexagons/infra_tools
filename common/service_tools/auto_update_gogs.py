@@ -211,7 +211,7 @@ def _run_update() -> int:
         notification_configs,
         subject="Success: Gogs updated",
         job="auto_update_gogs",
-        status="success",
+        status="good",
         message=f"Gogs updated to {target_tag}",
         logger=logger,
     )

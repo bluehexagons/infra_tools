@@ -86,6 +86,7 @@ class TestAutoUpdateGogs(unittest.TestCase):
         mock_command.assert_called_once_with(["systemctl", "restart", "gogs"])
         mock_notify.assert_called_once()
         self.assertIn("Success: Gogs updated", mock_notify.call_args.kwargs["subject"])
+        self.assertEqual(mock_notify.call_args.kwargs["status"], "good")
 
     @patch("common.service_tools.auto_update_gogs.send_notification_safe")
     @patch("common.service_tools.auto_update_gogs.install_or_update_gogs_release", side_effect=RuntimeError("boom"))

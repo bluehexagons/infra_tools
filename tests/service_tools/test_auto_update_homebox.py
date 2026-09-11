@@ -36,6 +36,7 @@ class AutoUpdateHomeBoxTests(unittest.TestCase):
         self.assertEqual(auto_update_homebox.main(), 0)
         self.record_update.assert_called_once_with(0, "v0.26.3", True)
         self.assertIn("HomeBox updated", notify.call_args.kwargs["subject"])
+        self.assertEqual(notify.call_args.kwargs["status"], "good")
 
     @patch("common.service_tools.auto_update_homebox.send_notification_safe")
     @patch("common.service_tools.auto_update_homebox.update_homebox_to_latest", side_effect=RuntimeError("migration failed"))

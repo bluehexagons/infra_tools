@@ -557,7 +557,7 @@ class TestGodotAutoUpdater(unittest.TestCase):
         _update_bundles,
     ):
         self.assertEqual(auto_update_godot.main(), 0)
-        self.assertEqual(mock_notify.call_args.kwargs["status"], "success")
+        self.assertEqual(mock_notify.call_args.kwargs["status"], "good")
 
     @patch(
         "common.service_tools.auto_update_godot.update_registered_godot_bundles",
@@ -584,7 +584,7 @@ class TestGodotAutoUpdater(unittest.TestCase):
         _update_bundles,
     ):
         self.assertEqual(auto_update_godot.main(), 0)
-        self.assertEqual(mock_notify.call_args.kwargs["status"], "success")
+        self.assertEqual(mock_notify.call_args.kwargs["status"], "good")
 
     @patch("common.service_tools.auto_update_godot.send_notification_safe")
     @patch("common.service_tools.auto_update_godot.log_event")
