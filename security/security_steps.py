@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from lib.atomic_io import write_text_atomic
 from lib.maintenance_systemd import configure_maintenance_timer
+from lib.kernel_restart import install_kernel_restart_hook
 from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
 from lib.machine_state import (
@@ -1069,6 +1070,9 @@ def configure_auto_restart(config: SetupConfig) -> None:
     if not can_modify_kernel():
         print("  ✓ Skipping automatic restart service (container)")
         return
+
+    if not is_dry_run():
+        install_kernel_restart_hook()
 
     configured = configure_maintenance_timer(
         service_name="auto-restart-if-needed",

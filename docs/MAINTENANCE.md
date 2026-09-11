@@ -47,6 +47,30 @@ VMs where their tools were not selected.
 
 ## Update Policy
 
+Kernel-capable setups install `/etc/kernel/postinst.d/infra-tools-reboot-required`.
+The standalone hook records `/run/reboot-required` and the package name in
+`/run/reboot-required.pkgs` when a different kernel is configured. It does not
+depend on unattended-upgrades and preserves existing package hooks and markers.
+Rerun setup to install or repair it; installing the hook does not itself reboot
+the machine or recreate a marker for an earlier update.
+
+For Proxmox hosts that already have an update without a marker, setup reports
+newer fully configured PVE kernel packages with boot images. The scheduled
+restart check also sends a warning to review boot selection and kernel pins.
+This package comparison is advisory only and cannot trigger an automatic or
+forced restart: an installed image does not establish the next boot selection.
+It continues to warn while a newer installed kernel is present, including when
+the older running kernel is deliberately pinned. Non-PVE running kernels do
+not use this fallback. Marker-based restarts retain the saved restart policy.
+
+Restart reminders are eligible once per local calendar day so timer jitter
+does not skip alternate days. Failed deliveries remain eligible on the next
+check; with multiple targets, successful targets can receive a duplicate when
+another target failed. Empty or level-filtered target lists are logged and do
+not count as delivery. Delivery failures remain best effort and do not change
+the restart policy. Inspect the restart service journal for the deferral reason
+and delivery result; service success alone does not prove notification delivery.
+
 [HomeBox](HOMEBOX.md) retains its installed version on ordinary setup reruns.
 Select an immediate reviewed upgrade with `--homebox-version TAG`; the weekly
 HomeBox timer also resolves the newest stable upstream release. Both paths use

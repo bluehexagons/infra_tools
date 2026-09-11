@@ -571,6 +571,11 @@ class TestConfigureAutoUpdates(unittest.TestCase):
 
 
 class TestConfigureMaintenanceTimers(unittest.TestCase):
+    def setUp(self):
+        patcher = patch("security.security_steps.install_kernel_restart_hook")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     @patch("security.security_steps.configure_maintenance_timer", return_value=False)
     @patch("security.security_steps.is_hardware", return_value=False)
     @patch("security.security_steps.is_vm", return_value=True)

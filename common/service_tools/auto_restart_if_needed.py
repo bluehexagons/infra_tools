@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 from lib.logging_utils import get_service_logger, log_event
 from lib.atomic_io import write_json_atomic
 from lib.agent_maintenance import inspect_agent_maintenance
+from lib.kernel_restart import newer_proxmox_kernel
 from lib.machine_state import can_restart_system, load_setup_config
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.plugin_registry import get_system_type_definition
@@ -29,7 +30,6 @@ logger = get_service_logger('auto_restart_if_needed', 'common', use_syslog=True)
 
 STATE_FILE = "/var/lib/infra_tools/auto_restart_state.json"
 MIN_UPTIME_SECONDS = 30 * 60
-NOTIFICATION_INTERVAL_SECONDS = 24 * 60 * 60
 _AGENT_PROCESS_NAMES = frozenset(("claude", "codex", "opencode"))
 _BUILD_PROCESS_NAMES = frozenset(
     (
@@ -261,26 +261,47 @@ def clear_restart_state() -> None:
 def should_notify(state: dict[str, Any], now: float) -> bool:
     """Return true when a deferral notification should be sent."""
     last_notified = _timestamp(state.get("last_notified"), 0)
-    return last_notified > now or now - last_notified >= NOTIFICATION_INTERVAL_SECONDS
+    if last_notified <= 0 or last_notified > now:
+        return True
+    try:
+        return time.localtime(last_notified)[:3] != time.localtime(now)[:3]
+    except (OSError, OverflowError, ValueError):
+        return True
 
 
-def record_deferral(reason: str, notification_configs, details: str | None = None) -> None:
+def record_deferral(
+    reason: str, notification_configs, details: str | None = None,
+    *, advisory: bool = False,
+) -> None:
     """Record a deferred restart and notify at most once per day."""
     now = time.time()
     state = load_restart_state()
-    first_required = _timestamp(state.get("first_required"), now)
-    state["first_required"] = now if first_required > now else first_required
-    if should_notify(state, now):
-        send_notification_safe(
-            notification_configs,
-            subject="Restart required: deferred",
+    if advisory:
+        state.pop("first_required", None)
+    else:
+        first_required = _timestamp(state.get("first_required"), now)
+        state["first_required"] = now if first_required > now else first_required
+    log_event(logger, "Restart deferred", reason=reason, advisory=advisory)
+    eligible = [
+        config for config in notification_configs
+        if getattr(config, "level", "normal") not in ("error", "off")
+    ]
+    if not eligible:
+        log_event(logger, "No eligible restart notification targets")
+    elif should_notify(state, now):
+        delivered = send_notification_safe(
+            eligible,
+            subject="Newer kernel installed: review restart" if advisory else "Restart required: deferred",
             job="auto_restart_if_needed",
             status="warning",
-            message=f"A restart is required, but it was deferred: {reason}.",
+            message=reason if advisory else f"A restart is required, but it was deferred: {reason}.",
             details=details,
             logger=logger,
         )
-        state["last_notified"] = now
+        if delivered is True:
+            state["last_notified"] = now
+        else:
+            log_event(logger, "Restart notification failed; next check will retry", level=ERROR)
     state["last_reason"] = reason
     save_restart_state(state)
 
@@ -338,6 +359,21 @@ def main() -> int:
     notification_configs = load_notification_configs_from_state(logger)
 
     if not check_restart_required():
+        try:
+            pending_kernel = newer_proxmox_kernel()
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            log_event(logger, "Could not inspect installed kernels", level=ERROR, error=str(exc))
+            return 1
+        if pending_kernel:
+            record_deferral(
+                f"Newer Proxmox kernel {pending_kernel} is installed, but no reboot "
+                "marker exists. Review boot selection and kernel pins, then schedule "
+                "a restart to activate the intended kernel. Automatic restart is "
+                "not scheduled from package comparison alone.",
+                notification_configs,
+                advisory=True,
+            )
+            return 0
         clear_restart_state()
         log_event(logger, "No restart required")
         return 0

@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -16,6 +17,65 @@ from common.service_tools import auto_restart_if_needed
 
 
 class TestAutoRestartIfNeeded(unittest.TestCase):
+    @patch("common.service_tools.auto_restart_if_needed.perform_restart")
+    @patch("common.service_tools.auto_restart_if_needed.record_deferral")
+    @patch("common.service_tools.auto_restart_if_needed.newer_proxmox_kernel", return_value="7.0.14-16-pve")
+    @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=False)
+    @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
+    def test_markerless_kernel_warns_without_scheduling_restart(self, _load, _marker, _kernel, defer, restart):
+        self.assertEqual(auto_restart_if_needed.main(), 0)
+        self.assertTrue(defer.call_args.kwargs["advisory"])
+        self.assertIn("7.0.14-16-pve", defer.call_args.args[0])
+        restart.assert_not_called()
+
+    def test_reminder_uses_calendar_day_despite_timer_jitter(self):
+        sent = time.mktime((2026, 9, 10, 2, 6, 44, 0, 0, -1))
+        next_run = time.mktime((2026, 9, 11, 2, 1, 44, 0, 0, -1))
+        self.assertTrue(auto_restart_if_needed.should_notify({"last_notified": sent}, next_run))
+        self.assertFalse(auto_restart_if_needed.should_notify({"last_notified": sent}, sent + 60))
+
+    @patch("common.service_tools.auto_restart_if_needed.save_restart_state")
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_state", return_value={})
+    @patch("common.service_tools.auto_restart_if_needed.send_notification_safe", return_value=False)
+    def test_failed_delivery_does_not_start_cooldown(self, send, _load, save):
+        auto_restart_if_needed.record_deferral("disabled", ["cfg"])
+        self.assertNotIn("last_notified", save.call_args.args[0])
+        self.assertIn("first_required", save.call_args.args[0])
+        send.return_value = True
+        auto_restart_if_needed.record_deferral("disabled", ["cfg"])
+        self.assertIn("last_notified", save.call_args.args[0])
+
+    @patch("common.service_tools.auto_restart_if_needed.save_restart_state")
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_state", return_value={"first_required": 1})
+    @patch("common.service_tools.auto_restart_if_needed.send_notification_safe")
+    def test_advisory_does_not_start_force_deadline_or_record_empty_delivery(self, send, _load, save):
+        auto_restart_if_needed.record_deferral("review kernel", [], advisory=True)
+        self.assertNotIn("first_required", save.call_args.args[0])
+        self.assertNotIn("last_notified", save.call_args.args[0])
+        send.assert_not_called()
+
+    @patch("common.service_tools.auto_restart_if_needed.clear_restart_state")
+    @patch("common.service_tools.auto_restart_if_needed.newer_proxmox_kernel")
+    @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=False)
+    @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=[])
+    def test_probe_failure_is_not_an_all_clear_and_success_clears_state(self, _load, _marker, probe, clear):
+        probe.side_effect = subprocess.TimeoutExpired("dpkg-query", 30)
+        self.assertEqual(auto_restart_if_needed.main(), 1)
+        clear.assert_not_called()
+        probe.side_effect = None
+        probe.return_value = None
+        self.assertEqual(auto_restart_if_needed.main(), 0)
+        clear.assert_called_once()
+
+    @patch("common.service_tools.auto_restart_if_needed.save_restart_state")
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_state", return_value={})
+    @patch("common.service_tools.auto_restart_if_needed.send_notification_safe")
+    def test_filtered_targets_do_not_start_delivery_cooldown(self, send, _load, save):
+        configs = [SimpleNamespace(level="off"), SimpleNamespace(level="error")]
+        auto_restart_if_needed.record_deferral("disabled", configs)
+        send.assert_not_called()
+        self.assertNotIn("last_notified", save.call_args.args[0])
+
     def test_detects_agent_build_multiplexer_and_managed_worktree_categories(self):
         with (
             tempfile.TemporaryDirectory() as home,

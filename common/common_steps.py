@@ -14,10 +14,11 @@ from typing import Optional
 
 from lib.atomic_io import write_text_atomic
 from lib.maintenance_systemd import configure_maintenance_timer
+from lib.kernel_restart import newer_proxmox_kernel
 from lib.apt_sources import ensure_debian_package_sources
 from lib.config import SetupConfig
 from lib.maintenance_defaults import APT_LOCK_OPTIONS
-from lib.machine_state import can_manage_time_sync
+from lib.machine_state import can_manage_time_sync, can_modify_kernel
 from lib.remote_utils import (
     file_contains,
     install_package,
@@ -752,16 +753,22 @@ def install_control_plane_tools(config: SetupConfig) -> None:
 
 
 def check_restart_required(config: SetupConfig) -> None:
-    needs_restart = False
-    
+    if is_dry_run():
+        print("  [DRY-RUN] Would inspect restart markers and installed kernels")
+        return
+
     if os.path.exists("/var/run/reboot-required"):
-        needs_restart = True
-    
-    if needs_restart:
         print("  ⚠ System restart recommended (kernel/system updates)")
         print("  Run 'sudo reboot' when convenient")
-    else:
-        print("  ✓ No restart required")
+        return
+    pending_kernel = newer_proxmox_kernel() if can_modify_kernel() else None
+    if pending_kernel:
+        print(
+            f"  ⚠ Newer Proxmox kernel installed: {pending_kernel}; "
+            "review boot selection and kernel pins, then schedule a restart"
+        )
+        return
+    print("  ✓ No restart requirement detected")
 
 
 def _run_as_login_user(
