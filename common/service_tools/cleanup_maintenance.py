@@ -15,6 +15,7 @@ from logging import ERROR, INFO, WARNING, DEBUG
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.disk_utils import get_disk_usage_details
+from lib.kernel_cleanup import obsolete_manual_kernels
 from lib.logging_utils import get_service_logger, log_event
 from lib.atomic_io import write_json_atomic
 from lib.maintenance_defaults import (
@@ -153,6 +154,20 @@ def cleanup_unused_packages() -> list[str]:
 
     env = os.environ.copy()
     env["DEBIAN_FRONTEND"] = "noninteractive"
+    try:
+        kernels = obsolete_manual_kernels()
+    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
+        log_event(logger, "Kernel retention inspection failed", level=WARNING, error=str(exc))
+        return [f"kernel retention inspection: {exc}"]
+    if kernels:
+        log_event(logger, "Returning obsolete kernels to automatic package management", packages=",".join(kernels))
+        failure = run_cleanup_command(
+            ["apt-mark", "auto"] + kernels,
+            "Obsolete kernel selection cleanup",
+            env=env,
+        )
+        if failure:
+            return [failure]
     failure = run_cleanup_command(
         [apt_get, "autoremove", "--purge", "-y", "-qq"] + APT_LOCK_OPTIONS,
         "APT unused package cleanup",

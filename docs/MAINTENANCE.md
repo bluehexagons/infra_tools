@@ -219,6 +219,31 @@ and Proxmox hosts, cleanup returns unused blocks to storage after deletion when
 discard is supported. It defers to an active native `fstrim.timer` instead of
 running a duplicate trim; containers skip this host-level operation.
 
+Before autoremove, kernel-capable non-container hosts return obsolete manual
+kernel selections to automatic APT management. This covers versioned
+Debian/Ubuntu kernel images matching the running flavour and old Proxmox kernel
+series metapackages. Only versions older than the running kernel qualify; the
+newest older image is also excluded from these metadata changes as a fallback.
+APT holds and `NeverAutoRemove` rules remain respected, including Proxmox's
+generated boot-selection protections. Default-kernel and helper packages,
+unversioned Debian/Ubuntu tracking metapackages, other flavours, and unknown
+custom kernel names are left alone. APT determines actual removals from its
+dependency and retention rules; infra-tools never deletes boot images directly.
+
+Rerun setup to deploy this behavior for the next weekly cleanup. Preview the
+manual selections it would release without changing anything:
+
+```bash
+cd /opt/infra_tools
+sudo /usr/bin/python3 -m lib.kernel_cleanup
+```
+
+To deliberately retain an additional obsolete image, use `apt-mark hold PACKAGE`
+(which also blocks package upgrades), or the platform's kernel retention rules.
+A manual-install flag alone no longer reserves an obsolete kernel. Failed
+inventory, retention inspection, or metadata updates stop the package-removal
+phase and are reported through the cleanup job's failure notification.
+
 `user-cache-maintenance` runs as the configured non-root account instead of
 root, after the weekly runtime-update window. It inventories tool-reported
 cache paths before acting. Tool commands receive the account's home-scoped

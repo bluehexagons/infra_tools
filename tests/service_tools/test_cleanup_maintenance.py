@@ -161,7 +161,8 @@ class TestCleanupHelpers(unittest.TestCase):
         _which,
         mock_cleanup,
     ):
-        result = cleanup_maintenance.cleanup_unused_packages()
+        with patch("common.service_tools.cleanup_maintenance.obsolete_manual_kernels", return_value=[]):
+            result = cleanup_maintenance.cleanup_unused_packages()
 
         self.assertEqual(result, [])
         mock_cleanup.assert_called_once_with(
@@ -189,7 +190,8 @@ class TestCleanupHelpers(unittest.TestCase):
         _which,
         mock_cleanup,
     ):
-        cleanup_maintenance.cleanup_unused_packages()
+        with patch("common.service_tools.cleanup_maintenance.obsolete_manual_kernels", return_value=[]):
+            cleanup_maintenance.cleanup_unused_packages()
 
         command = mock_cleanup.call_args.args[0]
         self.assertNotIn("~c", command)
