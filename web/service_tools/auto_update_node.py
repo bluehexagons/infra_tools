@@ -184,18 +184,21 @@ def get_global_package_specs(source_version: str) -> tuple[bool, list[str], Mayb
         "--depth=0",
         "--json",
     ])
-    if result.returncode != 0 and not result.stdout.strip():
+    if result.returncode != 0:
         details = result.stderr.strip() or f"npm list failed for {source_version}"
         return False, [], details
 
     try:
-        payload = json.loads(result.stdout or "{}")
+        payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         return False, [], f"Failed to parse global npm packages for {source_version}: {exc}"
 
+    if not isinstance(payload, dict) or payload.get("error") or payload.get("problems"):
+        return False, [], f"Invalid global npm package inventory for {source_version}"
+
     dependencies = payload.get("dependencies", {})
     if not isinstance(dependencies, dict):
-        return True, [], None
+        return False, [], f"Invalid global npm dependencies for {source_version}"
 
     package_specs: list[str] = []
     missing_versions: list[str] = []

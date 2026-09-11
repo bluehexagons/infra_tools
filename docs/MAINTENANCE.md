@@ -103,7 +103,8 @@ Node.js and uv use a conservative default policy:
 - Node.js follows the LTS track by default. An already-installed non-LTS track
   is treated as an explicit choice and remains on that track. Global npm
   package versions are preserved when the runtime changes. If package migration
-  fails, the updater restores the previous default and removes only the
+  fails (including failed npm inventory commands or malformed inventory),
+  the updater restores the previous default and removes only the
   incomplete new runtime. A later setup rerun verifies the promised
   Node/npm/PNPM baseline by running each version command and repairs it if a
   manual change left one unavailable or unusable. Setup fails visibly when the

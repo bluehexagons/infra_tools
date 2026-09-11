@@ -15,6 +15,47 @@ from lib.update_policy import DEPENDENCY_MIN_AGE_DAYS_ENV, ECOSYSTEM_AUTO_UPGRAD
 
 
 class TestAutoUpdateNode(unittest.TestCase):
+    @patch("web.service_tools.auto_update_node.run_nvm_command")
+    def test_invalid_package_inventory_rolls_back_without_removing_source(self, mock_run):
+        cases = [
+            (1, '{"dependencies":{"pnpm":{"version":"9.1.0"}}}'),
+            (0, ''),
+            (0, 'null'),
+            (0, '[]'),
+            (0, '{"dependencies":[]}'),
+            (0, '{"error":{"code":"ELSPROBLEMS"}}'),
+            (0, '{"problems":["missing package"]}'),
+        ]
+        for returncode, inventory in cases:
+            with self.subTest(returncode=returncode, inventory=inventory):
+                mock_run.reset_mock()
+
+                def run_command(args):
+                    if "list" in args:
+                        return subprocess.CompletedProcess(args, returncode, inventory, "")
+                    return subprocess.CompletedProcess(args, 0, "", "")
+
+                mock_run.side_effect = run_command
+                success, details = auto_update_node.install_target_version(
+                    "lts", "v20.12.3", "v20.12.2",
+                )
+                self.assertFalse(success)
+                self.assertIn("restored the previous Node.js runtime", details or "")
+                commands = [call.args[0] for call in mock_run.call_args_list]
+                self.assertIn(["nvm", "alias", "default", "v20.12.2"], commands)
+                self.assertIn(["nvm", "uninstall", "v20.12.3"], commands)
+                self.assertNotIn(["nvm", "uninstall", "v20.12.2"], commands)
+                self.assertFalse(any("npm" in command and "install" in command for command in commands))
+
+    @patch("web.service_tools.auto_update_node.run_nvm_command")
+    def test_empty_valid_package_inventory_needs_no_migration(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess([], 0, '{}', '')
+        self.assertEqual(
+            auto_update_node.reinstall_global_packages("v20.12.2", "v20.12.3"),
+            (True, None),
+        )
+        mock_run.assert_called_once()
+
     def test_select_installed_latest_track_from_versions_newer_than_lts(self):
         self.assertEqual(
             auto_update_node.select_installed_latest_track_version(
