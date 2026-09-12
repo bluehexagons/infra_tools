@@ -1,9 +1,14 @@
 # Shared desktop setup audit — 2026-09-12
 
-After applying the configuration cleanup, the operator reports that resize
-may no longer reconnect. The current VM has the updated configuration and a
-new session (PID 303762); the responsible setting has not been isolated. The
-source-level cursor-cache lead below remains unconfirmed. Supporting
+After another setup run, the operator confirmed that the first resize after
+connection still causes reconnection. The apparent earlier improvement was
+not a complete fix. The current VM has the updated configuration and a new
+session (PID 325588). Xorg records a successful resize to 948×760, a connection
+drop about 0.96 seconds later, and reattachment to the same X server. Subsequent
+resizes to 1174×760 and 1074×760 complete without an immediate drop. A fresh
+client trace is needed to confirm that this reproduction has the same cached
+pointer error as the earlier captures. The source-level cursor-cache lead
+below remains unconfirmed. Supporting
 distribution-packaged Remmina remains the objective. No client downgrade is a
 deployment requirement.
 
