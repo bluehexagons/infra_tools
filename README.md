@@ -53,6 +53,53 @@ defaults to a VM; select `--machine unprivileged` for the supported LXC path.
 See [Machine types](docs/MACHINE_TYPES.md) for capability and compatibility
 details.
 
+## Hardware sizing
+
+Choose the row for the workload you will actually run. Each cell lists
+**CPU cores / RAM / total OS disk**; for a VM, cores means virtual CPUs.
+These are practical planning tiers for Debian, not installer-enforced limits
+or benchmarks of every feature combination. Minimum means one user doing
+limited work, recommended suits ordinary small deployments, and performance
+adds room for concurrency, larger builds, and retained caches.
+
+| Use case | Minimum | Recommended | Performance |
+| --- | --- | --- | --- |
+| Controller or light SSH/server utilities | 1 / 1 GB / 8 GB | 2 / 2 GB / 16 GB | 4 / 4 GB / 32 GB |
+| Small web server or file-sharing service | 1 / 1 GB / 16 GB | 2 / 2 GB / 32 GB | 4 / 8 GB / 64 GB |
+| Headless development with one language runtime or coding agent | 2 / 2 GB / 16 GB | 2 / 4 GB / 32 GB | 4 / 8 GB / 64 GB |
+| Full XFCE/RDP desktop, T3, and occasional browser testing | **2 / 4 GB / 32 GB** | **4 / 8 GB / 64 GB** | **8 / 16 GB / 128 GB** |
+| Godot development, frequent builds, or several concurrent agents | 2 / 4 GB / 32 GB¹ | 4 / 8 GB / 64 GB | 8+ / 16–32 GB / 128–256 GB |
+
+¹ The minimum covers small 2D projects or one build/agent at a time; concurrent
+agents and large projects need more memory and storage. CPU speed, SSD latency,
+and graphics support also affect performance. Extra disk capacity alone does
+not make a machine faster.
+
+**A 32 GB full desktop is a valid limited-use target.** Keep only a few small
+projects locally, limit browser tabs and parallel builds, and leave recurring
+cleanup enabled. Budget roughly 4–6 GB of available space for temporary downloads
+and updates; cleanup can discard rebuildable caches but cannot shrink your
+projects or remove files used by active tools. Our maintained 32 GB test VM runs
+the desktop and agent/browser tooling at about 23 GiB used after managed cleanup
+(September 2026); this is an observed footprint, not a fresh-install size guarantee.
+
+The disks above include Debian, selected tools, modest local work, and room for
+updates. Add space for shared files, databases, container images, media, and
+backups separately. Minimum-memory setups assume swap is available; allow about
+2 GB for light servers and 4 GB for the desktop within the disk budget. Swap
+helps with brief memory spikes but does not replace RAM for sustained work.
+Coding-agent rows assume remote model providers; local model inference needs
+its own RAM, accelerator, and model-storage budget.
+These sizes exceed [Debian's base installation requirements](https://www.debian.org/releases/trixie/amd64/ch03s04.en.html)
+to accommodate infra-tools and useful work. For Proxmox hosts, add the resources
+required by every guest and storage workload to the host's own requirements;
+the table describes individual guests, not an entire virtualization host.
+
+Start with 64 GB for a desktop when unsure; choose 128 GB for the performance
+tier or substantial local work. The [beginner walkthrough](docs/GETTING_STARTED.md)
+and [cleanup guide](docs/MAINTENANCE.md#cleanup-and-state-safety) explain how to
+try features and keep a small VM usable.
+
 ## Capabilities
 
 | Area | Summary | Detailed guide |

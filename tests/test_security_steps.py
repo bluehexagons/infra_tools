@@ -664,9 +664,9 @@ class TestConfigureMaintenanceTimers(unittest.TestCase):
         mock_configure.assert_any_call(
             service_name="user-cache-maintenance",
             service_desc="Prune configured user developer-tool caches",
-            timer_desc="Prune configured user developer-tool caches (weekly)",
+            timer_desc="Prune configured user developer-tool caches (daily)",
             script_path="/opt/infra_tools/common/service_tools/user_cache_maintenance.py",
-            schedule="Mon *-*-* 03:00:00",
+            schedule="*-*-* 07:00:00",
             check_name="User cache maintenance",
             user="u",
             randomized_delay="30min",

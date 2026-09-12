@@ -16,6 +16,12 @@ from common.service_tools import user_cache_maintenance
 
 
 class TestUserCacheHelpers(unittest.TestCase):
+    def setUp(self):
+        patcher = patch("common.service_tools.user_cache_maintenance.process_uses_path", return_value=False)
+        self.path_patcher = patcher
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _context(self, home: str) -> user_cache_maintenance.UserContext:
         return user_cache_maintenance.UserContext("agent", home, os.getuid())
 
@@ -153,6 +159,8 @@ class TestUserCacheHelpers(unittest.TestCase):
             )
 
     def test_process_path_detection_checks_cwd_and_individual_arguments(self):
+        # This test exercises the real scanner against a synthetic proc tree.
+        self.path_patcher.stop()
         with tempfile.TemporaryDirectory() as proc_root, tempfile.TemporaryDirectory() as home:
             npx_path = os.path.join(home, ".npm", "_npx")
             process_dir = os.path.join(proc_root, "123")
@@ -172,6 +180,17 @@ class TestUserCacheHelpers(unittest.TestCase):
             self.assertTrue(
                 user_cache_maintenance.process_uses_path(npx_path, proc_root=proc_root)
             )
+
+            with patch.object(user_cache_maintenance.os, "readlink", side_effect=PermissionError):
+                # A protected cwd does not conceal a readable path argument.
+                self.assertTrue(
+                    user_cache_maintenance.process_uses_path(npx_path, proc_root=proc_root)
+                )
+                with open(os.path.join(process_dir, "cmdline"), "wb") as handle:
+                    handle.write(b"/usr/bin/ssh-agent\0")
+                self.assertFalse(
+                    user_cache_maintenance.process_uses_path(npx_path, proc_root=proc_root)
+                )
 
     @patch("common.service_tools.user_cache_maintenance.tool_is_active", return_value=False)
     def test_managed_cache_removes_only_allowlisted_directory(self, _active):
@@ -327,6 +346,10 @@ class TestUserCacheHelpers(unittest.TestCase):
 class TestUserCachePolicies(unittest.TestCase):
     def setUp(self):
         self.context = user_cache_maintenance.UserContext("agent", "/home/agent", 1000)
+        for name in ("storage_pressure", "tool_is_active", "process_uses_path"):
+            patcher = patch(f"common.service_tools.user_cache_maintenance.{name}", return_value=False)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     @patch("common.service_tools.user_cache_maintenance.run_cleanup_command", return_value=None)
     @patch("common.service_tools.user_cache_maintenance.process_uses_path", return_value=False)
@@ -484,8 +507,9 @@ class TestUserCachePolicies(unittest.TestCase):
         mock_cleanup.assert_called_once_with(
             self.context,
             ["go", "clean", "-cache", "-testcache", "-fuzzcache"],
-            "Go build cache oversized cleanup",
+            "Go build cache eviction",
             dry_run=False,
+            cache_path="/home/agent/.cache/go-build",
         )
 
     @patch(

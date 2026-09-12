@@ -11,6 +11,11 @@ Use a Debian VM with internet access, a regular user account, and working
 applying setup so you can return to the starting point. You can use an existing
 VM from any virtualization tool; infra-tools does not have to create it.
 
+For this small development-server exercise, start with 2 virtual CPUs, 4 GB RAM,
+and a 32 GB disk. A full desktop can also fit a 32 GB disk for limited use;
+64 GB gives more room for projects. See the [hardware sizing table](../README.md#hardware-sizing)
+for minimum, recommended, and performance tiers, including memory and swap.
+
 A full setup changes system packages, SSH, firewall rules, and recurring
 maintenance, including automatic updates and restart policy. Use a test VM
 instead of your everyday desktop for this exercise. Installing only the

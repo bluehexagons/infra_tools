@@ -27,8 +27,11 @@ APT_UPDATE_OPTIONS = ["-o", "APT::Update::Error-Mode=any"]
 CLEANUP_COMMAND_TIMEOUT_SECONDS = 600
 
 # User-scoped cache maintenance runs independently from privileged host
-# cleanup. Pruning commands run every week, while full cache eviction is
-# reserved for these bounded size/age thresholds.
+# cleanup. Pruning commands run daily, while full cache eviction is
+# reserved for these bounded size/age thresholds or low filesystem headroom.
+USER_CACHE_FREE_MIN_BYTES = 2 * BYTES_PER_GB
+USER_CACHE_FREE_MAX_BYTES = 8 * BYTES_PER_GB
+USER_CACHE_PRESSURE_MIN_BYTES = BYTES_PER_GB // 16
 NPM_CACHE_MAX_BYTES = 2 * BYTES_PER_GB
 NPM_NPX_CACHE_MAX_BYTES = BYTES_PER_GB
 PIP_CACHE_MAX_BYTES = 2 * BYTES_PER_GB

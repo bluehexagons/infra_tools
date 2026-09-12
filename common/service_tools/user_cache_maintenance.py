@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pwd
+import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -35,13 +38,17 @@ from lib.maintenance_defaults import (
     STALE_USER_TOOL_TMP_MAX_AGE_DAYS,
     T3_ROTATED_LOG_MAX_AGE_DAYS,
     T3_ROTATED_LOG_MAX_BYTES,
+    USER_CACHE_FREE_MAX_BYTES,
+    USER_CACHE_FREE_MIN_BYTES,
+    USER_CACHE_PRESSURE_MIN_BYTES,
 )
-from lib.types import BYTES_PER_MB
+from lib.types import BYTES_PER_MB, JSONDict
 from lib.validation import validate_filesystem_path
 
 
 logger = get_service_logger("user_cache_maintenance", "common", use_syslog=True)
 _TOOL_NOT_FOUND_EXIT = 77
+_T3_VERSION_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 
 
 @dataclass(frozen=True)
@@ -171,6 +178,7 @@ def run_cleanup_command(
     *,
     dry_run: bool,
     load_nvm: bool = False,
+    cache_path: str | None = None,
 ) -> str | None:
     """Run a supported cache command and return a concise failure summary."""
     if dry_run:
@@ -183,6 +191,7 @@ def run_cleanup_command(
         return None
 
     try:
+        before = cache_usage(cache_path) if cache_path else None
         result = run_tool_command(context, command, load_nvm=load_nvm)
     except subprocess.TimeoutExpired:
         details = f"timed out after {CLEANUP_COMMAND_TIMEOUT_SECONDS}s"
@@ -202,6 +211,16 @@ def run_cleanup_command(
         return f"{action}: {details}"
 
     log_event(logger, f"{action} completed", level=INFO)
+    if before is not None and cache_path is not None:
+        try:
+            after = cache_usage(cache_path)
+            log_event(
+                logger, "User cache cleanup result", action=action,
+                removed_mb=round(max(0, before.size_bytes - after.size_bytes) / BYTES_PER_MB, 1),
+                retained_mb=round(after.size_bytes / BYTES_PER_MB, 1),
+            )
+        except OSError as exc:
+            return f"{action} result inventory: {exc}"
     return None
 
 
@@ -353,8 +372,10 @@ def tool_is_active(process_names: tuple[str, ...], proc_root: str = "/proc") -> 
                     continue
                 with open(os.path.join(entry.path, "comm"), encoding="utf-8") as handle:
                     process_name = handle.read().strip().lower()
-            except OSError:
+            except FileNotFoundError:
                 continue
+            except OSError:
+                return True
             if any(
                 process_name == name
                 or process_name.startswith(f"{name}-")
@@ -366,7 +387,7 @@ def tool_is_active(process_names: tuple[str, ...], proc_root: str = "/proc") -> 
 
 
 def process_uses_path(path: str, proc_root: str = "/proc") -> bool:
-    """Detect current-user processes whose cwd or argument vector names a path."""
+    """Check accessible cwd/executable links and current-user argument vectors."""
     current_uid = os.getuid()
     absolute_path = os.path.abspath(path)
     encoded_path = os.fsencode(absolute_path)
@@ -382,11 +403,20 @@ def process_uses_path(path: str, proc_root: str = "/proc") -> bool:
             try:
                 if entry.stat(follow_symlinks=False).st_uid != current_uid:
                     continue
-                cwd = os.readlink(os.path.join(entry.path, "cwd"))
-                if os.path.commonpath((os.path.abspath(cwd), absolute_path)) == absolute_path:
-                    return True
-            except (OSError, ValueError):
-                pass
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            except OSError:
+                return True
+            # Non-dumpable user daemons (systemd, ssh-agent, etc.) commonly
+            # hide these links. Their readable argv must still be checked;
+            # one hidden cwd must not mark every user cache as occupied.
+            for link in ("cwd", "exe"):
+                try:
+                    target = os.readlink(os.path.join(entry.path, link))
+                    if os.path.commonpath((os.path.abspath(target), absolute_path)) == absolute_path:
+                        return True
+                except (OSError, ValueError):
+                    pass
             try:
                 with open(os.path.join(entry.path, "cmdline"), "rb") as handle:
                     arguments = handle.read()
@@ -395,8 +425,43 @@ def process_uses_path(path: str, proc_root: str = "/proc") -> bool:
                     for argument in arguments.split(b"\0")
                 ):
                     return True
-            except OSError:
+            except (FileNotFoundError, ProcessLookupError):
                 continue
+            except OSError:
+                return True
+    return False
+
+
+def storage_pressure(path: str) -> bool:
+    """Check available space on the cache's filesystem, including reserved blocks."""
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError as exc:
+        log_event(logger, "Cannot assess cache filesystem", level=WARNING, error=str(exc))
+        return False
+    target = min(USER_CACHE_FREE_MAX_BYTES, max(USER_CACHE_FREE_MIN_BYTES, usage.total // 5))
+    if usage.free >= target:
+        return False
+    log_event(
+        logger, "Cache filesystem needs headroom",
+        available_mb=round(usage.free / BYTES_PER_MB, 1),
+        target_mb=round(target / BYTES_PER_MB, 1),
+    )
+    return True
+
+
+def cache_needs_eviction(path: str, usage: CacheUsage, max_bytes: int) -> bool:
+    """Recheck space before each eviction so later caches can be retained."""
+    return usage.size_bytes > max_bytes or (
+        usage.size_bytes >= USER_CACHE_PRESSURE_MIN_BYTES and storage_pressure(path)
+    )
+
+
+def defer_active_cache(path: str, process_names: tuple[str, ...]) -> bool:
+    """Preserve caches referenced by a running tool or process path."""
+    if tool_is_active(process_names) or process_uses_path(path):
+        log_event(logger, "User cache cleanup deferred while in use", path=path)
+        return True
     return False
 
 
@@ -420,12 +485,14 @@ def cleanup_managed_directory(
     reasons: list[str] = []
     if usage.size_bytes > max_bytes:
         reasons.append("size limit exceeded")
+    elif cache_needs_eviction(path, usage, max_bytes):
+        reasons.append("low free space")
     cutoff = time.time() - (max_age_days * 24 * 60 * 60)
     if usage.newest_mtime < cutoff:
         reasons.append("stale")
     if not reasons:
         return []
-    if tool_is_active(process_names):
+    if defer_active_cache(path, process_names):
         log_event(
             logger,
             "User cache cleanup deferred while tool is active",
@@ -467,6 +534,7 @@ def cleanup_managed_directory(
         cache=label,
         path=path,
         reason=", ".join(reasons),
+        removed_mb=round(usage.size_bytes / BYTES_PER_MB, 1),
     )
     return []
 
@@ -555,6 +623,8 @@ def cleanup_npm_cache(context: UserContext, *, dry_run: bool) -> list[str]:
         return [failure]
     if path is None or executable is None:
         return []
+    if defer_active_cache(path, ("npm", "npx", "pnpm", "yarn")):
+        return []
 
     npx_path = os.path.join(path, "_npx")
     if process_uses_path(npx_path):
@@ -595,14 +665,15 @@ def cleanup_npm_cache(context: UserContext, *, dry_run: bool) -> list[str]:
     if (
         verify_failure is None
         and usage is not None
-        and usage.size_bytes > NPM_CACHE_MAX_BYTES
+        and cache_needs_eviction(path, usage, NPM_CACHE_MAX_BYTES)
     ):
         clean_failure = run_cleanup_command(
             context,
             [executable, "cache", "clean", "--force"],
-            "npm oversized cache cleanup",
+            "npm cache eviction",
             dry_run=dry_run,
             load_nvm=True,
+            cache_path=path,
         )
         if clean_failure:
             failures.append(clean_failure)
@@ -717,7 +788,7 @@ def cleanup_codex_standalone_releases(
 
 
 def cleanup_pip_cache(context: UserContext, *, dry_run: bool) -> list[str]:
-    """Purge pip's cache only after it exceeds its configured size limit."""
+    """Purge pip's cache when oversized or its filesystem needs headroom."""
     path, executable, failure = query_cache_path(
         context,
         (["pip3", "cache", "dir"], ["pip", "cache", "dir"]),
@@ -727,15 +798,18 @@ def cleanup_pip_cache(context: UserContext, *, dry_run: bool) -> list[str]:
         return [failure]
     if path is None or executable is None:
         return []
+    if defer_active_cache(path, ("pip", "pip3")):
+        return []
 
     usage, inventory_failure = inventory_cache(context, "pip", path)
     failures = [inventory_failure] if inventory_failure else []
-    if usage is not None and usage.size_bytes > PIP_CACHE_MAX_BYTES:
+    if usage is not None and cache_needs_eviction(path, usage, PIP_CACHE_MAX_BYTES):
         cleanup_failure = run_cleanup_command(
             context,
             [executable, "cache", "purge"],
-            "pip oversized cache cleanup",
+            "pip cache eviction",
             dry_run=dry_run,
+            cache_path=path,
         )
         if cleanup_failure:
             failures.append(cleanup_failure)
@@ -752,6 +826,8 @@ def cleanup_uv_cache(context: UserContext, *, dry_run: bool) -> list[str]:
     if failure:
         return [failure]
     if path is None or executable is None:
+        return []
+    if defer_active_cache(path, ("uv",)):
         return []
 
     usage, inventory_failure = inventory_cache(context, "uv", path)
@@ -778,7 +854,7 @@ def cleanup_go_cache(
     clean_args: list[str],
     dry_run: bool,
 ) -> list[str]:
-    """Clean one Go cache through the go command after it exceeds its limit."""
+    """Evict one idle Go cache when oversized or short of filesystem space."""
     path, executable, failure = query_cache_path(
         context,
         (["go", "env", go_env_name],),
@@ -788,15 +864,18 @@ def cleanup_go_cache(
         return [failure]
     if path is None or executable is None:
         return []
+    if defer_active_cache(path, ("go", "compile", "link", "gopls")):
+        return []
 
     usage, inventory_failure = inventory_cache(context, cache_name, path)
     failures = [inventory_failure] if inventory_failure else []
-    if usage is not None and usage.size_bytes > max_bytes:
+    if usage is not None and cache_needs_eviction(path, usage, max_bytes):
         cleanup_failure = run_cleanup_command(
             context,
             [executable, "clean"] + clean_args,
-            f"{cache_name} oversized cleanup",
+            f"{cache_name} eviction",
             dry_run=dry_run,
+            cache_path=path,
         )
         if cleanup_failure:
             failures.append(cleanup_failure)
@@ -843,18 +922,184 @@ def cleanup_agent_caches(context: UserContext, *, dry_run: bool) -> list[str]:
     return failures
 
 
+def cleanup_electron_downloads(context: UserContext, *, dry_run: bool) -> list[str]:
+    """Expire recognized Electron download ZIPs, preserving installations and profiles."""
+    root = os.path.join(context.home, ".cache", "electron")
+    if not is_safe_managed_path(context, root, "Electron downloads") or not os.path.isdir(root):
+        return []
+    if defer_active_cache(root, ("npm", "npx", "pnpm", "yarn", "electron")):
+        return []
+    pattern = re.compile(r"electron-v[0-9]+\.[0-9]+\.[0-9]+-linux-(?:x64|arm64|armv7l)\.zip")
+    failures: list[str] = []
+    try:
+        candidates: list[tuple[float, str]] = []
+        for directory, children, files in os.walk(root):
+            children[:] = [name for name in children if not os.path.islink(os.path.join(directory, name))]
+            for name in files:
+                if pattern.fullmatch(name):
+                    path = os.path.join(directory, name)
+                    info = os.lstat(path)
+                    if stat.S_ISREG(info.st_mode) and info.st_uid == context.uid:
+                        candidates.append((info.st_mtime, path))
+        for _mtime, path in sorted(candidates):
+            if not is_safe_managed_path(context, path, "Electron download"):
+                continue
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != context.uid:
+                continue
+            age_days = (time.time() - info.st_mtime) / 86400
+            # Even under pressure, leave newly downloaded/in-progress artifacts alone.
+            if age_days < 1 or (age_days < 30 and not storage_pressure(path)):
+                continue
+            if defer_active_cache(path, ("npm", "npx", "pnpm", "yarn", "electron")):
+                continue
+            if not dry_run:
+                os.unlink(path)
+            log_event(
+                logger, "Would remove Electron download" if dry_run else "Removed Electron download",
+                path=path, size_mb=round(info.st_size / BYTES_PER_MB, 1),
+            )
+    except OSError as exc:
+        failures.append(f"Electron download cleanup: {exc}")
+    return failures
+
+
+def _t3_state(context: UserContext, path: str) -> JSONDict:
+    """Read only a bounded regular T3 protocol-2 state file with known versions."""
+    if not is_safe_managed_path(context, path, "T3 service state"):
+        raise ValueError("unsafe T3 state path")
+    info = os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != context.uid or info.st_size > 65536:
+        raise ValueError("unrecognized T3 state file")
+    with open(path, encoding="utf-8") as handle:
+        state = json.load(handle)
+    if not isinstance(state, dict) or state.get("protocol") != 2:
+        raise ValueError("unrecognized T3 state protocol")
+    if (
+        not isinstance(state.get("activeVersion"), str)
+        or not _T3_VERSION_PATTERN.fullmatch(state["activeVersion"])
+    ):
+        raise ValueError("unrecognized T3 active version")
+    if "update" in state:
+        update = state["update"]
+        if not isinstance(update, dict) or update.get("status") not in (
+            "pending", "committed", "failed", "rolled-back",
+        ):
+            raise ValueError("unrecognized T3 update state")
+        for key in ("fromVersion", "targetVersion"):
+            if not isinstance(update.get(key), str) or not _T3_VERSION_PATTERN.fullmatch(update[key]):
+                raise ValueError("unrecognized T3 update version")
+        expected_active = update["targetVersion"] if update["status"] == "committed" else update["fromVersion"]
+        if (
+            state["activeVersion"] != expected_active
+            or _t3_version_key(update["targetVersion"]) <= _t3_version_key(update["fromVersion"])
+        ):
+            raise ValueError("inconsistent T3 update state")
+    return state
+
+
+def _t3_version_key(value: str) -> tuple[int, ...]:
+    """Order the validated stable versions understood by this retention policy."""
+    return tuple(int(part) for part in value.split("."))
+
+
+def cleanup_t3_runtimes(context: UserContext, *, dry_run: bool) -> list[str]:
+    """Prune validated old T3 runtimes while retaining rollback and process references."""
+    root = os.path.join(context.home, ".t3", "runtime", "versions")
+    state_path = os.path.join(context.home, ".t3", "runtime", "service-state.json")
+    if not os.path.lexists(root):
+        return []
+    if not is_safe_managed_path(context, root, "T3 runtimes"):
+        return []
+    try:
+        state = _t3_state(context, state_path)
+        update = state.get("update", {})
+        if update.get("status") == "pending" or tool_is_active(("npm", "npx", "pnpm", "yarn")):
+            log_event(logger, "T3 runtime cleanup deferred during update")
+            return []
+        active = state["activeVersion"]
+        retained = {active, update.get("fromVersion"), update.get("targetVersion")}
+        candidates: dict[str, os.stat_result] = {}
+        for name in os.listdir(root):
+            if not _T3_VERSION_PATTERN.fullmatch(name):
+                continue
+            path = os.path.join(root, name)
+            manifest_path = os.path.join(path, "node_modules", "t3", "package.json")
+            binary = os.path.join(path, "node_modules", "t3", "dist", "bin.mjs")
+            sentinel = os.path.join(path, ".install-complete")
+            if not all(is_safe_managed_path(context, item, "T3 runtime") for item in (manifest_path, binary, sentinel)):
+                continue
+            try:
+                info = os.lstat(path)
+                manifest_info = os.lstat(manifest_path)
+                binary_info = os.lstat(binary)
+                sentinel_info = os.lstat(sentinel)
+                if (
+                    not stat.S_ISDIR(info.st_mode) or info.st_uid != context.uid
+                    or not stat.S_ISREG(manifest_info.st_mode) or manifest_info.st_uid != context.uid
+                    or manifest_info.st_size > 65536
+                    or not stat.S_ISREG(binary_info.st_mode) or binary_info.st_uid != context.uid
+                    or not stat.S_ISREG(sentinel_info.st_mode) or sentinel_info.st_uid != context.uid
+                ):
+                    continue
+                with open(manifest_path, encoding="utf-8") as handle:
+                    manifest = json.load(handle)
+                if not isinstance(manifest, dict) or manifest.get("name") != "t3" or manifest.get("version") != name:
+                    continue
+            except (OSError, ValueError):
+                continue
+            candidates[name] = info
+        if active not in candidates:
+            raise ValueError("active T3 runtime could not be validated")
+        older = sorted(
+            (name for name in candidates if _t3_version_key(name) < _t3_version_key(active)),
+            key=_t3_version_key,
+        )
+        if older:
+            retained.add(older[-1])
+        for name in older:
+            if name in retained:
+                continue
+            if time.time() - candidates[name].st_mtime < 7 * 86400:
+                continue
+            path = os.path.join(root, name)
+            usage = cache_usage(path)
+            if usage.newest_mtime is None or time.time() - usage.newest_mtime < 7 * 86400:
+                continue
+            if process_uses_path(path):
+                log_event(logger, "T3 runtime retained while in use", version=name)
+                continue
+            if _t3_state(context, state_path) != state:
+                raise ValueError("T3 state changed during cleanup")
+            current = os.lstat(path)
+            if (current.st_dev, current.st_ino) != (candidates[name].st_dev, candidates[name].st_ino):
+                raise ValueError("T3 runtime changed during cleanup")
+            if not dry_run:
+                shutil.rmtree(path)
+            log_event(
+                logger, "Would remove old T3 runtime" if dry_run else "Removed old T3 runtime",
+                version=name, size_mb=round(usage.size_bytes / BYTES_PER_MB, 1),
+            )
+    except (OSError, ValueError) as exc:
+        return [f"T3 runtime cleanup: {exc}"]
+    return []
+
+
 def cleanup_agent_storage(context: UserContext, *, dry_run: bool) -> list[str]:
     """Reconcile validated agent releases and numbered T3 log rotations."""
     failures = cleanup_codex_standalone_releases(context, dry_run=dry_run)
     failures.extend(cleanup_t3_rotated_logs(context, dry_run=dry_run))
+    failures.extend(cleanup_t3_runtimes(context, dry_run=dry_run))
     return failures
 
 
 def run_user_cache_maintenance(context: UserContext, *, dry_run: bool) -> list[str]:
     """Run each independent user cache policy and collect failures."""
-    failures = cleanup_npm_cache(context, dry_run=dry_run)
-    failures.extend(cleanup_pip_cache(context, dry_run=dry_run))
+    failures = cleanup_agent_storage(context, dry_run=dry_run)
+    failures.extend(cleanup_electron_downloads(context, dry_run=dry_run))
     failures.extend(cleanup_uv_cache(context, dry_run=dry_run))
+    failures.extend(cleanup_npm_cache(context, dry_run=dry_run))
+    failures.extend(cleanup_pip_cache(context, dry_run=dry_run))
     failures.extend(
         cleanup_go_cache(
             context,
@@ -876,7 +1121,6 @@ def run_user_cache_maintenance(context: UserContext, *, dry_run: bool) -> list[s
         )
     )
     failures.extend(cleanup_agent_caches(context, dry_run=dry_run))
-    failures.extend(cleanup_agent_storage(context, dry_run=dry_run))
     return failures
 
 

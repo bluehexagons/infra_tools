@@ -21,7 +21,7 @@ same job at the same instant.
 | `auto-update-godot.timer` | Sunday at 06:30 | Setups with Godot; also reconciles selected Godot bundles |
 | `codex-auth-maintenance.timer` | Daily and 15 minutes after boot | Setups with Codex; refreshes file-backed ChatGPT auth only when its cached token is approaching expiry or refresh metadata is overdue |
 | `cleanup-maintenance.timer` | Sunday at 03:30 | Security-enabled setups |
-| `user-cache-maintenance.timer` | Monday at 03:00 | Security-enabled setups with a non-root setup user |
+| `user-cache-maintenance.timer` | Daily at 07:00 | Security-enabled setups with a non-root setup user |
 
 Container capabilities are respected. OCI containers cannot restart the system,
 and security monitoring, auditd, AppArmor, and kernel-level setup are skipped
@@ -246,17 +246,18 @@ inventory, retention inspection, or metadata updates stop the package-removal
 phase and are reported through the cleanup job's failure notification.
 
 `user-cache-maintenance` runs as the configured non-root account instead of
-root, after the weekly runtime-update window. It inventories tool-reported
+root, daily after the scheduled update windows. It inventories tool-reported
 cache paths before acting. Tool commands receive the account's home-scoped
 environment without loading interactive login profiles, and apply these
 bounded policies:
 
 - npm runs its supported verification and garbage collection, then uses a
-  forced clean only if the cache still exceeds 2 GiB. Its separately
-  rebuildable `_npx` workspaces are removed when they exceed 1 GiB or have had
+  forced clean if the cache still exceeds 2 GiB or disk space is low. Rebuildable
+  `_npx` workspaces are removed when they exceed 1 GiB or have had
   no activity for 30 days, and only while npm and npx are idle;
-- pip purges only above 2 GiB, uv runs its supported prune operation, and Go
-  cleans build and module caches only above 2 GiB and 5 GiB respectively; and
+- pip purges above 2 GiB or under disk pressure. uv runs its supported prune
+  operation. Go cleans build and module caches above 2 GiB and 5 GiB
+  respectively, or under disk pressure;
 - OpenCode and Codex cleanup is restricted to rebuildable cache directories.
   The OpenCode cache limit is 2 GiB and the Codex cache limit is 1 GiB; either
   cache may also be removed after 90 days without activity. Codex temporary
@@ -269,11 +270,40 @@ bounded policies:
   and 14 days. Current logs, terminal logs, non-numbered files, and symbolic
   links are never selected by this policy. Agent setup reruns apply both the
   Codex release policy and T3 rotation policy immediately, in addition to the
-  weekly maintenance job. Setup invokes this reconciliation as the target
+  daily maintenance job. Setup invokes this reconciliation as the target
   account rather than with its own root privileges.
+- T3 versioned application runtimes retain the active version, the immediately
+  preceding installed version, all newer candidates, and versions referenced
+  by service update/recovery state or running processes. Other validated older
+  runtimes qualify after seven days without modifications. Pending updates,
+  unreadable or unknown state, and changes to state during cleanup prevent
+  removal. Staging directories and the legacy installation are left alone.
+- Recognized Linux Electron download ZIPs under `~/.cache/electron` expire
+  after 30 days, or after one day under disk pressure. Installed Electron apps,
+  browser profiles, and other archives are not selected.
 
-Agent cache cleanup is deferred while the matching tool is running. Symbolic
-links and paths outside the configured user's home are never followed or
+Disk pressure means the cache's own filesystem has less than 20% available,
+with that free-space target bounded between 2 and 8 GiB. Reserved filesystem
+blocks do not count as available. Under pressure, npm, pip, Go, npx, and the
+allowlisted agent caches can be evicted below their normal size limits, but
+caches smaller than 64 MiB are retained unless their ordinary age/size policy
+selects them. Cleanup rechecks space before each eviction, so later caches
+remain available once the target is met. Agent retention and disposable
+Electron downloads run before package-cache eviction; Go module downloads
+come after build-cache cleanup. Downloads and subsequent builds can be slower
+after eviction.
+
+Logs show cache inventories, active-use deferrals, selected removals, and
+measured file-byte reductions for npm, pip, and Go evictions. A dry run reports
+eligibility at the current free-space level; it cannot predict which later
+evictions a real run would avoid after recovering space. Cleanup cannot
+guarantee free space when active tools or persistent project data occupy it.
+On a 32 GiB desktop, keep only a few small projects locally and check
+`df -h / "$HOME"` before a large build or update. See the
+[hardware sizing tiers](../README.md#hardware-sizing) for larger workloads.
+
+Cache eviction is deferred while a matching tool or referencing process is
+running. Symbolic links and paths outside the configured user's home are never followed or
 removed. OpenCode data under `.local/share/opencode` and Codex sessions,
 memories, credentials, plugins, and unrecognized package layouts are persistent
 state and are not cleanup targets. Root-only setups retain system cleanup but
@@ -284,6 +314,10 @@ files with:
 sudo -u USER /usr/bin/python3 \
   /opt/infra_tools/common/service_tools/user_cache_maintenance.py --dry-run
 ```
+
+Replace `USER` with the setup account. Omit `--dry-run` to run cleanup now.
+Rerun setup to install the updated helper and daily timer on an existing host;
+updating the controller checkout alone does not change the target's timer.
 
 Cleanup never removes installed language runtime versions, Proxmox backups,
 templates, ISOs, guest volumes, container/image stores, crash-report
