@@ -209,3 +209,4 @@ __marimo__/
 # Local state written by the managed installation channel controller.
 .infra_tools/
 state/
+artifacts/
