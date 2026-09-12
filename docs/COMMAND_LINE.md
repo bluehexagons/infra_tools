@@ -161,7 +161,7 @@ tools, not for an LXC container.
 | `--verify-provider` | For `setup` with `--provision-on`, verify the cached guest against Proxmox and reconcile supported provider-side settings |
 | `--image-sha512 HEX` | Required 128-character SHA-512 for a custom HTTPS VM image URL |
 | `--steps STEP...` | Run an explicit space-separated step list with `custom_steps` |
-| `--dry-run` | Validate the setup and print its step plan without executing commands or changing target files |
+| `--dry-run` | Validate the request and preview the setup handoff without applying target setup |
 | `--auto-restart` / `--no-auto-restart` | Control normal automatic restarts |
 | `--auto-restart-force-days N` | Force restart after N days of deferrals |
 | `--auto-restart-grace N` | Warning period before an automatic restart |
@@ -329,10 +329,13 @@ and disconnect-cleanup flags are removed; saved legacy policies are migrated
 with warnings for nondefault behavior. See [XRDP](XRDP.md) for runtime commands,
 human takeover, console conversion, and rollback.
 
-Setup `--dry-run` validates the requested profile and prints the complete step
-plan without invoking setup functions, running target commands, or writing
-target files. This makes it safe to use before a first live run, including for
-the local desktop installer path.
+Setup `--dry-run` validates the requested configuration and prints the planned
+upload or local-copy handoff without applying target setup. It does not run the
+target-side step list or prove that installation will succeed. Deployment and
+provisioning options can still perform preflight work, such as fetching a
+repository; use a simple profile when exploring without those dependencies.
+The separate target-side `remote_setup.py --dry-run` prints the selected step
+list. Neither preview is a completed live setup.
 
 ### Development Flags
 
@@ -439,8 +442,7 @@ run it immediately:
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane \
-  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 

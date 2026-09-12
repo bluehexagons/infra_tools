@@ -3,23 +3,27 @@
 Use this page to find the right command family and detailed guide. It is not a
 replacement for the [command-line reference](COMMAND_LINE.md): read that page
 before combining advanced options or changing a production host.
+For a first experiment without a domain or SSH setup, follow the
+[beginner walkthrough](GETTING_STARTED.md).
 
 ## Common host lifecycle
 
 | Goal | Command | Details |
 | --- | --- | --- |
-| Preview a new setup | `infra-tools setup server_lite server.example admin --ssl --dry-run` | [Installation](INSTALLATION.md#install-and-configure-a-remote-host) |
-| Set up a new host | `infra-tools setup server_lite server.example admin --ssl` | [CLI reference](COMMAND_LINE.md#setup-at-a-glance) |
+| Preview a new setup | `infra-tools setup server_dev server.example admin --node --dry-run` | [Installation](INSTALLATION.md#install-and-configure-a-remote-host) |
+| Set up a new host | `infra-tools setup server_dev server.example admin --node` | [CLI reference](COMMAND_LINE.md#setup-at-a-glance) |
 | List saved hosts | `infra-tools list` | [Saved configuration operations](OPERATIONS.md#inspect-saved-hosts) |
 | Inspect a saved host | `infra-tools info server.example` | [Saved configuration operations](OPERATIONS.md#inspect-saved-hosts) |
 | View its saved command | `infra-tools cmd server.example` | [Saved configuration operations](OPERATIONS.md#recall-and-reconstruction) |
-| Change saved configuration | `infra-tools patch server.example admin --ssl` | [Saved configuration operations](OPERATIONS.md#patch-and-redeploy) |
+| Preview adding Python tools | `infra-tools patch server.example admin --python --dry-run` | [Saved configuration operations](OPERATIONS.md#patch-and-redeploy) |
 | Update shares only | `infra-tools shares fileserver` | [Samba shares](SAMBA_SHARES.md) |
-| Deploy a saved host | `infra-tools deploy server.example --yes` | [Deployments](DEPLOYMENTS.md#basic-deployment) |
+| Rerun a saved setup | `infra-tools deploy server.example` | [Saved configuration operations](OPERATIONS.md#patch-and-redeploy) |
 
-Replace the examples with the actual system type, host, user, and options for
-your environment. Use `--dry-run` before a first setup or a consequential
-change.
+`server.example` is a placeholder: replace it with your Debian target's IP
+address or hostname, and replace `admin` with the account to configure there.
+Remote setup requires root SSH key access and [host-key enrollment](SSH.md).
+The saved-host rows require a successful initial setup in the same workspace.
+Remove `--dry-run` from the patch example to apply it.
 
 ## Find a task
 

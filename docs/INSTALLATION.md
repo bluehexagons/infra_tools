@@ -4,42 +4,33 @@ Use the installer on the machine that will manage your hosts. It keeps a local
 Git worktree, installs the managed `infra-tools` launcher, and can configure
 the same machine immediately.
 
+For a guided first experiment, use [Try infra-tools on a Debian
+VM](GETTING_STARTED.md). This page also covers advanced installation choices;
+choose one path rather than running every example.
+
 This guide targets the upcoming stable `v2.0.0` release. Before that tag is
 published, `dev` follows `main` and `stable` selects the latest published tag.
 
 Debian is the only officially supported distribution. Ubuntu and Linux Mint are
 recognized as best-effort Debian-compatible hosts.
 
-## Unsupported orchestration hosts
+## Prerequisites
 
-The installer can also install the remote-management launcher on another Linux
-distribution, such as CachyOS, but this remains outside the support guarantee.
-It asks for an explicit `[y/N]` confirmation, does not attempt to install APT
-packages, and requires these controller commands to already be available:
-
-- `python3`
-- `git`
-- `ssh`
-- `rsync`
-- `curl` or `wget`
-
-Install the equivalent packages with the host distribution's package manager
-before rerunning the installer. For example, on CachyOS, the equivalent setup
-is approximately:
-
-```bash
-sudo pacman -Syu --needed python git openssh rsync curl ca-certificates tar
-```
-
-The installer skips local system-package bootstrap on unsupported hosts. Do not
-use `--local-setup` or `--qemu-guest-agent` there; install the launcher and use
-remote-management commands such as `setup`, `patch`, `ssh`, `push`, and `pull`.
-Remote setup profiles and target-side package operations remain Debian-oriented.
+Use a regular account with access to `sudo` on Debian. `sudo` asks for your
+account password and grants administrator privileges to that command. If the
+account cannot use it, ask the machine's administrator to provide access before
+following system-installation examples.
 
 The installer needs either `wget` or `curl`. The examples below use wget,
 which is commonly present on minimal Debian systems. If only `curl` is
-installed, replace the download command with
-`curl --fail --location --connect-timeout 15 --max-time 120 -o "$HOME/.infra_tools-install.sh" URL`.
+installed, replace the download command with:
+
+```bash
+curl --fail --location --connect-timeout 15 --max-time 120 \
+  -o "$HOME/.infra_tools-install.sh" \
+  https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+```
+
 If neither command is available, install one first with:
 
 ```bash
@@ -80,16 +71,16 @@ rm -f "$HOME/.infra_tools-install.sh"
 ### Set up a minimal Debian control plane
 
 This installs common administrator and Linux tools and configures the local
-machine to manage other VMs and containers. Select agent tools explicitly:
+machine to manage other VMs and containers:
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane \
-  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
-If the orchestration machine is itself a Proxmox VM, add
+Coding agents are optional; append `--agent-tool codex`, for example, only
+when wanted. If the orchestration machine is itself a Proxmox VM, add
 `--qemu-guest-agent` before `--local-setup`. The installer then installs the
 guest-agent package and starts and enables its systemd service during
 self-setup:
@@ -97,7 +88,7 @@ self-setup:
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
 sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --qemu-guest-agent \
-  --local-setup control_plane --agent-tool gh --agent-tool codex
+  --local-setup control_plane
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -184,6 +175,7 @@ Start a new login shell if necessary, then run:
 
 ```bash
 command -v infra-tools
+infra-tools --version
 infra-tools channel
 infra-tools --help
 ```
@@ -204,17 +196,16 @@ export PATH="$HOME/.local/bin:$PATH"
 ```
 
 Before applying a setup for the first time, validate its profile with a dry
-run. Local setup preflight still needs root, so use `sudo`; the dry run
-validates arguments and prints the steps without changing the target:
+run. This simple local preview does not need `sudo`:
 
 ```bash
-sudo "$(command -v infra-tools)" setup agent_workstation localhost "$USER" \
-  --control-plane --desktop xfce --rdp \
-  --rdp-existing-password --dry-run
+infra-tools setup server_dev localhost "$USER" --node --dry-run
 ```
 
-For the all-in-one commands above, the installer runs this local setup after
-installing the launcher, so a separate setup command is not required.
+The preview shows the configuration and setup handoff without applying the
+profile or saving a configured host. Live local setup requires `sudo`.
+For the all-in-one commands above, the installer runs the selected local setup
+after installing the launcher, so a separate setup command is not required.
 SSH hardening is applied when `openssh-server` is present; an outbound-only
 control plane without `sshd` reports a skip instead of failing the setup.
 
@@ -227,14 +218,31 @@ Python environments.
 
 ## Install and configure a remote host
 
-Install the launcher on the control plane first, then run setup through the
-installed command. The remote account must be reachable over SSH and have the
-privileges required by the selected profile:
+Run these commands on the controller. Replace `server.example` with the
+target's hostname or IP and `admin` with the target account to configure.
+Setup connects as root to perform system changes; the positional username does
+not select the SSH transport account. First arrange key-based root SSH access
+on the Debian target, then verify its host key. See [SSH authentication](SSH.md)
+for authentication requirements and passphrase handling.
+
+From the target's VM console or another trusted session, obtain its fingerprint:
 
 ```bash
-infra-tools setup server_web example.com admin \
-  --node --ssl --ssl-email admin@example.com
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 ```
+
+Back on the controller, enroll the host and compare the displayed fingerprint
+with that trusted value. Preview the setup before applying it:
+
+```bash
+infra-tools ssh-key enroll server.example
+infra-tools setup server_dev server.example admin --node --dry-run
+```
+
+After a successful preview, repeat the setup command without `--dry-run`.
+Add `--key ~/.ssh/YOUR_KEY` if your root login uses a non-default private key.
+A normal sudo password on the target is not a substitute for root SSH access;
+infra-tools does not collect or forward sudo passwords.
 
 Ruby/Rails setup and deployment support has been removed. Keep a pinned older
 infra-tools installation for a legacy Rails host; `v2.0.0` refuses Ruby
@@ -283,6 +291,32 @@ source commit, branch, and whether the controller checkout was dirty, so
 `infra-tools channel` on the target reports exactly what that setup run
 deployed. A target snapshot is not a Git worktree: switch or upgrade the
 controller channel first, then rerun `setup` or `patch` to update the target.
+
+## Unsupported orchestration hosts
+
+The installer can also install the remote-management launcher on another Linux
+distribution, such as CachyOS, but this remains outside the support guarantee.
+It asks for an explicit `[y/N]` confirmation, does not attempt to install APT
+packages, and requires these controller commands to already be available:
+
+- `python3`
+- `git`
+- `ssh`
+- `rsync`
+- `curl` or `wget`
+
+Install the equivalent packages with the host distribution's package manager
+before rerunning the installer. For example, on CachyOS, the equivalent setup
+is approximately:
+
+```bash
+sudo pacman -Syu --needed python git openssh rsync curl ca-certificates tar
+```
+
+The installer skips local system-package bootstrap on unsupported hosts. Do not
+use `--local-setup` or `--qemu-guest-agent` there; install the launcher and use
+remote-management commands such as `setup`, `patch`, `ssh`, `push`, and `pull`.
+Remote setup profiles and target-side package operations remain Debian-oriented.
 
 ## Debian package sources
 
@@ -367,5 +401,6 @@ policy and HTTPS credentials, see [Git access](GIT_ACCESS.md).
 - [XRDP](XRDP.md) — RDP sessions and firewall behavior
 - [Machine types](MACHINE_TYPES.md) — Debian VMs, bare metal, and containers
 
-Review [`install.sh`](../install.sh) before running a network-piped installer
-on a privileged machine.
+You can review the downloaded [`install.sh`](../install.sh) before executing
+it. The examples download a file first and do not pipe network content into a
+privileged shell.

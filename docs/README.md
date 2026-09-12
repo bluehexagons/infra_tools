@@ -1,6 +1,8 @@
 # infra-tools documentation
 
-Start with the [quick reference](QUICK_REFERENCE.md) for a task-oriented map.
+Start with [Try infra-tools on a Debian VM](GETTING_STARTED.md) for a guided
+first setup and small feature experiments. Use the
+[quick reference](QUICK_REFERENCE.md) once you know the basic workflow.
 Use the detailed guides only when you need the configuration model, limits, or
 troubleshooting for that task. The [root README](../README.md) is the project
 overview.
@@ -9,6 +11,7 @@ overview.
 
 | I need to… | Start here | Then use |
 | --- | --- | --- |
+| Try infra-tools for the first time | [Beginner walkthrough](GETTING_STARTED.md) | [Installation](INSTALLATION.md), [Quick reference](QUICK_REFERENCE.md) |
 | Install infra-tools or configure a first host | [Installation](INSTALLATION.md) | [Quick reference](QUICK_REFERENCE.md), [CLI reference](COMMAND_LINE.md) |
 | Change or inspect an existing host | [Saved configuration operations](OPERATIONS.md) | [Sysadmin shortcuts](SYSADMIN.md), [Maintenance](MAINTENANCE.md) |
 | Provision or maintain a coding VM | [Agent systems](agents/README.md) | [Workstations](WORKSTATIONS.md), [Credentials](CREDENTIALS.md) |

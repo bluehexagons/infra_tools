@@ -11,6 +11,57 @@ T3 Code installations also place the managed web-gateway skill in compatible
 terminal agents, so the publishing workflow is discoverable without enabling
 the Godot bundle.
 
+Run `infra-web` commands on that configured VM as the account that owns the
+site, not on a separate controller. Check `command -v infra-web` first. If it
+is missing, provision a gateway-capable feature before continuing; the
+[beginner walkthrough](GETTING_STARTED.md#5-try-another-feature) shows one path.
+
+## Try a plain HTML page
+
+Once the gateway is installed, this example needs no JavaScript project or
+package manager. First run `infra-web site list` and choose an unused site
+name. The example uses `hello`; change it throughout if that name exists,
+because publishing the same name replaces that site's snapshot.
+
+Create a fresh directory in your home and a small page:
+
+```bash
+demo_dir="$(mktemp -d "$HOME/infra-web-demo.XXXXXX")"
+printf 'Source directory: %s\n' "$demo_dir"
+mkdir "$demo_dir/public"
+cat > "$demo_dir/public/index.html" <<'HTML'
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>My infra-tools demo</title>
+<h1>Hello from infra-tools!</h1>
+<p>This page is served by the managed HTTPS gateway.</p>
+</html>
+HTML
+infra-web publish site hello --project "$demo_dir" --no-build --output public
+infra-web site doctor hello
+infra-web site url hello
+```
+
+`demo_dir` holds the new directory's path for this terminal session. Publication
+does not require `sudo`.
+
+The doctor should report a healthy site. Open the printed URL in a browser and
+look for **Hello from infra-tools!** A browser on another computer needs a route
+to the VM and may need [client CA trust](CLIENT_CA_TRUST.md); `localhost` on
+that computer refers to itself, not the VM. Use a gateway-reported VM address.
+
+To change the page, edit `public/index.html` in the printed source directory
+and repeat the publication command in the same terminal. To remove just the
+hosted demo:
+
+```bash
+infra-web site remove hello --yes
+```
+
+This keeps your source directory. The examples below are alternatives for
+existing projects and live servers; they are not additional required steps.
+
 ## Publish a static site
 
 For a Vite or similar JavaScript project with a `build` script:
@@ -81,12 +132,16 @@ representative non-sensitive served file with its build artifact when content
 freshness matters:
 
 ```bash
+set -o pipefail
 published_url="$(infra-web site url docs)"
 curl --fail --silent --show-error "${published_url}assets/app.js" | sha256sum
 sha256sum dist/assets/app.js
 ```
 
-Do not add `-k`. A fragment such as `#/README.md` is client-side state and is
+Replace `assets/app.js` with an actual file from your build output. Require
+the download pipeline to succeed before comparing hashes; `pipefail` preserves
+a failed HTTP request's exit status. Do not add `-k`.
+A fragment such as `#/README.md` is client-side state and is
 not sent in the HTTP request; test the corresponding public file and then use a
 browser for the rendered route. A failed build or activation keeps the previous
 publication available.

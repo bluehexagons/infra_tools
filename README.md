@@ -11,6 +11,10 @@ release. Until that tag is published, the installer’s `dev` channel tracks
 
 ## Start here
 
+New to Linux or infra-tools? Follow [Try infra-tools on a Debian
+VM](docs/GETTING_STARTED.md) for a guided first setup, small feature experiments,
+and checks that show whether each step worked.
+
 Install the launcher on the machine that will manage your hosts:
 
 ```bash
@@ -19,7 +23,9 @@ sh "$HOME/.infra_tools-install.sh"
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
-The installer needs either `wget` or `curl`; use `infra-tools setup ...` for
+Run each line in order and continue only if the previous command succeeds.
+If `wget` is missing, use the [download prerequisites](docs/INSTALLATION.md#prerequisites).
+Installing the launcher does not configure a target. Use `infra-tools setup ...` for
 remote hosts and `infra-tools upgrade` to update the selected channel. The
 [installation guide](docs/INSTALLATION.md) covers prerequisites, verification,
 alternate download commands, local control-plane and desktop/RDP profiles,
@@ -107,29 +113,17 @@ work. See [Saved configuration operations](docs/OPERATIONS.md).
 ## Common commands
 
 ```bash
-# Inspect a saved host
+# Explore the command help and preview a local profile without applying it
+infra-tools --help
+infra-tools setup server_dev localhost "$USER" --node --dry-run
+
+# List configurations saved by this account (empty before the first live setup)
 infra-tools list
-infra-tools info example.com
-
-# Apply a targeted general patch
-infra-tools patch example.com admin --ssl
-
-# Update Samba shares only
-infra-tools shares fileserver \
-  --share write documents /srv/documents alice,bob
-
-# Inspect and manage a Proxmox VM by its saved local name
-infra-tools vm health agent-dev-01
-infra-tools vm stats agent-dev-01
-infra-tools vm autostart agent-dev-01
-
-# Audit local firmware and explicitly apply available updates
-infra-tools firmware audit
-infra-tools firmware update
 ```
 
-Use the [documentation index](docs/README.md) for the complete command and
-feature map.
+Use the [beginner walkthrough](docs/GETTING_STARTED.md) to apply your first
+setup, the [quick reference](docs/QUICK_REFERENCE.md) for saved-host commands,
+and the [documentation index](docs/README.md) for the feature map.
 
 ## Development checks
 
