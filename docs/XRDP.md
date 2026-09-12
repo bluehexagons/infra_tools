@@ -27,14 +27,21 @@ support. Use the CLI flags below to change the managed channel policy.
 
 On Debian workstations, setup uses the official Debian Sid builds of `xrdp`
 and `xorgxrdp` because the Trixie `xorgxrdp` build has a known Xorg crash in
-the RDP capture path. Sid is added with a low-priority pin, and only the XRDP
-transaction is targeted at it. Package installation disables recommendations,
+the RDP capture path. Sid is added with a low-priority pin. Only `xrdp` and
+`xorgxrdp` explicitly select Sid; ordinary X11 utilities retain normal package
+selection. Package installation disables recommendations,
 so the optional PipeWire XRDP module and its large codec/runtime dependency
 tree are not installed. Setup simulates the transaction first and refuses it
 if it would remove packages or upgrade core packages such as `libc6`,
 `systemd`, or `xserver-xorg-core`. The install keeps modified configuration
 files without prompting, then reapplies the managed versions after the
 package transaction completes.
+
+Generic APT repair preserves this exact managed source only with its matching
+low-priority pin. It restores sources commented out by older infra-tools repair
+runs; desktop setup also reconciles the source when packages are already
+installed. Package upgrades still require `--refresh-packages` for this pinned
+XRDP path; restoring the source alone does not upgrade the running server.
 
 For a remote target, provide the Unix account password through a secret source:
 

@@ -21,6 +21,16 @@ DEBIAN_ARCHIVE_KEYRING = "/usr/share/keyrings/debian-archive-keyring.gpg"
 DEBIAN_ARCHIVE_KEYRING_PGP = "/usr/share/keyrings/debian-archive-keyring.pgp"
 MANAGED_SOURCE_FILENAME = "infra_tools-debian.sources"
 MANAGED_SOURCE_MARKER = "# Managed by infra_tools"
+XRDP_SID_SOURCE = """Types: deb
+URIs: https://deb.debian.org/debian
+Suites: sid
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+"""
+XRDP_SID_PREFERENCE = """Package: *
+Pin: release n=sid
+Pin-Priority: 50
+"""
 _DEFAULT_DEBIAN_ARCHIVE_KEYRING = DEBIAN_ARCHIVE_KEYRING
 _DEBIAN_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 
@@ -323,6 +333,23 @@ def _disable_stale_official_sources(apt_dir: str, codename: str) -> list[str]:
     for path in _source_files(apt_dir):
         with open(path, encoding="utf-8") as file_obj:
             content = file_obj.read()
+
+        # Desktop setup deliberately uses this exact, low-priority source.
+        # Do not exempt arbitrary Sid entries, or a matching filename without
+        # its pin. Also repair files commented by our older generic cleanup.
+        pin_path = os.path.join(apt_dir, "preferences.d", "infra-tools-sid.pref")
+        if path == os.path.join(apt_dir, "sources.list.d", "infra-tools-sid.sources"):
+            try:
+                with open(pin_path, encoding="utf-8") as pin_file:
+                    pinned = pin_file.read() == XRDP_SID_PREFERENCE
+            except FileNotFoundError:
+                pinned = False
+            disabled = "".join(_comment_lines(XRDP_SID_SOURCE.splitlines(keepends=True)))
+            if pinned and content.rstrip() in {XRDP_SID_SOURCE.rstrip(), disabled.rstrip()}:
+                if content.rstrip() != XRDP_SID_SOURCE.rstrip():
+                    _backup_file(path)
+                    _write_text_atomically(path, XRDP_SID_SOURCE)
+                continue
 
         if path.endswith(".sources"):
             output: list[str] = []

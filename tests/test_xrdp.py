@@ -384,6 +384,24 @@ class TestInstallXrdp(unittest.TestCase):
             self.assertIn("Dpkg::Options::=--force-confdef", command)
             self.assertIn("Dpkg::Options::=--force-confold", command)
 
+    @patch("desktop.xrdp_steps._configure_xrdp_package_source", return_value="sid")
+    @patch("desktop.xrdp_steps.run")
+    def test_only_rdp_packages_explicitly_select_sid(self, mock_run, source):
+        mock_run.return_value = Mock(returncode=0, stdout="")
+        _install_xrdp_packages(("xrdp", "xorgxrdp", "scrot", "dbus-x11"))
+        for call in mock_run.call_args_list:
+            command = call.args[0]
+            self.assertIn("xrdp/sid xorgxrdp/sid scrot dbus-x11", command)
+            self.assertNotIn("-t sid", command)
+
+    @patch("desktop.xrdp_steps._configure_xrdp_package_source", return_value="sid")
+    @patch("desktop.xrdp_steps.run")
+    def test_core_upgrade_guard_handles_architecture_suffix(self, mock_run, source):
+        mock_run.return_value = Mock(returncode=0, stdout="Inst libc6:amd64 (2.43 Debian:unstable)")
+        with self.assertRaisesRegex(RuntimeError, "core packages: libc6"):
+            _install_xrdp_packages(("xrdp",))
+        self.assertEqual(mock_run.call_count, 1)
+
 
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')

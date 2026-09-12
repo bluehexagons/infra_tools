@@ -6,16 +6,54 @@ import os
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 
 from lib.apt_sources import (
     MANAGED_SOURCE_FILENAME,
     ensure_debian_package_sources,
     inspect_apt_sources,
     parse_apt_sources,
+    XRDP_SID_SOURCE,
+    XRDP_SID_PREFERENCE,
+    _disable_stale_official_sources,
 )
 
 
 class TestAptSources(unittest.TestCase):
+    def test_preserves_pinned_desktop_source_and_repairs_prior_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "sources.list.d/infra-tools-sid.sources"
+            pin = root / "preferences.d/infra-tools-sid.pref"
+            source.parent.mkdir()
+            pin.parent.mkdir()
+            pin.write_text(XRDP_SID_PREFERENCE)
+            for content in (XRDP_SID_SOURCE, "".join(
+                    "# Disabled by infra_tools: " + line
+                    for line in XRDP_SID_SOURCE.splitlines(keepends=True)) + "\n"):
+                source.write_text(content)
+                _disable_stale_official_sources(directory, "trixie")
+                self.assertEqual(source.read_text(), XRDP_SID_SOURCE)
+                _disable_stale_official_sources(directory, "trixie")
+                self.assertEqual(source.read_text(), XRDP_SID_SOURCE)
+
+    def test_desktop_filename_does_not_exempt_unpinned_or_altered_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "sources.list.d/infra-tools-sid.sources"
+            pin = root / "preferences.d/infra-tools-sid.pref"
+            source.parent.mkdir()
+            pin.parent.mkdir()
+            for preference, content in (
+                ("", XRDP_SID_SOURCE),
+                (XRDP_SID_PREFERENCE.replace("50", "990"), XRDP_SID_SOURCE),
+                (XRDP_SID_PREFERENCE, XRDP_SID_SOURCE.replace("Suites: sid", "Suites: sid testing")),
+            ):
+                pin.write_text(preference)
+                source.write_text(content)
+                _disable_stale_official_sources(directory, "trixie")
+                self.assertFalse(parse_apt_sources(directory))
+
     def _layout(self, *, os_release: str, sources_list: str = "") -> tuple[str, str]:
         root = tempfile.mkdtemp()
         apt_dir = os.path.join(root, "etc", "apt")

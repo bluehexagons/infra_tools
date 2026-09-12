@@ -9,6 +9,7 @@ import shlex
 from desktop.session_steps import STARTWM, assert_desktop_idle, install_session_runtime
 
 from lib.config import SetupConfig
+from lib.apt_sources import XRDP_SID_PREFERENCE, XRDP_SID_SOURCE
 from lib.remote_utils import (
     get_os_id,
     get_user_home,
@@ -27,16 +28,6 @@ _XRDP_XORG_LAUNCHER = "/usr/local/libexec/infra-tools-xrdp-Xorg"
 _XRDP_APPARMOR_LOCAL = "/etc/apparmor.d/local/Xorg"
 _XRDP_SID_SOURCES = "/etc/apt/sources.list.d/infra-tools-sid.sources"
 _XRDP_SID_PREFERENCES = "/etc/apt/preferences.d/infra-tools-sid.pref"
-_XRDP_SID_SOURCE = """Types: deb
-URIs: https://deb.debian.org/debian
-Suites: sid
-Components: main
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-"""
-_XRDP_SID_PREFERENCE = """Package: *
-Pin: release n=sid
-Pin-Priority: 50
-"""
 _XRDP_SID_FORBIDDEN_UPGRADES = (
     "libc6",
     "systemd",
@@ -55,7 +46,7 @@ _XRDP_GLAMOR_DRIVERS = frozenset({"amdgpu", "i915", "xe", "msm", "radeon"})
 _XRDP_GLAMOR_DRIVER_LIST = "amdgpu i915 xe msm radeon"
 
 
-def _configure_xrdp_package_source() -> str:
+def _configure_xrdp_package_source(*, refresh_metadata: bool = True) -> str:
     """Configure the narrowly pinned Debian Sid source used for XRDP."""
     if get_os_id() != "debian":
         return ""
@@ -63,21 +54,28 @@ def _configure_xrdp_package_source() -> str:
     os.makedirs(os.path.dirname(_XRDP_SID_SOURCES), exist_ok=True)
     os.makedirs(os.path.dirname(_XRDP_SID_PREFERENCES), exist_ok=True)
     with open(_XRDP_SID_SOURCES, "w", encoding="utf-8") as source_file:
-        source_file.write(_XRDP_SID_SOURCE)
+        source_file.write(XRDP_SID_SOURCE)
     with open(_XRDP_SID_PREFERENCES, "w", encoding="utf-8") as preference_file:
-        preference_file.write(_XRDP_SID_PREFERENCE)
+        preference_file.write(XRDP_SID_PREFERENCE)
 
-    update_result = run("apt-get update -qq", check=False)
-    if update_result.returncode != 0:
-        raise RuntimeError("could not refresh Debian Sid package metadata")
-    return "-t sid"
+    if refresh_metadata:
+        update_result = run("apt-get update -qq", check=False)
+        if update_result.returncode != 0:
+            raise RuntimeError("could not refresh Debian Sid package metadata")
+    return "sid"
 
 
 def _install_xrdp_packages(packages: tuple[str, ...]) -> None:
     """Install XRDP packages without optional dependency stacks."""
+    from lib.validation import validate_package_name
+
+    for package in packages:
+        validate_package_name(package)
     target_release = _configure_xrdp_package_source()
-    package_list = " ".join(shlex.quote(package) for package in packages)
-    apt_prefix = f"apt-get {target_release + ' ' if target_release else ''}install"
+    package_list = " ".join(shlex.quote(
+        f"{package}/{target_release}" if target_release and package in {"xrdp", "xorgxrdp"}
+        else package) for package in packages)
+    apt_prefix = "apt-get install"
     simulation = run(
         f"{apt_prefix} --simulate {_XRDP_DPKG_OPTIONS}"
         f" --no-install-recommends --no-remove {package_list}",
@@ -90,7 +88,7 @@ def _install_xrdp_packages(packages: tuple[str, ...]) -> None:
         )
     simulation_output = simulation.stdout or ""
     simulated_installs = {
-        line.split()[1]
+        line.split()[1].split(":", 1)[0]
         for line in simulation_output.splitlines()
         if line.startswith("Inst ") and len(line.split()) > 1
     }
@@ -445,7 +443,8 @@ def install_xrdp(config: SetupConfig) -> None:
         )
         _install_xrdp_packages(packages_to_install)
     else:
-        print("  ✓ xRDP packages already installed; skipping APT source refresh")
+        _configure_xrdp_package_source(refresh_metadata=False)
+        print("  ✓ xRDP packages already installed; source reconciled without refreshing metadata")
 
     missing_packages = [
         package for package in required_packages if not is_package_installed(package)

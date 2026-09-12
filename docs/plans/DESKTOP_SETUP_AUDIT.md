@@ -118,12 +118,49 @@ Remaining items needing separate migration or live qualification:
 - The fixed Virtual 3840×2160 is not proof of a required RANDR limit. Compare
   upstream configuration in an isolated session before removing this boot-time
   difference; keep explicit startup modes and the verified module load order.
-- Restrict Sid selection to packages actually needing it rather than including
-  ordinary X11 utilities in the target-release transaction. The current guard
-  rejects a short core-package list, not every possible distro transition.
 
 These are setup quality issues, not demonstrated causes of the cached-pointer
 failure. They should not be bundled with an unverified server cursor fix.
+
+## Live leftovers and package-source conflict
+
+A further read-only inspection found that generic APT repair had commented out
+`infra-tools-sid.sources`, despite XRDP setup deliberately creating it with a
+priority-50 pin. This is a conflict between managed setup paths, not an operator
+mistake. Repair now preserves the exact known source with its matching pin and
+restores the exact commented form emitted by older repair runs. A matching
+filename alone is insufficient. Desktop setup reconciles the source even when
+packages are already installed, without an unnecessary metadata refresh.
+
+Package installation now selects `xrdp/sid` and `xorgxrdp/sid` individually,
+instead of making Sid the target release for the entire transaction. Ordinary
+utilities use normal package selection. Core-upgrade checks normalize the
+architecture suffix in APT's output (`libc6:amd64` was previously missed).
+The guard remains a selected core-package denylist, not proof that every
+possible future dependency transition is safe. Tests cover source preservation,
+restoration, rejection of unpinned/altered exceptions, and package selection.
+
+Live inspection also found:
+
+- `dpkg -V xrdp xorgxrdp` reports only the three intentionally managed config
+  files. No other package checksum differences were reported; gfx.toml has no
+  local checksum modification.
+- No extra XRDP command-line flags, frontend service drop-ins, or graphics
+  environment overrides were found in the inspected files/user service manager.
+- One Xorg/XFCE session is running. No Xvnc, competing Xwayland server, or
+  Light Locker process appeared in the process check.
+- `~/startwm.sh` is an old script with xset and dbus-launch tweaks, but is
+  inactive: user window-manager overrides are disabled and the configured
+  startup script is `/etc/xrdp/infra-tools-startwm.sh`. It was retained rather
+  than deleting an operator-owned recovery artifact.
+- The old global pm-is-supported stub is still present; the previous commit's
+  exact-match migration will remove it on setup. Xorg's log confirms the new
+  empty DRMDevice is selecting software mode. Configuration backups and two
+  cached xfwm state files were retained; their presence alone is not evidence
+  that they are executed or causing instability.
+
+This inspection did not install packages, restart services, or alter the active
+desktop. Root-only state beyond the available files remains outside the audit.
 
 ## Sources
 
