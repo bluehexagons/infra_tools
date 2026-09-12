@@ -7,9 +7,7 @@ bitmap_cache=true
 bitmap_compression=true
 bulk_compression=true
 
-; TCP buffer optimization
-tcp_send_buffer_bytes=65536
-tcp_recv_buffer_bytes=65536
+; Let the operating system size TCP buffers, as in the upstream defaults.
 tcp_nodelay=true
 tcp_keepalive=true
 
@@ -48,9 +46,7 @@ new_cursors=true
 ; Allow session reconnection and the explicitly listed channels below
 allow_channels=true
 allow_multimon=true
-; Optimize for LAN performance (suitable for Remmina on local network)
-max_idle_time=0
-max_disc_time=0
+; Idle/disconnected session limits are configured in sesman.ini.
 
 ; Fork a separate process per session for stability
 fork=true

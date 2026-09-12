@@ -499,9 +499,8 @@ class TestInstallXrdp(unittest.TestCase):
         # Check for xrdpdev driver
         self.assertIn('Driver "xrdpdev"', combined_content)
         
-        # Check for disabled glamor (to prevent crashes)
-        self.assertIn('UseGlamor', combined_content)
-        self.assertIn('false', combined_content)
+        # Disable the driver's default render-node probe for software mode.
+        self.assertIn('Option "DRMDevice" ""', combined_content)
         self.assertIn('owner /dev/shm/ rw,', combined_content)
         self.assertIn('owner /dev/shm/** rw,', combined_content)
         
@@ -517,7 +516,10 @@ class TestInstallXrdp(unittest.TestCase):
         content = _generate_xorg_conf()
 
         self.assertIn('Driver "xrdpdev"', content)
-        self.assertIn('Option "UseGlamor" "false"', content)
+        self.assertIn('Option "DRMDevice" ""', content)
+        self.assertIn('Option "DefaultServerLayout" "X11 Server"', content)
+        self.assertNotIn('UseGlamor', content)
+        self.assertNotIn('SWCursor', content)
         self.assertIn('Modes "640x480" "800x600" "1024x768"', content)
         self.assertIn('Virtual 3840 2160', content)
 

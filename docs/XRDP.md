@@ -311,6 +311,11 @@ Rollback restores configuration, not unsaved applications. Keep SSH available.
 
 ## Live qualification
 
+The [desktop setup audit](plans/DESKTOP_SETUP_AUDIT.md) records the configuration
+comparison, cleanup, remaining issues, and a server-side stale-pointer-cache
+path requiring instrumented reproduction. The operator also observed a
+reconnect with a 24-bpp client profile; seamless resize remains unqualified.
+
 On 2026-09-12, agent-2 (Debian, XRDP 0.10.6.1-2, xorgxrdp 0.10.5-2,
 XFCE session 4.20.2-2, scrot 2.0.0-1) passed local peer-authenticated startup,
 native Mousepad launch, text input/save, desktop and application screenshots,
@@ -489,6 +494,11 @@ accessible supported DRM render node and enables glamor only when one is
 actually present; the normal Proxmox emulated VirtIO-GPU recovery display is
 not treated as XRDP acceleration. In the usual VM case the session therefore
 uses the software fallback and no GPU group is added.
+
+Software mode sets an empty `DRMDevice` to disable xorgxrdp's default render-node
+probe. Older templates used `UseGlamor=false` and `SWCursor=true`, neither of
+which xorgxrdp 0.10.5 reads. Removing these ineffective options does not disable
+RDP cursor caching or fix the observed resize disconnect.
 
 Unprivileged Proxmox LXC guests support basic XRDP access, but host limits may
 affect desktop polish. A VM is the better choice for a reproducible graphical

@@ -218,7 +218,8 @@ def _generate_xorg_conf(render_node: str | None = None) -> str:
     if render_node is None:
         acceleration_options = (
             '    # No supported, accessible DRM render node was detected.\n'
-            '    Option "UseGlamor" "false"\n'
+            '    # An empty device disables the driver default render-node probe.\n'
+            '    Option "DRMDevice" ""\n'
         )
     else:
         acceleration_options = (
@@ -235,6 +236,7 @@ def _generate_xorg_conf(render_node: str | None = None) -> str:
 EndSection
 
 Section "ServerFlags"
+    Option "DefaultServerLayout" "X11 Server"
     Option "DontVTSwitch" "on"
     Option "AutoAddDevices" "off"
     Option "AutoAddGPU" "off"
@@ -270,9 +272,7 @@ EndSection
 Section "Device"
     Identifier "Video Card (xrdpdev)"
     Driver "xrdpdev"
-{acceleration_options}    # Software cursor prevents cursor-related resize issues
-    Option "SWCursor" "true"
-EndSection
+{acceleration_options}EndSection
 
 Section "Screen"
     Identifier "Screen (xrdpdev)"
