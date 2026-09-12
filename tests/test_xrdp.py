@@ -765,6 +765,11 @@ class TestConfigureXfceForRdp(unittest.TestCase):
     """Test XFCE RDP compatibility configuration."""
 
     def setUp(self):
+        self.helpers = {}
+        for name in ("update_channel", "clean_legacy_xfwm", "remove_legacy_pm_stub", "remove_legacy_override"):
+            patcher = patch(f"desktop.desktop_environment_steps.{name}")
+            self.helpers[name] = patcher.start()
+            self.addCleanup(patcher.stop)
         glob_patcher = patch("desktop.desktop_environment_steps.glob.glob", return_value=[])
         self.glob = glob_patcher.start()
         self.addCleanup(glob_patcher.stop)
@@ -848,12 +853,10 @@ class TestConfigureXfceForRdp(unittest.TestCase):
         
         configure_xfce_for_rdp(config)
         
-        # Check that power manager config was written
-        write_calls = [c for c in mock_open().write.call_args_list]
-        combined_content = ''.join([str(c[0][0]) for c in write_calls if c[0]])
-        
-        self.assertIn("dpms-enabled", combined_content)
-        self.assertIn("false", combined_content)
+        # The merge helper receives only the managed power settings.
+        settings = self.helpers["update_channel"].call_args.args[1]
+        self.assertIn("dpms-enabled", settings)
+        self.assertIn("false", settings)
 
     @patch('desktop.desktop_environment_steps.run')
     @patch('desktop.desktop_environment_steps.os.makedirs')
@@ -874,17 +877,18 @@ class TestConfigureXfceForRdp(unittest.TestCase):
 
         configure_xfce_for_rdp(config)
 
-        removed_paths = [call.args[0] for call in mock_remove.call_args_list]
+        removed_paths = [call.args[0] for call in self.helpers["remove_legacy_override"].call_args_list]
         self.assertIn("/home/testuser/.config/autostart/xfsettingsd.desktop", removed_paths)
         self.assertIn("/home/testuser/.config/xfce4/xfconf/xfce-perchannel-xml/displays.xml", removed_paths)
+        mock_remove.assert_not_called()
         
     @patch('desktop.desktop_environment_steps.run')
     @patch('desktop.desktop_environment_steps.os.makedirs')
     @patch('desktop.desktop_environment_steps.os.path.exists')
     @patch('desktop.desktop_environment_steps.os.remove')
     @patch('builtins.open', new_callable=unittest.mock.mock_open)
-    def test_creates_pm_stub(self, mock_open, mock_remove, mock_exists, mock_makedirs, mock_run):
-        """Should create pm-is-supported stub to suppress warnings."""
+    def test_retires_pm_stub(self, mock_open, mock_remove, mock_exists, mock_makedirs, mock_run):
+        """Delegate exact-match migration; never install a global stub."""
         mock_exists.return_value = False
         mock_run.return_value = Mock(returncode=0)
         
@@ -897,16 +901,12 @@ class TestConfigureXfceForRdp(unittest.TestCase):
         
         configure_xfce_for_rdp(config)
         
-        # Check that pm-is-supported was written
+        # No global stub is written; only known old content may be removed.
         write_calls = [c for c in mock_open().write.call_args_list]
         combined_content = ''.join([str(c[0][0]) for c in write_calls if c[0]])
         
-        self.assertIn("pm-is-supported", combined_content)
-        self.assertIn("exit 1", combined_content)
-        
-        # Check chmod was called to make it executable
-        chmod_calls = [c for c in mock_run.call_args_list if 'chmod' in str(c)]
-        self.assertGreater(len(chmod_calls), 0)
+        self.assertNotIn("pm-is-supported", combined_content)
+        self.helpers["remove_legacy_pm_stub"].assert_called_once_with()
 
 
 if __name__ == '__main__':

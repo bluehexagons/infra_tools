@@ -1,7 +1,9 @@
 # Shared desktop setup audit — 2026-09-12
 
-The resize disconnect remains unresolved. The strongest source-level lead is
-XRDP's cursor-cache lifecycle, not the shared-session supervisor. Supporting
+After applying the configuration cleanup, the operator reports that resize
+may no longer reconnect. The current VM has the updated configuration and a
+new session (PID 303762); the responsible setting has not been isolated. The
+source-level cursor-cache lead below remains unconfirmed. Supporting
 distribution-packaged Remmina remains the objective. No client downgrade is a
 deployment requirement.
 
@@ -57,9 +59,10 @@ live firewall state were not available for verification.
 - Remove ignored `max_idle_time` and `max_disc_time` from xrdp.ini. Actual
   session limits are already configured in sesman.ini.
 
-The previous change removed the ignored `enable_gfx=false` setting. None of
-these cleanups is a demonstrated fix for the reported disconnect. The live
-session still uses its existing configuration until setup and a new session.
+The previous change removed the ignored `enable_gfx=false` setting. At the
+initial audit these changes had not been applied to the live session. The
+operator subsequently reran setup and reports improvement, as recorded above;
+the causal change has not been isolated.
 
 ## Direct cursor-cache lead
 
@@ -96,14 +99,19 @@ that regression test and live reproduction validate it.
 
 ## Additional cleanup backlog
 
-- XFCE setup rewrites entire power-manager/xfwm4 files and deletes displays.xml
-  on every run. Replace this with targeted, idempotent migration preserving
-  unrelated user settings. The `/general/Xfwm/Xinerama` property is not an
-  established xfwm4 configuration switch; the dark-theme merge also writes
-  theme under `/general/Xfwm/theme` rather than `/general/theme`.
-- The global `pm-is-supported` stub suppresses warnings by shadowing a command
-  for every user. Prefer removing only the known managed stub and tolerating
-  harmless messages, after verifying session behavior.
+The follow-up removes the unsupported `/general/Xfwm/Xinerama` and misplaced
+`/general/Xfwm/theme` values written by earlier setup. It no longer forces a
+HiDPI window-manager theme. Power and GTK settings now merge only managed
+properties, with atomic writes and rejection of malformed/symlinked files.
+Unrelated preferences survive reruns. Legacy displays.xml and xfsettingsd
+overrides are deleted only when their contents exactly match the old generated
+files; custom keyboard autostart entries are no longer deleted by filename.
+Setup removes only exact known versions of the global `pm-is-supported` stub,
+and no longer creates one to suppress warnings. Tests cover preservation,
+idempotence, malformed XML, symlinks, and the integrated setup rerun.
+
+Remaining items needing separate migration or live qualification:
+
 - Xwrapper.config is not in the managed launch path: the launcher directly
   execs the real Xorg binary. Stop describing it as required for this stack;
   retiring the global override needs a migration that preserves other uses.

@@ -5,6 +5,11 @@ import glob
 import os
 import shlex
 
+from desktop.xfce_config import (
+    LEGACY_DISPLAYS, LEGACY_XFSETTINGSD, clean_legacy_xfwm,
+    remove_legacy_override, remove_legacy_pm_stub, update_channel,
+)
+
 from lib.config import SetupConfig
 from lib.validation import validate_filesystem_path
 from lib.remote_utils import (
@@ -54,7 +59,7 @@ def configure_xfce_for_rdp(config: SetupConfig) -> None:
     Fixes common issues:
     - Disables light-locker (crashes without display manager)
     - Disables xfce4-power-manager display features (no DPMS in RDP)
-    - Creates stub pm-is-supported to suppress warnings
+    - Retires the legacy global power-management stub
     - Removes problematic autostart entries
     - Removes stale XFCE display profiles that conflict with xorgxrdp RANDR
     - Sets XRDP-specific environment indicators
@@ -99,24 +104,10 @@ Hidden=true
     # xfsettingsd is needed for normal XFCE settings; stale display profiles are
     # the part that conflicts with xorgxrdp's RANDR-driven resize events.
     xfsettingsd_desktop = f"{autostart_dir}/xfsettingsd.desktop"
-    if os.path.exists(xfsettingsd_desktop):
-        os.remove(xfsettingsd_desktop)
+    remove_legacy_override(xfsettingsd_desktop, LEGACY_XFSETTINGSD)
     
-    # 3. Create stub pm-is-supported to suppress xfce4-session warnings
-    pm_stub = "/usr/local/bin/pm-is-supported"
-    if not os.path.exists(pm_stub):
-        with open(pm_stub, "w") as f:
-            f.write("""#!/bin/bash
-# Stub for pm-is-supported to suppress XFCE warnings in headless/RDP sessions
-# Always returns false (1) - no power management available
-exit 1
-""")
-        run(f"chmod +x {shlex.quote(pm_stub)}")
-    
-    # 4. Remove invalid XKBOPTIONS autostart entry if it exists
-    swap_escape_desktop = f"{autostart_dir}/swap escape.desktop"
-    if os.path.exists(swap_escape_desktop):
-        os.remove(swap_escape_desktop)
+    # Retire the global warning-suppression shim without touching user tools.
+    remove_legacy_pm_stub()
     
     # 5. Configure xfce4-power-manager to not manage displays
     os.makedirs(xfce_config_dir, exist_ok=True)
@@ -136,28 +127,15 @@ exit 1
   </property>
 </channel>
 """
-    with open(power_manager_config, "w") as f:
-        f.write(power_manager_xml)
+    update_channel(power_manager_config, power_manager_xml)
     
     # 6. Remove stale fixed display profile from previous infra_tools runs.
     # A saved resolution/output profile can override xorgxrdp RANDR resize events.
     displays_config = f"{xfce_config_dir}/displays.xml"
-    if os.path.exists(displays_config):
-        os.remove(displays_config)
+    remove_legacy_override(displays_config, LEGACY_DISPLAYS)
     
-    # 7. Create xfwm4 configuration that doesn't interfere with RANDR
-    xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
-    xfwm4_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfwm4" version="1.0">
-  <property name="general" type="empty">
-    <property name="Xfwm" type="empty">
-      <property name="Xinerama" type="bool" value="false"/>
-    </property>
-  </property>
-</channel>
-"""
-    with open(xfwm4_config, "w") as f:
-        f.write(xfwm4_xml)
+    # Remove unsupported settings without resetting the window manager.
+    clean_legacy_xfwm(f"{xfce_config_dir}/xfwm4.xml")
     
     # 8. Set ownership
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(autostart_dir)}")
@@ -165,9 +143,9 @@ exit 1
     
     print("  ✓ XFCE configured for RDP compatibility")
     print("    - light-locker disabled (prevents crashes)")
-    print("    - Stale fixed display profile removed")
+    print("    - Known legacy display overrides retired; custom profiles preserved")
     print("    - Display power management disabled (no DPMS in RDP)")
-    print("    - Power management warnings suppressed")
+    print("    - Unrelated window-manager and power preferences preserved")
 
 
 def install_smbclient(config: SetupConfig) -> None:
@@ -198,7 +176,7 @@ def configure_dark_theme(config: SetupConfig) -> None:
     """Configure desktop environment to use dark theme.
     
     Configures dark theme settings for supported desktop environments:
-    - XFCE: Sets appearance and window manager themes
+    - XFCE: Sets GTK appearance while preserving window-manager preferences
     - LXQt: Sets Qt theme to dark
     - Cinnamon: Sets GTK and window manager themes
     - i3: Informational message (requires manual configuration)
@@ -227,68 +205,10 @@ def configure_dark_theme(config: SetupConfig) -> None:
   </property>
 </channel>
 """
-        with open(xsettings_config, "w") as f:
-            f.write(xsettings_xml)
-        
-        # Configure XFCE window manager theme (merge with RDP config to preserve Xinerama=false)
-        xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
-        
-        # Parse existing xfwm4.xml if it exists (from configure_xfce_for_rdp)
-        # to keep Xinerama=false setting needed for RDP dynamic resolution
-        import xml.etree.ElementTree as ET
-        
-        xfwm4_root = None
-        if os.path.exists(xfwm4_config):
-            try:
-                tree = ET.parse(xfwm4_config)
-                xfwm4_root = tree.getroot()
-            except (ET.ParseError, IOError, OSError):
-                pass
-        
-        if xfwm4_root is not None:
-            # Existing config - add theme to Xfwm section
-            general = xfwm4_root.find('.//property[@name="general"]')
-            if general is not None:
-                xfwm = general.find('.//property[@name="Xfwm"]')
-                if xfwm is not None:
-                    # Check if theme already exists
-                    existing_theme = xfwm.find('.//property[@name="theme"]')
-                    if existing_theme is None:
-                        theme_elem = ET.SubElement(xfwm, 'property')
-                        theme_elem.set('name', 'theme')
-                        theme_elem.set('type', 'string')
-                        theme_elem.set('value', 'Default-xhdpi')
-                else:
-                    # Create Xfwm section with theme and Xinerama
-                    xfwm = ET.SubElement(general, 'property')
-                    xfwm.set('name', 'Xfwm')
-                    xfwm.set('type', 'empty')
-                    theme_elem = ET.SubElement(xfwm, 'property')
-                    theme_elem.set('name', 'theme')
-                    theme_elem.set('type', 'string')
-                    theme_elem.set('value', 'Default-xhdpi')
-                    xinerama_elem = ET.SubElement(xfwm, 'property')
-                    xinerama_elem.set('name', 'Xinerama')
-                    xinerama_elem.set('type', 'bool')
-                    xinerama_elem.set('value', 'false')
-            # Write back with proper formatting
-            tree = ET.ElementTree(xfwm4_root)
-            tree.write(xfwm4_config, encoding='UTF-8', xml_declaration=True)
-        else:
-            # No existing config - create new with both theme and Xinerama
-            xfwm4_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfwm4" version="1.0">
-  <property name="general" type="empty">
-    <property name="theme" type="string" value="Default-xhdpi"/>
-    <property name="Xfwm" type="empty">
-      <property name="Xinerama" type="bool" value="false"/>
-    </property>
-  </property>
-</channel>
-"""
-            with open(xfwm4_config, "w") as f:
-                f.write(xfwm4_xml)
-        
+        update_channel(xsettings_config, xsettings_xml)
+        clean_legacy_xfwm(f"{xfce_config_dir}/xfwm4.xml")
+        # Leave WM theme and HiDPI selection to XFCE/user settings.
+
         run(f"chown -R {safe_username}:{safe_username} {shlex.quote(xfce_config_dir)}")
         print("  ✓ XFCE configured with dark theme (Adwaita-dark)")
         

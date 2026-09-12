@@ -102,6 +102,7 @@ TEST_SUITE_PATTERNS: dict[str, tuple[str, ...]] = {
         "tests/test_go_setup.py",
         "tests/test_godot*.py",
         "tests/test_rdp_validation.py",
+        "tests/test_xfce_config.py",
         "tests/test_xrdp*.py",
     ),
     "deployment": (

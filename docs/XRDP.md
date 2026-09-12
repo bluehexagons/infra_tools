@@ -446,11 +446,19 @@ This accelerates Xorg drawing and compositing. The Debian xrdp 0.10 packages
 still use the CPU x264 encoder for H.264 RDP output, so this is not hardware
 video encoding.
 
-The startup script sets `XRDP_SESSION=1`, disables
-screen blanking and DPMS, and starts the selected desktop through D-Bus. XFCE
-display profiles and power-management settings that conflict with dynamic
-resolution are cleared, while `xfsettingsd` remains enabled for normal desktop
-settings.
+The startup script sets `XRDP_SESSION=1` and starts the selected desktop through
+D-Bus. Xorg blanking timers and XFCE display power management are disabled by
+their configurations. Setup retires only exact known legacy display-profile
+and xfsettingsd overrides; custom display profiles and keyboard autostarts are
+preserved. If a custom profile forces an unwanted resolution, adjust it in
+XFCE Display settings. `xfsettingsd` remains enabled for normal desktop settings.
+
+Power and GTK appearance changes merge the explicitly managed properties into
+existing XML, preserving unrelated preferences. Malformed files stop the edit
+instead of being silently reset. The obsolete nested Xinerama/window-theme
+properties and exact known global `pm-is-supported` stubs are retired. Setup
+does not force a HiDPI window-manager theme or install a warning-suppression
+stub. These migrations run during normal setup, after managed desktop logout.
 
 Existing managed configuration files are saved with a `.bak` suffix before the
 managed versions are written. Use the normal setup or patch flow to reapply
