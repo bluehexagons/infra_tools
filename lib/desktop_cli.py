@@ -13,11 +13,14 @@ from desktop import session_runtime as runtime
 def add_desktop_subparser(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser("desktop", help="Start and use the shared desktop as its owner")
     commands = parser.add_subparsers(dest="desktop_command", required=True)
-    for name in ("status", "start", "logout"):
+    for name in ("status", "start", "logout", "windows"):
         commands.add_parser(name).add_argument("--json", action="store_true")
     screenshot = commands.add_parser("screenshot")
     screenshot.add_argument("--output", required=True)
     screenshot.add_argument("--json", action="store_true")
+    target = screenshot.add_mutually_exclusive_group()
+    target.add_argument("--window", help="Capture a window ID from 'desktop windows'")
+    target.add_argument("--active-window", action="store_true", help="Capture the active application without changing focus")
     execute = commands.add_parser("exec")
     execute.add_argument("argv", nargs=argparse.REMAINDER)
     control = commands.add_parser("control")
@@ -52,8 +55,12 @@ def run_desktop_command(args: argparse.Namespace) -> int:
                     raise RuntimeError("Desktop is starting; run 'infra-tools desktop start' to wait for readiness")
                 raise RuntimeError(f"Desktop is {state}; inspect 'infra-tools desktop status' before retrying")
             payload = {"action": command, "generation": current["generation"]}
-            if command == "screenshot":
+            if command == "windows":
+                result = runtime.request(payload)
+            elif command == "screenshot":
                 payload["output"] = str(Path(args.output).absolute())
+                payload["window"] = args.window
+                payload["active_window"] = args.active_window
                 result = runtime.request(payload)
             else:
                 if command == "exec":

@@ -145,6 +145,20 @@ reconnect: disable client auto-reconnect when intentionally logging out.
 it. Observe `status` afterward; the request alone is not proof of completion.
 
 Screenshots return the session `generation` and full-display pixel `geometry`.
+Use `desktop windows` to discover current window IDs and titles. Capture one
+application's client area with `desktop screenshot --window ID --output PATH.png`,
+or use `--active-window` for the active application. Neither option changes focus;
+hidden or closed windows produce an error instead of a full-desktop fallback.
+Inspect captures for overlapping content before sharing. The `image_geometry`
+field describes the PNG, while top-level `geometry` still describes the desktop.
+Window metadata includes its desktop `origin`; recapture the desktop before
+coordinate-based input because a window can move between commands.
+
+Agents can include inspected PNGs through their client's image/attachment support
+or local Markdown image links. Keep response artifacts at stable paths outside
+Git, retain linked images, and avoid exposing unrelated windows or credentials.
+The desktop skill documents capture selection and response attachment guidance.
+
 Use those exact values for bounded input, then inspect the result:
 
 ```bash
@@ -217,6 +231,14 @@ manager and `display-manager.service`, and deliberately start that service.
 Rollback restores configuration, not unsaved applications. Keep SSH available.
 
 ## Live qualification
+
+On 2026-09-12, agent-2 (Debian, XRDP 0.10.6.1-2, xorgxrdp 0.10.5-2,
+XFCE session 4.20.2-2, scrot 2.0.0-1) passed local peer-authenticated startup,
+native Mousepad launch, text input/save, desktop and application screenshots,
+screenshots during pause, and normal logout followed by a new session generation.
+T3 Code remained active. Application capture produced a 640×480 client-area PNG
+within the 1280×720 desktop. Human RDP reconnect/resize, cross-client clipboard,
+lock/unlock, and frontend restart still require live qualification.
 
 The implementation has mocked lifecycle/setup tests. End-to-end qualification
 is still required on a disposable Debian VM with standard emulated graphics;

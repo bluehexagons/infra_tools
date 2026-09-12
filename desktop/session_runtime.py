@@ -178,6 +178,50 @@ def window_manager_ready() -> bool:
     return re.search(r"window id # 0x[1-9a-fA-F][0-9a-fA-F]*", value) is not None
 
 
+def window_ids(property_name: str = "_NET_CLIENT_LIST_STACKING") -> list[str]:
+    value = run_tool(["xprop", "-root", property_name], timeout=3)
+    return [hex(int(value, 16)) for value in re.findall(r"0x[0-9a-fA-F]+", value)
+            if int(value, 16)]
+
+
+def window_details(window_id: str) -> dict[str, Any]:
+    value = run_tool(["env", "LC_ALL=C", "xwininfo", "-id", window_id], timeout=3)
+    fields = {}
+    for name in ("Absolute upper-left X", "Absolute upper-left Y", "Width", "Height"):
+        match = re.search(rf"^\s*{name}:\s*(-?\d+)\s*$", value, re.MULTILINE)
+        if match is None:
+            raise RuntimeError("Could not inspect application window geometry")
+        fields[name] = int(match[1])
+    title = re.search(r'^xwininfo: Window id: \S+ "(.*)"$', value, re.MULTILINE)
+    return {"id": window_id, "title": title[1] if title else "",
+            "origin": [fields["Absolute upper-left X"], fields["Absolute upper-left Y"]],
+            "geometry": [fields["Width"], fields["Height"]],
+            "visible": re.search(r"Map State:\s*IsViewable", value) is not None}
+
+
+def capture_window(payload: dict[str, Any]) -> dict[str, Any] | None:
+    selected = payload.get("window")
+    active = payload.get("active_window", False)
+    if type(active) is not bool or (active and selected is not None):
+        raise ValueError("Choose either a window ID or the active window")
+    if active:
+        ids = window_ids("_NET_ACTIVE_WINDOW")
+        if not ids:
+            raise ValueError("No active application window")
+        selected = ids[0]
+    if selected is None:
+        return None
+    if not isinstance(selected, str) or not re.fullmatch(r"(?:0x[0-9a-fA-F]+|[0-9]+)", selected):
+        raise ValueError("Window ID must be decimal or hexadecimal")
+    selected = hex(int(selected, 16 if selected.startswith("0x") else 10))
+    if selected not in window_ids():
+        raise ValueError("Window is no longer managed by this desktop; list windows again")
+    window = window_details(selected)
+    if not window["visible"]:
+        raise ValueError("Window is minimized or hidden; make it visible before capture")
+    return window
+
+
 class DesktopSession:
     """Serialize bounded GUI operations and keep launches in the desktop group."""
 
@@ -228,7 +272,22 @@ class DesktopSession:
             raise ValueError("Desktop session changed; inspect it again")
         if self.process.poll() is not None:
             raise RuntimeError("Desktop is stopping")
+        if action == "windows":
+            windows = []
+            ids = window_ids()
+            deadline = time.monotonic() + 10
+            inspected = 0
+            for window_id in ids[:64]:
+                if time.monotonic() >= deadline:
+                    break
+                inspected += 1
+                try:
+                    windows.append(window_details(window_id))
+                except (RuntimeError, OSError, subprocess.SubprocessError):
+                    continue  # A window may close while we enumerate it.
+            return {"generation": self.generation, "windows": windows, "truncated": len(ids) > inspected}
         if action == "screenshot":
+            window = capture_window(payload)
             path = payload.get("output")
             if not isinstance(path, str):
                 raise ValueError("Screenshot output path is required")
@@ -238,22 +297,34 @@ class DesktopSession:
             output = Path(path)
             if not output.is_absolute() or output.suffix.lower() != ".png":
                 raise ValueError("Screenshot output must be an absolute PNG path")
+            desktop_geometry = geometry()
             # Refuse overwrite and symlinks; create a private file before capture.
             fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             os.close(fd)
             try:
-                run_tool(["scrot", "--overwrite", str(output)])
+                options = ["--window", window["id"]] if window else []
+                run_tool(["scrot", "--overwrite", *options, str(output)])
                 with output.open("rb") as captured:
                     header = captured.read(24)
                 if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n":
                     raise RuntimeError("Desktop capture did not produce a PNG")
                 captured_geometry = list(struct.unpack(">II", header[16:24]))
-                if captured_geometry != geometry():
+                expected = desktop_geometry
+                if window:
+                    after = window_details(window["id"])
+                    if after != window:
+                        raise RuntimeError("Window changed during capture; take a new screenshot")
+                    expected = window["geometry"]
+                if captured_geometry != expected:
+                    raise RuntimeError("Desktop or window resized during capture; take a new screenshot")
+                snapshot = self.snapshot_status()
+                if snapshot["geometry"] != desktop_geometry:
                     raise RuntimeError("Desktop resized during capture; take a new screenshot")
             except Exception:
                 output.unlink(missing_ok=True)
                 raise
-            return {**self.snapshot_status(), "geometry": captured_geometry, "output": str(output)}
+            return {**snapshot, "image_geometry": captured_geometry,
+                    "window": window, "output": str(output)}
         if self.paused:
             raise RuntimeError("Agent desktop control is paused for human use")
         if action == "acquire":

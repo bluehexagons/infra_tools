@@ -58,6 +58,36 @@ it using your available image viewer:
 infra-tools desktop screenshot --output /tmp/desktop-check-1.png
 ```
 
+Prefer an application screenshot when the result concerns one application:
+
+```bash
+infra-tools desktop windows
+infra-tools desktop screenshot --window 0x123456 --output /tmp/application-check-1.png
+infra-tools desktop screenshot --active-window --output /tmp/active-application-1.png
+```
+
+Use a current ID from `windows`; do not guess IDs or select by an ambiguous title.
+Window capture excludes window-manager decorations and does not raise or focus
+the application. Minimized/hidden windows must be made visible first; failures
+never fall back to capturing the whole desktop. Inspect the image for occlusion,
+dialogs and unrelated private content before sharing. These are pixel captures,
+not exports of off-screen or minimized application content.
+
+`image_geometry` describes the PNG dimensions; top-level `geometry` remains the
+full desktop size used by input commands. For window images, `window.origin`
+gives the client area's desktop offset. Windows can move without changing the
+session generation: recapture the full desktop before coordinate-based input.
+
+When an image helps explain a result, include the inspected screenshot using
+the response client's image/attachment support, with a brief caption. A local
+image viewer tool lets you inspect it but may not attach it to the final answer.
+For clients supporting local Markdown images, use `![caption](/absolute/path.png)`;
+otherwise use their artifact/upload tool, or provide a file link and state the
+limitation. Keep shared artifacts at stable paths outside Git (or ignored artifact
+directories), retain them for the user, and never publish them to an external host
+merely to display them. Prefer the narrowest useful capture; do not include
+passwords, tokens, or unrelated private windows in evidence.
+
 Use the returned `generation` and `geometry` for input, for example:
 
 ```bash
@@ -72,7 +102,7 @@ the result, and recapture after reconnect, resize, focus changes or an error.
 A successful input response is not proof that the application changed. Stale
 session or geometry errors require a fresh screenshot; never retry old clicks.
 Desktop automation provides pixels and input, not DOM/network assertions.
-Delete temporary screenshots when finished; avoid capturing unrelated user data.
+Delete disposable captures when finished; retain screenshots linked in responses.
 
 ## Human handoff and logout
 

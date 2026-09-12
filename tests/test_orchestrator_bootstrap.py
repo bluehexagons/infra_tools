@@ -303,10 +303,10 @@ class TestRetireLegacyTmpfilesConf(unittest.TestCase):
     @patch("lib.orchestrator_bootstrap.retire_legacy_tmpfiles_conf", return_value=True)
     @patch("lib.orchestrator_bootstrap.install_launcher", return_value="/usr/local/bin/infra-tools")
     @patch("lib.orchestrator_bootstrap.subprocess.run")
-    @patch("lib.orchestrator_bootstrap._run_apt_command", return_value=0)
+    @patch("lib.orchestrator_bootstrap.install_system_packages", return_value=0)
     @patch("lib.orchestrator_bootstrap.os.geteuid", return_value=0)
     def test_bootstrap_retires_tmpfiles_conf(
-        self, _mock_geteuid, _mock_run_apt, mock_run, _mock_launcher, mock_tmpfiles
+        self, _mock_geteuid, _mock_packages, mock_run, _mock_launcher, mock_tmpfiles
     ):
         mock_run.side_effect = [
             unittest.mock.MagicMock(returncode=0, stdout="", stderr=""),
@@ -315,7 +315,8 @@ class TestRetireLegacyTmpfilesConf(unittest.TestCase):
         ]
         with patch("lib.orchestrator_bootstrap.resolve_bootstrap_user", return_value=("admin", "/home/admin")):
             with patch("lib.orchestrator_bootstrap.get_current_username", return_value="admin"):
-                orchestrator_bootstrap.run_orchestrator_bootstrap("infra_tools.py", "bash", None)
+                result = orchestrator_bootstrap.run_orchestrator_bootstrap("infra_tools.py", "bash", None)
+        self.assertEqual(result, 0)
         mock_tmpfiles.assert_called_once()
 
 

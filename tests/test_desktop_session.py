@@ -141,6 +141,82 @@ class DesktopControlTests(unittest.TestCase):
             self.assertEqual(result["geometry"], [1280, 720])
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
+    @patch.object(runtime, "window_ids", return_value=["0x123"])
+    @patch.object(runtime, "window_details")
+    @patch.object(runtime, "run_tool")
+    def test_window_capture_preserves_desktop_coordinates_and_does_not_focus(self, tool, details, ids):
+        details.return_value = {"id": "0x123", "title": "Editor", "origin": [10, 20],
+                                "geometry": [640, 480], "visible": True}
+        self.session.paused = True
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "app.png"
+            tool.side_effect = lambda argv: path.write_bytes(
+                b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", 640, 480))
+            result = self.session.handle({"action": "screenshot", "generation": self.session.generation,
+                                          "window": "291", "output": str(path)})
+            self.assertEqual(result["geometry"], [1280, 720])
+            self.assertEqual(result["image_geometry"], [640, 480])
+            self.assertEqual(result["window"]["origin"], [10, 20])
+            tool.assert_called_once_with(["scrot", "--overwrite", "--window", "0x123", str(path)])
+
+    @patch.object(runtime, "window_ids", return_value=["0x123"])
+    @patch.object(runtime, "window_details", return_value={"visible": False})
+    @patch.object(runtime, "run_tool")
+    def test_hidden_or_stale_window_never_captures_desktop_as_fallback(self, tool, details, ids):
+        for window, message in (("0x123", "hidden"), ("0x456", "no longer"), ("--exec", "Window ID")):
+            with self.subTest(window=window), self.assertRaisesRegex(ValueError, message):
+                self.session.handle({"action": "screenshot", "generation": self.session.generation,
+                                     "window": window, "output": "/tmp/unused.png"})
+        tool.assert_not_called()
+
+    @patch.object(runtime, "window_ids", side_effect=[["0x123"], ["0x123"]])
+    @patch.object(runtime, "window_details", return_value={"id": "0x123", "visible": True})
+    def test_active_window_resolves_to_a_specific_managed_window(self, details, ids):
+        self.assertEqual(runtime.capture_window({"active_window": True})["id"], "0x123")
+        self.assertEqual(ids.call_args_list[0].args, ("_NET_ACTIVE_WINDOW",))
+
+    @patch.object(runtime, "run_tool", return_value='''
+xwininfo: Window id: 0x123 "Editor"
+  Absolute upper-left X:  -10
+  Absolute upper-left Y:  20
+  Width: 640
+  Height: 480
+  Map State: IsViewable
+''')
+    def test_window_inspection_parses_client_coordinates(self, tool):
+        result = runtime.window_details("0x123")
+        self.assertEqual(result["origin"], [-10, 20])
+        self.assertEqual(result["geometry"], [640, 480])
+        self.assertEqual(result["title"], "Editor")
+        self.assertTrue(result["visible"])
+
+    @patch.object(runtime, "capture_window")
+    @patch.object(runtime, "window_details")
+    @patch.object(runtime, "run_tool")
+    def test_window_move_during_capture_discards_image(self, tool, details, selected):
+        selected.return_value = {"id": "0x123", "origin": [10, 20], "geometry": [640, 480], "visible": True}
+        details.return_value = {**selected.return_value, "origin": [30, 40]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "moving.png"
+            tool.side_effect = lambda argv: path.write_bytes(
+                b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", 640, 480))
+            with self.assertRaisesRegex(RuntimeError, "Window changed"):
+                self.session.handle({"action": "screenshot", "generation": self.session.generation,
+                                     "window": "0x123", "output": str(path)})
+            self.assertFalse(path.exists())
+
+    @patch.object(runtime, "geometry", side_effect=[[1280, 720], [800, 600]])
+    @patch.object(runtime, "run_tool")
+    def test_desktop_resize_during_final_status_discards_image(self, tool, geometry):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "resizing.png"
+            tool.side_effect = lambda argv: path.write_bytes(
+                b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", 1280, 720))
+            with self.assertRaisesRegex(RuntimeError, "Desktop resized"):
+                self.session.handle({"action": "screenshot", "generation": self.session.generation,
+                                     "output": str(path)})
+            self.assertFalse(path.exists())
+
     @patch.object(runtime, "run_tool")
     def test_screenshot_rejects_scrot_filename_expansion(self, tool):
         with self.assertRaisesRegex(ValueError, "format characters"):
@@ -398,6 +474,17 @@ class DesktopSupervisorTests(unittest.TestCase):
 
 
 class DesktopCliTests(unittest.TestCase):
+    @patch.object(runtime, "status", return_value={"state": "running", "generation": "current"})
+    @patch.object(runtime, "request", return_value={"output": "/tmp/app.png"})
+    def test_window_screenshot_routes_without_acquiring_control(self, request, status):
+        parser = argparse.ArgumentParser()
+        add_desktop_subparser(parser.add_subparsers())
+        args = parser.parse_args(["desktop", "screenshot", "--window", "0x123", "--output", "/tmp/app.png"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(run_desktop_command(args), 0)
+        request.assert_called_once_with({"action": "screenshot", "generation": "current",
+                                        "window": "0x123", "active_window": False, "output": "/tmp/app.png"})
+
     @patch.object(runtime, "status", return_value={"state": "starting"})
     @patch.object(runtime, "request")
     def test_starting_desktop_gets_accurate_guidance(self, request, status):
