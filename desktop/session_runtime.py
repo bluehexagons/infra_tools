@@ -33,11 +33,16 @@ SESSION_COMMANDS = {
     "lxqt": ["startlxqt"],
 }
 MAX_MESSAGE = 65536
+START_REQUEST_TIMEOUT = 30
+START_READY_TIMEOUT = 30
 
 
 def configuration() -> dict[str, Any]:
     """Read the root-owned machine desktop declaration."""
-    info = CONFIG_PATH.lstat()
+    try:
+        info = CONFIG_PATH.lstat()
+    except FileNotFoundError as exc:
+        raise RuntimeError("Shared desktop is not configured; rerun VM setup with --desktop xfce") from exc
     if not CONFIG_PATH.is_file() or CONFIG_PATH.is_symlink() or info.st_uid != 0 or info.st_mode & 0o022:
         raise RuntimeError("Unsafe desktop configuration")
     config = json.loads(CONFIG_PATH.read_text())
@@ -69,7 +74,7 @@ def runtime_directory() -> Path:
 def session_lock(name: str) -> Iterator[None]:
     fd = os.open(runtime_directory() / name, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
-        deadline = time.monotonic() + 35
+        deadline = time.monotonic() + START_REQUEST_TIMEOUT + START_READY_TIMEOUT + 30
         while True:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -101,7 +106,7 @@ def receive(connection: socket.socket) -> dict[str, Any]:
 def request(payload: dict[str, Any]) -> dict[str, Any]:
     configuration()
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.settimeout(15)
+        connection.settimeout(30)
         connection.connect(str(runtime_directory() / "control.sock"))
         connection.sendall(json.dumps(payload).encode() + b"\n")
         result = receive(connection)
@@ -127,31 +132,37 @@ def start() -> dict[str, Any]:
             return current
         if current["state"] not in {"stopped", "starting"}:
             raise RuntimeError("Desktop is changing state; inspect status before retrying")
+        startup_failed = False
         if current["state"] == "stopped":
-            result = subprocess.run(
-                ["xrdp-sesrun", "-t", "Xorg", "-g", "1280x720", "-b", "32"],
-                capture_output=True, text=True, timeout=30, check=False,
-            )
-            if result.returncode:
-                raise RuntimeError("Desktop startup failed; inspect xrdp-sesman and the per-session Xorg log")
-        deadline = time.monotonic() + 15
+            try:
+                result = subprocess.run(
+                    ["xrdp-sesrun", "-t", "Xorg", "-g", "1280x720", "-b", "32"],
+                    capture_output=True, text=True, timeout=START_REQUEST_TIMEOUT, check=False,
+                )
+                startup_failed = result.returncode != 0
+            except subprocess.TimeoutExpired:
+                startup_failed = True
+            # A human can win the login race before our control socket appears.
+            # Even a failed/timed-out sesrun request may have created a session.
+        deadline = time.monotonic() + START_READY_TIMEOUT
         while time.monotonic() < deadline:
             current = status()
             if current["state"] == "running":
                 return current
             time.sleep(0.2)
-        raise RuntimeError("Desktop did not become ready; inspect the desktop session log")
+        reason = "Desktop startup request failed" if startup_failed else "Desktop did not become ready"
+        raise RuntimeError(f"{reason}; run 'infra-tools desktop status' and inspect xrdp-sesman and the per-session Xorg log")
 
 
-def run_tool(argv: list[str]) -> str:
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=8, check=False)
+def run_tool(argv: list[str], *, timeout: float = 8) -> str:
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
     if result.returncode:
         raise RuntimeError(f"{argv[0]} failed: {result.stderr.strip()[:500]}")
     return result.stdout.strip()
 
 
 def geometry() -> list[int]:
-    output = run_tool(["xdotool", "getdisplaygeometry"])
+    output = run_tool(["xdotool", "getdisplaygeometry"], timeout=3)
     parts = output.split()
     if len(parts) != 2 or not all(part.isdecimal() for part in parts):
         raise RuntimeError("Could not determine desktop geometry")
@@ -161,7 +172,7 @@ def geometry() -> list[int]:
 def window_manager_ready() -> bool:
     """Require an EWMH window manager, not merely an accepting X server."""
     try:
-        value = run_tool(["xprop", "-root", "_NET_SUPPORTING_WM_CHECK"])
+        value = run_tool(["xprop", "-root", "_NET_SUPPORTING_WM_CHECK"], timeout=3)
     except (RuntimeError, OSError, subprocess.SubprocessError):
         return False
     return re.search(r"window id # 0x[1-9a-fA-F][0-9a-fA-F]*", value) is not None
@@ -180,14 +191,27 @@ class DesktopSession:
         self.children: list[subprocess.Popen[Any]] = []
 
     def snapshot_status(self) -> dict[str, Any]:
-        return {
-            "state": ("stopping" if self.process.poll() is not None else
-                      "running" if window_manager_ready() else "starting"),
+        state = "stopping" if self.process.poll() is not None else "starting"
+        size = None
+        detail = None
+        if state != "stopping":
+            ready = window_manager_ready()
+            try:
+                size = geometry()
+            except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+                detail = str(exc)
+            if ready and size is not None:
+                state = "running"
+        result = {
+            "state": state,
             "generation": self.generation, "desktop": self.config["desktop"],
             "username": self.config["username"], "display": os.environ["DISPLAY"],
-            "geometry": geometry(), "paused": self.paused,
+            "geometry": size, "paused": self.paused,
             "pid": self.process.pid,
         }
+        if detail:
+            result["detail"] = detail
+        return result
 
     def handle(self, payload: dict[str, Any]) -> dict[str, Any]:
         action = payload.get("action")
@@ -247,7 +271,14 @@ class DesktopSession:
             argv = payload.get("argv")
             if not isinstance(argv, list) or not argv or not all(isinstance(v, str) and "\0" not in v for v in argv):
                 raise ValueError("Application argv must be a nonempty string array")
-            process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, process_group=self.process.pid)
+            cwd = payload.get("cwd")
+            if cwd is not None:
+                if not isinstance(cwd, str) or not Path(cwd).is_absolute():
+                    raise ValueError("Application working directory must be an absolute directory")
+                validate_filesystem_path(cwd, must_exist=True)
+                if not Path(cwd).is_dir():
+                    raise ValueError("Application working directory must be a directory")
+            process = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, process_group=self.process.pid)
             self.children.append(process)
             return {"pid": process.pid, "generation": self.generation}
         if action == "logout":
@@ -300,8 +331,9 @@ def serve() -> int:
     with session_lock("session.lock"):
         path = runtime_directory() / "control.sock"
         path.unlink(missing_ok=True)
-        with socket.socket(socket.AF_UNIX) as server:
+        with socket.socket(socket.AF_UNIX) as server, contextlib.ExitStack() as cleanup:
             server.bind(str(path))
+            cleanup.callback(path.unlink, missing_ok=True)
             os.chmod(path, 0o600)
             server.listen(8)
             server.settimeout(0.25)

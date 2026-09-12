@@ -102,7 +102,20 @@ infra-tools desktop logout
 All commands return JSON. `status` observes without starting a session; `start`
 reuses one already running. `exec` and screenshots require a running session.
 `exec` launches argument vectors with the desktop's X authority and D-Bus
-environment. It does not execute a shell or change unrelated user services.
+environment and the invoking terminal's working directory, so relative project
+paths work as expected. It does not execute a shell or change unrelated user services.
+The session declares its desktop identity before starting D-Bus, including the
+XFCE menu prefix, so desktop-specific autostart entries and toolkit integration
+can recognize it.
+
+`start` waits for the window manager and display geometry to become usable,
+including when a human login wins a simultaneous start. A startup request gets
+30 seconds, followed by up to 30 seconds of readiness polling; concurrent agent
+starts serialize and reuse the result. While initializing, `status` reports
+`starting`; unavailable geometry is `null`, with a diagnostic `detail` when
+the geometry query fails. Wait with `start` before launching applications or
+sending input. A startup error never automatically logs out or retries login.
+
 The local agent startup uses XRDP 0.10's `xrdp-sesrun` Unix peer authentication;
 it needs no stored password. This is for local Unix accounts; it does not
 unlock password-protected keyrings or provide AD/Kerberos login.

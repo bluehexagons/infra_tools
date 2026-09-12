@@ -45,7 +45,12 @@ def run_desktop_command(args: argparse.Namespace) -> int:
         else:
             current = runtime.status()
             if current["state"] != "running":
-                raise RuntimeError("Desktop is stopped; run 'infra-tools desktop start' first")
+                state = current["state"]
+                if state == "stopped":
+                    raise RuntimeError("Desktop is stopped; run 'infra-tools desktop start' first")
+                if state == "starting":
+                    raise RuntimeError("Desktop is starting; run 'infra-tools desktop start' to wait for readiness")
+                raise RuntimeError(f"Desktop is {state}; inspect 'infra-tools desktop status' before retrying")
             payload = {"action": command, "generation": current["generation"]}
             if command == "screenshot":
                 payload["output"] = str(Path(args.output).absolute())
@@ -53,6 +58,7 @@ def run_desktop_command(args: argparse.Namespace) -> int:
             else:
                 if command == "exec":
                     payload["argv"] = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
+                    payload["cwd"] = str(Path.cwd())
                 elif command == "input":
                     payload.update({name: getattr(args, name) for name in ("generation", "geometry", "kind", "key", "text", "x", "y", "button")})
                 lease = runtime.request({"action": "acquire", "generation": payload["generation"]})

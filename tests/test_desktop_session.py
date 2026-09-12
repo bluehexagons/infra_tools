@@ -8,6 +8,7 @@ import io
 import json
 from pathlib import Path
 import struct
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -73,6 +74,21 @@ class DesktopControlTests(unittest.TestCase):
         self.assertEqual(popen.call_args.args[0], ["editor", "$(not-a-shell)"])
         self.assertEqual(popen.call_args.kwargs["process_group"], self.process.pid)
 
+    @patch.object(runtime.subprocess, "Popen")
+    def test_application_launch_preserves_caller_directory(self, popen):
+        with tempfile.TemporaryDirectory() as directory:
+            self.session.handle({"action": "exec", **self.acquire(),
+                                 "argv": ["editor", "relative.txt"], "cwd": directory})
+            self.assertEqual(popen.call_args.kwargs["cwd"], directory)
+
+    @patch.object(runtime.subprocess, "Popen")
+    def test_invalid_application_directory_does_not_launch(self, popen):
+        lease = self.acquire()
+        for cwd in ("relative", 12):
+            with self.subTest(cwd=cwd), self.assertRaisesRegex(ValueError, "absolute directory"):
+                self.session.handle({"action": "exec", **lease, "argv": ["editor"], "cwd": cwd})
+        popen.assert_not_called()
+
     def test_expired_lease_is_rejected(self):
         lease = self.acquire()
         self.session.lease_until = 0
@@ -82,6 +98,20 @@ class DesktopControlTests(unittest.TestCase):
     @patch.object(runtime, "window_manager_ready", return_value=False)
     def test_starting_desktop_is_not_reported_ready(self, ready):
         self.assertEqual(self.session.snapshot_status()["state"], "starting")
+
+    @patch.object(runtime, "geometry", side_effect=RuntimeError("display initializing"))
+    def test_temporary_geometry_failure_keeps_status_available(self, geometry):
+        result = self.session.snapshot_status()
+        self.assertEqual(result["state"], "starting")
+        self.assertIsNone(result["geometry"])
+        self.assertEqual(result["detail"], "display initializing")
+        self.assertTrue(self.session.handle({"action": "pause"})["paused"])
+
+    @patch.object(runtime, "geometry")
+    def test_stopping_status_does_not_query_dead_display(self, geometry):
+        self.process.poll.return_value = 0
+        self.assertEqual(self.session.snapshot_status()["state"], "stopping")
+        geometry.assert_not_called()
 
     @patch.object(runtime, "run_tool")
     def test_invalid_click_does_not_even_move_pointer(self, tool):
@@ -144,6 +174,32 @@ class DesktopControlTests(unittest.TestCase):
 class DesktopStartTests(unittest.TestCase):
     @patch.object(runtime, "configuration")
     @patch.object(runtime, "session_lock")
+    @patch.object(runtime, "status", side_effect=[{"state": "stopped"}, {"state": "running"}])
+    @patch.object(runtime.subprocess, "run", return_value=Mock(returncode=1))
+    def test_failed_start_request_joins_a_racing_human_login(self, run, status, lock, config):
+        self.assertEqual(runtime.start()["state"], "running")
+        self.assertEqual(run.call_count, 1)
+
+    @patch.object(runtime, "configuration")
+    @patch.object(runtime, "session_lock")
+    @patch.object(runtime, "status", side_effect=[{"state": "stopped"}, {"state": "running"}])
+    @patch.object(runtime.subprocess, "run", side_effect=subprocess.TimeoutExpired("sesrun", 30))
+    def test_timed_out_request_can_still_have_started_the_session(self, run, status, lock, config):
+        self.assertEqual(runtime.start()["state"], "running")
+        self.assertEqual(run.call_count, 1)
+
+    @patch.object(runtime, "configuration")
+    @patch.object(runtime, "session_lock")
+    @patch.object(runtime, "status", return_value={"state": "stopped"})
+    @patch.object(runtime.subprocess, "run", return_value=Mock(returncode=1))
+    @patch.object(runtime.time, "monotonic", side_effect=[0, 31])
+    def test_failed_start_is_bounded_and_does_not_repeat_login(self, clock, run, status, lock, config):
+        with self.assertRaisesRegex(RuntimeError, "startup request failed"):
+            runtime.start()
+        self.assertEqual(run.call_count, 1)
+
+    @patch.object(runtime, "configuration")
+    @patch.object(runtime, "session_lock")
     @patch.object(runtime, "status", side_effect=[{"state": "starting"}, {"state": "running"}])
     @patch.object(runtime.subprocess, "run")
     def test_join_human_start_without_a_second_start_request(self, run, status, lock, config):
@@ -188,12 +244,16 @@ class DesktopMigrationTests(unittest.TestCase):
                     patch("desktop.session_steps.configure_session_service"):
                 install_session_runtime(config)
                 first = declaration.read_text()
+                self.assertIn("export XDG_CURRENT_DESKTOP=XFCE\n", wrapper.read_text())
+                self.assertIn("export XDG_MENU_PREFIX=xfce-\n", wrapper.read_text())
                 config.desktop = "i3"
                 install_session_runtime(config)
             self.assertEqual(json.loads(declaration.read_text())["desktop"], "i3")
             self.assertEqual(declaration.with_suffix(".json.bak").read_text(), first)
             self.assertEqual(wrapper.stat().st_mode & 0o777, 0o755)
             self.assertIn("dbus-run-session", wrapper.read_text())
+            self.assertIn("export XDG_CURRENT_DESKTOP=i3\n", wrapper.read_text())
+            self.assertNotIn("XDG_MENU_PREFIX=xfce-", wrapper.read_text())
             self.assertIn(["gpasswd", "-M", "agent", "infra-desktop"], [call.args[0] for call in run.call_args_list])
             self.assertEqual(skills.call_args.args, ("agent", ["codex"], ("infra-tools-desktop",)))
 
@@ -293,6 +353,21 @@ class DesktopServiceTests(unittest.TestCase):
 
 
 class DesktopSupervisorTests(unittest.TestCase):
+    def test_failed_desktop_launch_removes_control_socket(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runtime, "configuration", return_value={"desktop": "xfce", "username": "agent"}), \
+                patch.object(runtime, "session_lock"), patch.object(runtime.pwd, "getpwnam"), \
+                patch.object(runtime.os, "chdir"), patch.object(runtime.os, "chmod"), \
+                patch.object(runtime, "runtime_directory", return_value=Path(directory)), \
+                patch.dict("os.environ", {"DISPLAY": ":10"}), \
+                patch.object(runtime.socket, "socket") as socket, \
+                patch.object(runtime.subprocess, "Popen", side_effect=FileNotFoundError("desktop executable missing")):
+            path = Path(directory) / "control.sock"
+            socket.return_value.__enter__.return_value.bind.side_effect = lambda _: path.touch()
+            with self.assertRaisesRegex(FileNotFoundError, "desktop executable missing"):
+                runtime.serve()
+            self.assertFalse(path.exists())
+
     @patch.object(runtime, "configuration", return_value={"desktop": "xfce", "username": "agent"})
     @patch.object(runtime, "session_lock")
     @patch.object(runtime.pwd, "getpwnam")
@@ -323,6 +398,25 @@ class DesktopSupervisorTests(unittest.TestCase):
 
 
 class DesktopCliTests(unittest.TestCase):
+    @patch.object(runtime, "status", return_value={"state": "starting"})
+    @patch.object(runtime, "request")
+    def test_starting_desktop_gets_accurate_guidance(self, request, status):
+        args = argparse.Namespace(desktop_command="exec", argv=["editor"])
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(run_desktop_command(args), 1)
+        self.assertIn("starting", json.loads(output.getvalue())["error"])
+        request.assert_not_called()
+
+    @patch.object(runtime, "status", return_value={"state": "running", "generation": "current"})
+    @patch.object(runtime, "request", side_effect=[{"lease": "mine"}, {"pid": 42}, {"released": True}])
+    def test_exec_sends_the_invoking_shell_directory(self, request, status):
+        args = argparse.Namespace(desktop_command="exec", argv=["--", "editor", "relative.txt"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(run_desktop_command(args), 0)
+        self.assertEqual(request.call_args_list[1].args[0]["cwd"], str(Path.cwd()))
+        self.assertEqual(request.call_args_list[1].args[0]["argv"], ["editor", "relative.txt"])
+
     def test_lite_server_reconciles_firewall_before_enabling_rdp(self):
         from plugins.server import build_server_steps
         from security.steps import configure_firewall
@@ -356,6 +450,12 @@ class DesktopCliTests(unittest.TestCase):
 
 
 class DesktopPrivateRuntimeTests(unittest.TestCase):
+    def test_unconfigured_desktop_explains_how_to_enable_it(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runtime, "CONFIG_PATH", Path(directory) / "desktop.json"):
+            with self.assertRaisesRegex(RuntimeError, "not configured.*--desktop"):
+                runtime.configuration()
+
     def test_runtime_directory_rejects_nonprivate_parent(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)

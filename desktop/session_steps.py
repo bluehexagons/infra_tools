@@ -141,11 +141,20 @@ def install_session_runtime(config: SetupConfig) -> None:
     write_text_atomic(str(CONFIG_PATH), content, mode=0o644)
     run(["groupadd", "-f", "infra-desktop"])
     run(["gpasswd", "-M", config.username, "infra-desktop"])
+    desktop_names = {"xfce": "XFCE", "i3": "i3", "cinnamon": "X-Cinnamon", "lxqt": "LXQt"}
+    desktop_environment = (
+        f"export XDG_CURRENT_DESKTOP={shlex.quote(desktop_names[config.desktop])}\n"
+        f"export XDG_SESSION_DESKTOP={shlex.quote(config.desktop)}\n"
+        f"export DESKTOP_SESSION={shlex.quote(config.desktop)}\n"
+    )
+    if config.desktop == "xfce":
+        desktop_environment += "export XDG_MENU_PREFIX=xfce-\n"
     script = (
         "#!/bin/sh\n# Managed by infra_tools shared desktop setup\n"
         "umask 077\nexport XRDP_SESSION=1\n"
         'export PATH="$HOME/.local/bin:$PATH"\n'
         'export XDG_SESSION_TYPE=x11\n'
+        f"{desktop_environment}"
         "unset DBUS_SESSION_BUS_ADDRESS SESSION_MANAGER\n"
         f"cd {shlex.quote(source)} || exit 1\n"
         "exec dbus-run-session -- /usr/bin/python3 -m desktop.session_runtime\n"

@@ -41,8 +41,11 @@ infra-tools desktop exec -- thunar /home/agent
 ```
 
 Use the actual account's paths. `status` only observes; `start` reuses a running
-desktop. `exec` accepts an argument vector and supplies the session's display,
-X authority and D-Bus environment. Do not guess `DISPLAY`, copy authority cookies,
+desktop and waits for readiness when initialization is in progress. During
+`starting`, geometry may be `null`; inspect any `detail` if startup fails.
+`exec` accepts an argument vector, keeps the invoking shell's working directory,
+and supplies the session's display, X authority and D-Bus environment.
+Do not guess `DISPLAY`, copy authority cookies,
 start a second X server, or import GUI variables into the global user manager.
 Output is JSON; failures return a nonzero exit code and an `error` field.
 
