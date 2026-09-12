@@ -24,6 +24,7 @@ import subprocess
 import time
 from typing import Any, Iterator
 
+from desktop import accessibility
 from lib.validation import validate_filesystem_path
 from lib.validators import validate_username
 
@@ -288,6 +289,7 @@ class DesktopSession:
         self.lease_until = 0.0
         self.children: list[subprocess.Popen[Any]] = []
         self.launches: dict[str, subprocess.Popen[Any]] = {}
+        self.elements: dict[str, dict[str, Any]] = {}
 
     def snapshot_status(self) -> dict[str, Any]:
         state = "stopping" if self.process.poll() is not None else "starting"
@@ -320,6 +322,7 @@ class DesktopSession:
         if action == "pause":
             self.paused = True
             self.lease = None
+            self.elements.clear()
             return self.snapshot_status()
         if action == "resume":
             self.paused = False
@@ -328,6 +331,14 @@ class DesktopSession:
             raise ValueError("Desktop session changed; inspect it again")
         if self.process.poll() is not None:
             raise RuntimeError("Desktop is stopping")
+        if action == "inspect":
+            result = accessibility.worker_request({**payload, "operation": "inspect"})
+            for row in result["elements"]:
+                self.elements[row["ref"]] = {"pid": result["pid"], "name": row["name"],
+                    "role": row["role"], "observed_at": time.monotonic()}
+            while len(self.elements) > 512:
+                del self.elements[next(iter(self.elements))]
+            return {**result, "generation": self.generation}
         if action == "windows":
             windows = []
             ids = window_ids()
@@ -406,6 +417,15 @@ class DesktopSession:
         if action == "release":
             self.lease = None
             return {"released": True}
+        if action == "element":
+            ref = payload.get("ref")
+            observed = self.elements.get(ref) if isinstance(ref, str) else None
+            if observed is None or time.monotonic() - observed["observed_at"] > 60:
+                raise ValueError("Element reference expired; inspect again")
+            self.elements.clear()  # Actions can change the entire accessible tree.
+            result = accessibility.worker_request({**payload, **observed})
+            return {**result, "generation": self.generation}
+        self.elements.clear()
         if action == "window":
             return {**change_window(payload), "generation": self.generation}
         if action == "exec":

@@ -13,6 +13,7 @@ import time
 from typing import Any
 
 from desktop import session_runtime as runtime
+from desktop.accessibility import validate_query
 from lib.validation import validate_filesystem_path
 
 
@@ -70,6 +71,39 @@ def wait_for_window(generation: str, *, window: str | None = None,
                     "launch_status": launch_status}
         if time.monotonic() >= deadline:
             raise RuntimeError(f"Timed out waiting for window condition '{condition}'; inspect desktop status and windows")
+        time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+
+
+def wait_for_element(generation: str, *, pid: int, name: str | None = None,
+                     role: str | None = None, state: str = "present", text: str | None = None,
+                     timeout: float = 15) -> dict[str, Any]:
+    """Poll semantic observations without a lease; require an unambiguous match."""
+    query = {"action": "inspect", "generation": generation, "pid": pid, "name": name, "role": role}
+    validate_query(query)
+    if name is None and role is None:
+        raise ValueError("Select an exact accessible name or role")
+    if type(timeout) not in (int, float) or not 0 < timeout <= 120:
+        raise ValueError("Wait timeout must be greater than zero and at most 120 seconds")
+    if state not in ("present", "absent", "enabled", "showing", "focused"):
+        raise ValueError("Unknown element wait state")
+    if text is not None and (not isinstance(text, str) or len(text) > 256 or state == "absent"):
+        raise ValueError("Text wait requires at most 256 characters and a non-absent state")
+    deadline = time.monotonic() + timeout
+    while True:
+        result = runtime.request(query)
+        if result["generation"] != generation:
+            raise RuntimeError("Desktop session changed while waiting")
+        matches = result["elements"]
+        complete = not result["truncated"]
+        if state not in ("present", "absent"):
+            matches = [row for row in matches if state in row["states"]]
+        if text is not None:
+            matches = [row for row in matches if not row.get("text_truncated", False) and row.get("text") == text]
+        ready = complete and not matches if state == "absent" else complete and len(matches) == 1
+        if ready:
+            return {**result, "elements": matches, "condition": state}
+        if time.monotonic() >= deadline:
+            return {**result, "error": f"Timed out waiting for element state '{state}'; inspect matches and truncation"}
         time.sleep(min(0.25, max(0, deadline - time.monotonic())))
 
 

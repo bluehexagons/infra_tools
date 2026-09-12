@@ -54,6 +54,24 @@ def add_desktop_subparser(subparsers: argparse._SubParsersAction) -> None:
     sequence.add_argument("--generation", required=True)
     control = commands.add_parser("control")
     control.add_argument("operation", choices=("pause", "resume"))
+    inspect = commands.add_parser("inspect", help="Read a bounded AT-SPI tree for one application")
+    inspect.add_argument("--pid", required=True, type=int)
+    inspect.add_argument("--name", help="Exact accessible name")
+    inspect.add_argument("--role", help="Exact accessible role")
+    element = commands.add_parser("element", help="Act on a recent accessibility reference")
+    element.add_argument("operation", choices=("invoke", "set-text", "focus"))
+    element.add_argument("--ref", required=True)
+    element.add_argument("--generation", required=True)
+    element.add_argument("--action-name")
+    element.add_argument("--text")
+    semantic_wait = commands.add_parser("wait-element", help="Wait for a uniquely matched accessible control")
+    semantic_wait.add_argument("--pid", required=True, type=int)
+    semantic_wait.add_argument("--name")
+    semantic_wait.add_argument("--role")
+    semantic_wait.add_argument("--state", choices=("present", "absent", "enabled", "showing", "focused"), default="present")
+    semantic_wait.add_argument("--text", help="Exact complete text to wait for")
+    semantic_wait.add_argument("--timeout", type=float, default=15)
+    semantic_wait.add_argument("--generation", required=True)
     action = commands.add_parser("input", help="Apply a bounded input using screenshot generation/geometry")
     action.add_argument("--generation", required=True)
     action.add_argument("--geometry", required=True, nargs=2, type=int, metavar=("WIDTH", "HEIGHT"))
@@ -96,6 +114,11 @@ def run_desktop_command(args: argparse.Namespace) -> int:
                 baseline = runtime.request({"action": "windows", "generation": current["generation"]})["windows"]
             if command == "windows":
                 result = runtime.request(payload)
+            elif command == "inspect":
+                result = runtime.request({**payload, **{name: getattr(args, name) for name in ("pid", "name", "role")}})
+            elif command == "wait-element":
+                result = client.wait_for_element(args.generation,
+                    **{name: getattr(args, name) for name in ("pid", "name", "role", "state", "text", "timeout")})
             elif command == "launch-status":
                 result = runtime.request({**payload, "launch": args.launch, "generation": args.generation})
             elif command == "wait":
@@ -121,6 +144,9 @@ def run_desktop_command(args: argparse.Namespace) -> int:
                 elif command == "window":
                     payload.update({name: getattr(args, name) for name in
                                     ("generation", "identity", "window", "operation", "x", "y", "width", "height")})
+                elif command == "element":
+                    payload.update({name: getattr(args, name) for name in
+                                    ("generation", "operation", "ref", "action_name", "text")})
                 elif command == "input":
                     payload.update({name: getattr(args, name) for name in ("generation", "geometry", "kind", "key", "text", "x", "y", "button")})
                 lease = runtime.request({"action": "acquire", "generation": payload["generation"]})

@@ -352,3 +352,7 @@ For remote sessions, test XRDP separately and use the log checks in
 [`XRDP.md`](./XRDP.md). Machine capability differences, including Flatpak
 fallbacks and software rendering in containers, are documented in
 [`MACHINE_TYPES.md`](./MACHINE_TYPES.md).
+
+For agent-operated native controls, see [Desktop automation](DESKTOP_AUTOMATION.md).
+It covers bounded AT-SPI inspection, named actions, semantic waits, and a small
+Geany edit/save check using the default `agent_code_vm` editor.
