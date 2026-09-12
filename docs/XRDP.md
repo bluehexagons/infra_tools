@@ -326,7 +326,10 @@ and agent screenshots matched the final 1356×912 size. This is usable with a
 resize interruption, not qualified seamless resizing. Remmina/FreeRDP versions
 and client/frontend logs are still needed to identify the disconnect cause.
 The operator's Pause button blocked an agent launch while screenshot observation
-remained available. Human Resume and close-while-paused tests remain pending.
+remained available. The operator confirmed closing and reopening the control
+window preserved pause, then clicked Resume. Agent status reported unpaused and
+a harmless `/usr/bin/true` launch exited successfully, with unchanged desktop
+PID and generation. The human handoff cycle passed.
 
 The default XFCE Lock action did nothing: Light Locker is intentionally disabled
 for the display-manager-free XRDP session, and no replacement locker is installed.
@@ -341,8 +344,8 @@ resize, maximize, minimize/restore, normal close with an unsaved-work prompt,
 canceled-close timeout, and save/capture sequences. Default document opening
 selected Geany; parent-directory reveal opened the file manager. The handoff
 window's Pause button blocked agent mutations while application screenshots
-remained available; CLI resume restored control. The human Resume button and
-closing the handoff window while paused still need separate UI qualification.
+remained available; CLI resume restored control. Subsequent human UI handoff
+qualification is recorded above.
 
 Startup inspection found XFCE's notification autostart attempting a display-less
 user service before falling back, plus PulseAudio receiving an empty X authority
