@@ -17,6 +17,21 @@ MAX_OUTPUT = 48000
 STATES = ("enabled", "sensitive", "showing", "visible", "focused", "editable", "checked", "selected", "busy", "defunct")
 
 
+def check_dependencies() -> dict[str, Any]:
+    """Import the system bindings without connecting to a desktop or reading UI."""
+    try:
+        result = subprocess.run(
+            ["/usr/bin/python3", "-c",
+             "import gi; gi.require_version('Atspi', '2.0'); from gi.repository import Atspi"],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+        if result.returncode == 0:
+            return {"available": True}
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {"available": False, "error": "System AT-SPI bindings unavailable; check python3-gi and gir1.2-atspi-2.0"}
+
+
 def validate_query(payload: dict[str, Any]) -> None:
     if type(payload.get("pid")) is not int or not 0 < payload["pid"] <= 2147483647:
         raise ValueError("Accessibility PID must be a positive process ID from desktop windows")
@@ -53,16 +68,18 @@ def describe(node: Any, path: list[int], api: Any, parent_ref: str) -> dict[str,
     """Expose bounded text, excluding password controls and their descendants."""
     role = node.get_role_name()
     protected = node.get_role() == api.Role.PASSWORD_TEXT
-    name = "" if protected else (node.get_name() or "")[:256]
+    full_name = "" if protected else (node.get_name() or "")
+    name = full_name[:256]
     states = node.get_state_set()
     present = [state for state in STATES if states.contains(getattr(api.StateType, state.upper()))]
-    identity = [node.app.bus_name, node.path, path, role, name, parent_ref]
+    identity = [node.app.bus_name, node.path, path, role, full_name, parent_ref]
     ref = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:32]
     actions = []
     if not protected and node.is_action():
         action = node.get_action_iface()
-        actions = [action.get_action_name(i)[:128] for i in range(min(action.get_n_actions(), 16))]
+        actions = [action.get_action_name(i) for i in range(min(action.get_n_actions(), 16))]
     row = {"ref": ref, "path": path, "role": role, "name": name,
+           "name_truncated": len(full_name) > 256,
            "states": present, "actions": actions, "protected": protected}
     if not protected and node.is_text():
         text = node.get_text_iface()
@@ -80,10 +97,13 @@ def inspect_application(payload: dict[str, Any], api: Any) -> tuple[dict[str, An
     for index in range(min(desktop.get_child_count(), 128)):
         if time.monotonic() >= deadline:
             raise RuntimeError("Accessibility application lookup timed out")
-        candidate = desktop.get_child_at_index(index)
-        if candidate and candidate.get_process_id() == payload["pid"]:
-            application = candidate
-            break
+        try:
+            candidate = desktop.get_child_at_index(index)
+            if candidate and candidate.get_process_id() == payload["pid"]:
+                application = candidate
+                break
+        except api.Error:
+            continue  # A closing unrelated application must not block this one.
     if application is None:
         raise RuntimeError("Application is not available through AT-SPI; check PID and accessibility support")
     pending = deque([(application, [], "")])
@@ -102,15 +122,20 @@ def inspect_application(payload: dict[str, Any], api: Any) -> tuple[dict[str, An
             if path and not node.get_state_set().contains(api.StateType.SHOWING):
                 continue  # Closed menus and inactive tabs can dwarf the usable UI.
             row = describe(node, path, api, parent_ref)
-            matches = all(payload.get(field) is None or row[field] == payload[field] for field in ("name", "role"))
+            target_ref = payload.get("ref") if payload.get("operation", "inspect") != "inspect" else None
+            matches = (row["ref"] == target_ref if target_ref is not None else
+                       all(payload.get(field) is None or row[field] == payload[field] for field in ("name", "role"))
+                       and (payload.get("name") is None or not row["name_truncated"]))
             if matches:
                 cost = len(json.dumps(row).encode()) + 2
                 if len(elements) >= MAX_RESULTS or size + cost > MAX_OUTPUT - 1024:
                     truncated = True
                     break
                 elements.append(row)
-                targets[row["ref"]] = node
+                targets[row["ref"]] = (node, parent_ref)
                 size += cost
+                if target_ref is not None:
+                    break  # Do not delay a known target behind unrelated UI queries.
             if not row["protected"]:
                 count = node.get_child_count()
                 room = MAX_NODES - visited - len(pending)
@@ -140,10 +165,14 @@ def perform(payload: dict[str, Any], api: Any) -> dict[str, Any]:
     ref = payload.get("ref")
     if not isinstance(ref, str) or ref not in targets:
         raise ValueError("Element changed or is unavailable; inspect again")
-    row = next(item for item in result["elements"] if item["ref"] == ref)
+    previous = next(item for item in result["elements"] if item["ref"] == ref)
+    node, parent_ref = targets[ref]
+    node.clear_cache()
+    row = describe(node, previous["path"], api, parent_ref)
+    if row["ref"] != ref:
+        raise ValueError("Element changed before the action; inspect again")
     if row["protected"] or not {"enabled", "sensitive", "showing"}.issubset(row["states"]) or "defunct" in row["states"]:
         raise ValueError("Element is protected, hidden, disabled, or defunct; inspect again")
-    node = targets[ref]
     if operation == "invoke":
         action = payload.get("action_name")
         if not isinstance(action, str) or row["actions"].count(action) != 1:

@@ -76,6 +76,48 @@ class BackendTests(unittest.TestCase):
             self.inspect(operation="set-text", ref=ref, text="replacement")
         self.field.get_editable_text_iface.assert_not_called()
 
+    def test_long_names_are_not_exact_prefix_matches_and_full_identity_is_checked(self):
+        self.field.get_name.return_value = "x" * 256 + "first"
+        row = self.inspect(role="text")["elements"][0]
+        self.assertTrue(row["name_truncated"])
+        self.assertEqual(self.inspect(name="x" * 256)["elements"], [])
+        # The supervisor stores the displayed name, but actions must resolve by ref.
+        self.inspect(operation="set-text", ref=row["ref"], name=row["name"], text="updated")
+        self.field.get_editable_text_iface.reset_mock()
+        self.field.get_name.return_value = "x" * 256 + "second"
+        with self.assertRaisesRegex(ValueError, "changed"):
+            self.inspect(operation="set-text", ref=row["ref"], text="wrong target")
+        self.field.get_editable_text_iface.assert_not_called()
+
+    def test_target_state_is_refreshed_immediately_before_mutation(self):
+        ref = self.inspect(role="text")["elements"][0]["ref"]
+        def disabled():
+            self.field.get_state_set.return_value.contains.side_effect = lambda state: state == "showing"
+        self.field.clear_cache.side_effect = disabled
+        with self.assertRaisesRegex(ValueError, "disabled"):
+            self.inspect(operation="set-text", ref=ref, text="must not be written")
+        self.field.clear_cache.assert_called_once()
+        self.field.get_editable_text_iface.assert_not_called()
+
+    def test_target_rename_during_refresh_rejects_mutation(self):
+        ref = self.inspect(role="text")["elements"][0]["ref"]
+        self.field.clear_cache.side_effect = lambda: setattr(self.field.get_name, "return_value", "Replacement")
+        with self.assertRaisesRegex(ValueError, "changed"):
+            self.inspect(operation="set-text", ref=ref, text="must not be written")
+        self.field.get_editable_text_iface.assert_not_called()
+
+    def test_action_lookup_ignores_output_limit_for_unrelated_controls(self):
+        ref = self.inspect(role="text")["elements"][0]["ref"]
+        with patch.object(a11y, "MAX_RESULTS", 1):
+            result = self.inspect(operation="focus", ref=ref)
+        self.assertEqual(result["requested"], "focus")
+
+    def test_closing_unrelated_application_does_not_block_lookup(self):
+        closing = self.node("closing")
+        closing.get_process_id.side_effect = RuntimeError("disconnected")
+        self.api.get_desktop.return_value = self.node("desktop", children=[closing, self.app])
+        self.assertEqual(self.inspect(role="text")["elements"][0]["text"], "hello")
+
     def test_hidden_subtrees_are_not_read(self):
         self.field.get_state_set.return_value.contains.side_effect = lambda state: False
         result = self.inspect(role="text")
@@ -127,6 +169,34 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "timed out"):
             a11y.worker_request({"pid": 42})
         self.assertEqual(run.call_args.kwargs["timeout"], 8)
+
+
+class DependencyTests(unittest.TestCase):
+    @patch.object(a11y.subprocess, "run", return_value=Mock(returncode=0))
+    def test_probe_imports_system_bindings_without_querying_desktop(self, run):
+        self.assertTrue(a11y.check_dependencies()["available"])
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[:2], ["/usr/bin/python3", "-c"])
+        self.assertIn("gi.require_version", argv[2])
+        self.assertNotIn("get_desktop", argv[2])
+        self.assertEqual(run.call_args.kwargs["timeout"], 3)
+
+    @patch.object(a11y.subprocess, "run", side_effect=subprocess.TimeoutExpired("python", 3))
+    def test_failed_probe_reports_missing_dependencies(self, run):
+        result = a11y.check_dependencies()
+        self.assertFalse(result["available"])
+        self.assertIn("gir1.2-atspi-2.0", result["error"])
+
+    @patch.object(client, "check_dependencies", return_value={"available": False, "error": "AT-SPI unavailable"})
+    @patch.object(client.importlib.util, "find_spec", return_value=True)
+    @patch.object(client.shutil, "which", return_value="/usr/bin/tool")
+    @patch.object(client.subprocess, "run", return_value=Mock(stdout="active"))
+    @patch.object(runtime, "runtime_directory", return_value="/private/runtime")
+    @patch.object(runtime, "status", return_value={"state": "stopped"})
+    def test_doctor_reports_unhealthy_when_only_accessibility_is_missing(self, status, directory, run, which, spec, check):
+        result = client.doctor()
+        self.assertFalse(result["healthy"])
+        self.assertEqual(result["suggestions"], ["AT-SPI unavailable"])
 
 
 class SessionTests(unittest.TestCase):

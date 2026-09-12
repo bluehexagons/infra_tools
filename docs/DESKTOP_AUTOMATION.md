@@ -10,6 +10,10 @@ no office suite or application adapter is required. Existing installations need
 updated runtime code and these packages; normal desktop setup applies them after
 its existing logout checks. Save work before rerunning setup.
 
+`infra-tools desktop doctor` checks that the system Python can import AT-SPI.
+This dependency probe neither starts the desktop nor reads application content;
+application accessibility coverage still requires an inspection.
+
 ## Inspect and act
 
 ```bash
@@ -26,7 +30,10 @@ PID corresponds to one window. Names and roles are exact matches. Inspect the
 returned tree paths, states and text to distinguish duplicate controls.
 
 Each row includes a reference, name, role, states and advertised action names.
-Text previews stop at 256 characters and report `text_truncated`. Marked password
+Name and text previews stop at 256 characters and report `name_truncated` and
+`text_truncated`. A shortened name does not match an exact name selector; select
+by role and inspect the returned reference instead. Identity checks use the full
+name. Marked password
 controls omit their names, text and descendants. Other document content may be
 private; inspect output before sharing it.
 
@@ -40,7 +47,9 @@ References are retained in a bounded session-local inventory for up to 60 second
 Desktop mutations and human pause clear them. Actions recheck the application's
 D-Bus/object identity, tree position, name, role and enabled/showing state. These
 checks reduce stale targeting; application changes can still race with an action.
-All mutations require the existing session generation and exclusive control lease.
+Actions refresh the target's cached identity/state immediately before requesting
+the mutation. All mutations require the existing session generation and exclusive
+control lease.
 
 `element focus` requests keyboard focus. `element set-text --text TEXT` replaces
 the entire editable control with up to 4096 characters, including Unicode and

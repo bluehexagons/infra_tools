@@ -13,7 +13,7 @@ import time
 from typing import Any
 
 from desktop import session_runtime as runtime
-from desktop.accessibility import validate_query
+from desktop.accessibility import check_dependencies, validate_query
 from lib.validation import validate_filesystem_path
 
 
@@ -118,6 +118,7 @@ def doctor() -> dict[str, Any]:
     required = ("xrdp-sesrun", "xdotool", "xprop", "xwininfo", "scrot", "wmctrl", "xdg-open")
     checks["tools"] = {name: shutil.which(name) is not None for name in required}
     checks["handoff_ui"] = importlib.util.find_spec("tkinter") is not None
+    checks["accessibility"] = check_dependencies()
     for name in ("xrdp", "xrdp-sesman"):
         try:
             result = subprocess.run(["systemctl", "is-active", name], capture_output=True,
@@ -131,6 +132,8 @@ def doctor() -> dict[str, Any]:
     missing = [name for name, found in checks["tools"].items() if not found]
     if missing or not checks["handoff_ui"]:
         problems.append("Rerun desktop setup to install missing tools: " + ", ".join(missing + ([] if checks["handoff_ui"] else ["python3-tk"])))
+    if not checks["accessibility"]["available"]:
+        problems.append(checks["accessibility"]["error"])
     if any(checks[name] != "active" for name in ("xrdp", "xrdp-sesman")):
         problems.append("Inspect xrdp and xrdp-sesman service logs; no services were restarted")
     if checks["session"].get("state") in ("starting", "stopping"):

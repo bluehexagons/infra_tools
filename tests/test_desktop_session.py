@@ -268,13 +268,14 @@ xwininfo: Window id: 0x123 "Editor"
 
 
 class DesktopProductivityTests(unittest.TestCase):
+    @patch.object(client, "check_dependencies", return_value={"available": True})
     @patch.object(runtime, "status", return_value={"state": "stopped"})
     @patch.object(runtime, "runtime_directory", return_value=Path("/private/runtime"))
     @patch.object(client.shutil, "which", return_value=None)
     @patch.object(client.importlib.util, "find_spec", return_value=None)
     @patch.object(client.subprocess, "run", return_value=Mock(stdout="active\n"))
     @patch.object(runtime, "start")
-    def test_doctor_reports_missing_tools_without_starting_or_repairing(self, start, run, spec, which, directory, status):
+    def test_doctor_reports_missing_tools_without_starting_or_repairing(self, start, run, spec, which, directory, status, bindings):
         result = client.doctor()
         self.assertFalse(result["healthy"])
         self.assertIn("python3-tk", result["suggestions"][0])
