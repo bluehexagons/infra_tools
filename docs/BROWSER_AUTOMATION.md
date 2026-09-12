@@ -327,52 +327,40 @@ progress bar confirms document rendering but not application readiness. Wait
 one bounded startup interval and capture the expected application frame once;
 do not turn ordinary runtime startup into an unbounded polling loop.
 
-An opened preview tab or a status result containing the requested URL does not
-prove the document rendered. Confirm a snapshot or user-visible content. When
-private-URL navigation fails, separate the failure layers:
+For private-URL failures, verify the exact URL and a non-sensitive artifact
+from the VM with normal TLS verification, then inspect the attached preview's
+snapshot and network error. Use the observed failure to choose the next step:
 
-1. verify the exact URL and a non-sensitive artifact from the VM with normal
-   TLS verification;
-2. if preview status remains available, inspect a snapshot and its network
-   error before treating a generic navigation failure as a detached preview;
-3. check whether the client reports a certificate error, as opposed to a
-   timeout or unreachable route;
-4. for an explicit client certificate trust error, route to VM-local
-   Playwright or skip the collaborative layer; offer `infra-web ca` and
-   [Client CA trust](CLIENT_CA_TRUST.md) only when the user wants to restore
-   preview access;
-5. use the explicitly provisioned VM-local browser when a VM-origin rendering
-   check is appropriate and the current agent integration permits it.
+| Observation | Next step |
+| --- | --- |
+| No automation host or unavailable capture | Use healthy VM-local Playwright when VM-origin coverage fits; otherwise report the browser gap. |
+| Explicit `ERR_CERT_AUTHORITY_INVALID` | Offer `infra-web ca` and [Client CA trust](CLIENT_CA_TRUST.md) only when the user wants client access restored. Otherwise skip that client-origin check. |
+| Timeout, refused connection, or unreachable address | Check client routing and the gateway's source policy; CA enrollment will not repair connectivity. |
+| Background DOM works but no visible surface or snapshot | Follow the bounded stale-preview recovery above. |
 
-When T3 reports that no preview automation host is available, run
-`infra-tools agent doctor --capability browser --json` as the explicit fallback
-probe. This is a handoff to a separate VM-origin browser, not evidence that the
-application or collaborative preview URL is unhealthy. If that optional
-capability is absent or unhealthy, continue with safe non-browser checks and
-state what browser coverage could not be collected; do not install a separate
-automation stack ad hoc.
+Before using provisioned Playwright as the fallback, run
+`infra-tools agent doctor --capability browser --json`. If the capability is
+absent or unhealthy, continue non-browser checks and report the missing
+coverage. Do not install another browser stack merely to fill that gap.
 
-A client-only reachability failure is not evidence that the hosted site is
-down. Do not respond by weakening TLS, expanding gateway/firewall exposure, or
-rebinding the application. Report which network origin passed and which one
-failed so the operator can decide whether that client should have access.
-
-Client CA enrollment is never required for unrelated work. If the user does
-not want to change client trust, retain normal TLS verification, use healthy
-VM-local Playwright when it fits, and mark only the collaborative client-origin
-coverage as skipped.
+Report which network origin passed and which failed. A client-only failure
+does not establish that the hosted site is down. Preserve TLS verification,
+loopback bindings, and the intended access policy; client CA enrollment is
+optional and does not block unrelated work.
 
 ## Verification
 
 Run the browser check on the configured VM as the setup user:
 
 ```bash
-infra-tools agent doctor \
-  --tool codex --tool opencode \
-  --capability browser
+infra-tools agent doctor --capability browser --json
 ```
 
-Add `--json` for automation. The capability is healthy only when both managed
+This checks the browser capability without requiring unrelated terminal tools.
+Add `--tool codex` or `--tool opencode` when that client must also be healthy;
+each explicit tool is required, even when absent.
+
+The capability is healthy only when both managed
 launchers are executable, root-owned regular files without group or world write
 access; explicit managed-Chromium selection and current private, bounded
 evidence, safe-coordinate, and one-second-settle defaults are present; every
@@ -383,10 +371,7 @@ active managed MCP processes use those same safe defaults; and the local
 interaction/rendering smoke test passes. A stale or unsafe launcher is
 unhealthy even when its smoke test passes; inspect an unsafe path, then rerun
 the saved setup to reconcile it. A stale active process instead requires
-restarting the agent session that owns it. If only one compatible agent was
-provisioned, list only that tool. The default doctor tool set still includes
-all terminal agents, so explicit `--tool` flags are useful on deliberately
-minimal VMs.
+restarting the agent session that owns it.
 
 JSON results include a stable `issues` list and one primary `remediation` code.
 `mcp_browser_selection_missing` identifies a launcher that can pass the direct

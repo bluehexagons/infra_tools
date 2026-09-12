@@ -57,6 +57,7 @@ automation, T3 Code, skills, and hardening.
 | Guide | Use it for |
 | --- | --- |
 | [Workstations and desktop applications](WORKSTATIONS.md) | Desktop profiles, human-operated browsers, Flatpak, office tools, and verification |
+| [Shared desktop automation](DESKTOP_AUTOMATION.md) | Native application launch, accessibility and pixel input, screenshots, and human handoff |
 | [Agentic coding security](AGENT_SECURITY.md) | Sudo, Codex approval/sandbox policy, hardened modes, and supply-chain boundaries |
 | [Agent browser automation](BROWSER_AUTOMATION.md) | Playwright provisioning, Codex/OpenCode registration, and browser security boundaries |
 | [T3 Code server](T3_CODE.md) | Headless service, deliberate updates, pairing, remote clients, and security boundaries |

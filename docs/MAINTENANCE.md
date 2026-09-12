@@ -178,8 +178,9 @@ nonzero, which prevents old evidence from being mistaken for a post-reboot
 check. The same `--record` and `--last-record` options work with the remote
 `HOST USER` doctor form.
 
-If a vendor command is run directly, use the same account and working
-directory, such as `sudo -u agent -H sh -lc 'cd /home/agent && codex update'`.
+For manual terminal-agent upgrades, use the managed update command above;
+its vendor mechanism and account boundaries are described in the
+[CLI reference](COMMAND_LINE.md#agent-host-flags).
 
 Set `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` in the relevant service environment
 to allow global npm packages and uv-managed tools to advance. The default

@@ -19,7 +19,7 @@ managed machine.
 | Seed, rotate, or recover coding-agent auth | [Agent authentication](../AGENT_AUTHENTICATION.md) | [Credentials overview](../CREDENTIALS.md) |
 | Configure GitHub or self-hosted Git access | [Git access](../GIT_ACCESS.md) | [Credentials overview](../CREDENTIALS.md) |
 | Use managed browser testing | [Agent browser automation](../BROWSER_AUTOMATION.md) | [Managed workflow skills](../AGENT_SKILLS.md) |
-| Share native desktop applications with an agent | [Shared XRDP desktop](../XRDP.md) | [Managed workflow skills](../AGENT_SKILLS.md) |
+| Share native desktop applications with an agent | [Desktop automation](../DESKTOP_AUTOMATION.md) | [Shared XRDP desktop](../XRDP.md) |
 | Install or operate T3 Code | [T3 Code server](../T3_CODE.md) | [Agent browser automation](../BROWSER_AUTOMATION.md) |
 | Understand installed skills and capability routing | [Managed workflow skills](../AGENT_SKILLS.md) | [Command-line agent flags](../COMMAND_LINE.md#agent-host-flags) |
 | Build or publish a Godot web project | [Godot Engine](../GODOT.md) | [Internal HTTPS sites](../INTERNAL_WEB.md) |
@@ -30,13 +30,23 @@ Run these commands from the controller after setup or when an agent service
 needs attention:
 
 ```bash
-infra-tools agent doctor HOST USER
-infra-tools agent update HOST USER
+infra-tools agent doctor HOST USER --all-capabilities --json
 infra-tools agent maintenance status HOST USER
 ```
 
-Use `agent doctor` to verify the managed agent capability. Use `agent update`
-only for a deliberate terminal-agent upgrade. Maintenance holds are for
+`--all-capabilities` checks provisioned capabilities and installed terminal
+tools without failing for intentionally absent clients. Narrow the check with
+`--capability host` or require a specific client with `--tool codex`.
+
+For a deliberate terminal-agent upgrade, preview the selected tool first:
+
+```bash
+infra-tools agent update HOST USER --tool codex --dry-run
+```
+
+Repeat without `--dry-run` to apply. This updates terminal-agent executables;
+T3 uses its [own updater](../T3_CODE.md#service-and-update-model), and managed
+skills refresh through saved setup. Maintenance holds are for
 protecting active work from scheduled host maintenance; see
 [recurring maintenance](../MAINTENANCE.md#agent-maintenance-holds).
 

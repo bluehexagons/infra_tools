@@ -47,7 +47,7 @@ infra-tools python-tools [options]
 infra-tools bootstrap [options]
 infra-tools self-setup [options]
 infra-tools local [subcommand]
-infra-tools desktop <status|start|exec|screenshot|input|control|logout> ...
+infra-tools desktop <command> ...
 infra-tools firmware <audit|update> [options]
 infra-tools channel [CHANNEL]
 infra-tools upgrade
@@ -79,11 +79,14 @@ infra-tools ssh-key enroll <host> [--port PORT] [--yes]
 `infra-tools --version` prints one stable line containing the installed project
 version, suitable for feedback and support records.
 
+For the desktop command catalog, including accessibility, window operations,
+waits, and live smoke checks, see [Desktop automation](DESKTOP_AUTOMATION.md).
+
 Use `infra-tools agent doctor --capability t3code` to check the managed T3
 service, native runtime, provider authentication, Git identity, pairing helper,
 endpoint, and agent skill. Add `--fix` to rebuild missing native dependencies,
-configure the GitHub HTTPS credential helper after a successful login, and
-restart an inactive managed service.
+configure the GitHub HTTPS credential helper after a successful login, enable
+the service at boot, and restart it when inactive.
 
 ### Bootstrap and self-setup flags
 
@@ -601,7 +604,9 @@ is required. It does not disable certificate verification globally. The target
 stores the credential in a dedicated mode-`0600` file because unattended Git
 and Git LFS need persistent access.
 
-On the configured VM, check selected tools without exposing credential contents:
+Select the relevant command below; this is a catalog, not a sequence to run.
+Doctor is read-only unless `--fix` or `--record` is selected. Updates, workspace
+creation, and maintenance holds change state:
 
 ```bash
 infra-tools agent doctor
@@ -645,8 +650,8 @@ Absent optional toolchains do not fail the capability.
 `--capability t3code` checks the managed service, native runtime, pairing helper,
 endpoint, provider authentication, Git identity and credential helper, and the
 managed agent skill. Its `--fix` mode can rebuild blocked native dependencies,
-configure the GitHub HTTPS helper after a successful login, and restart an
-inactive managed service.
+configure the GitHub HTTPS helper after a successful login, enable the service
+at boot, and restart it when inactive.
 `--capability host` reports memory and swap headroom, filesystem and bounded
 agent-storage use, T3 service cgroup pressure, recurring maintenance timer
 state (including installed Node and Godot update jobs), the agent maintenance
@@ -688,8 +693,11 @@ form. Doctor JSON output retains its existing result-array shape when
 places a dedicated `agent/TASK` branch below
 `~/.local/share/infra_tools/worktrees`, leaving the primary checkout's files
 untouched. `list` and `status` report branch, commit, and dirty state without
-printing changed file names. `remove` accepts only a registered worktree below
-that managed root, refuses dirty or untracked work, requires an `agent/*`
+printing changed file names. The default base is the primary checkout's `HEAD`;
+creation does not fetch remote refs or copy uncommitted changes. To start from
+current remote main, fetch it first and pass `--base origin/main`. `remove`
+accepts only a registered worktree below that managed root, refuses dirty or
+untracked work, requires an `agent/*`
 branch merged into the primary checkout's current `HEAD`, and never has a
 force mode. Use its `--dry-run` before cleanup.
 
@@ -761,17 +769,10 @@ The updater resets the working directory and user-scoped environment before
 calling the vendor installer, so the invoking account's home and PATH do not
 leak into the update.
 
-If you invoke a vendor updater directly instead of using infra-tools, apply the
-same account and working-directory rule yourself. For example:
-
-```bash
-sudo -u agent -H sh -lc 'cd /home/agent && codex update'
-```
-
-Running `codex update` from another user's home can make the installer fail
-while restoring its working directory, or update the wrong user-scoped
-installation. The `infra-tools agent update` command is the preferred managed
-path because it also performs preflight checks and rollback.
+For a deliberately chosen vendor update outside infra-tools, verify the
+installed tool's supported update mechanism and use its owning account and
+home directory. The managed command above supplies those settings and adds
+preflight checks and rollback.
 
 Credential rotation does not rebuild the VM or overwrite repositories:
 

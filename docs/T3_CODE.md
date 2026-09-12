@@ -41,25 +41,13 @@ infra-tools setup agent_code_vm vm.example agent \
   --browser-automation playwright
 ```
 
-For a collaborative check, status may report `available: true` with no current
-tab; that means the automation host is attached and the agent should open one
-tab, not that preview is unavailable. After opening, use a snapshot-first
-workflow and verify the rendered result of each input rather than relying on a
-successful dispatch response. Viewport presets retain the desktop user agent,
-and recording paths belong to the connected client's artifact store. See
-[Agent browser automation](BROWSER_AUTOMATION.md) for the full interaction,
-evidence, and fallback contract.
-
-The collaborative preview uses the connected device's routes and certificate
-store, not the VM's. If it remains attached but renders
-`ERR_CERT_AUTHORITY_INVALID` for an `infra-web` URL, certificate enrollment is
-optional. Route the browser check to managed Playwright when available, or skip
-that collaborative layer and continue server checks. If the user wants preview
-access restored, use `infra-web ca` and [Client CA trust](CLIENT_CA_TRUST.md)
-for verified enrollment on Linux, macOS, Windows, ChromeOS, iPhone/iPad, or
-Android. Never bypass TLS or make client trust a prerequisite for unrelated
-operations. A timeout or unreachable private address needs network diagnosis
-instead.
+The collaborative preview uses the connected client's routes and certificate
+store. Use the [browser workflow](BROWSER_AUTOMATION.md#collaborative-preview-and-private-networks)
+for tab attachment, verified input, recordings, and bounded recovery. If only
+client-origin testing fails, continue with healthy VM-local Playwright or
+non-browser checks. For an explicit `ERR_CERT_AUTHORITY_INVALID`, optional
+[client CA enrollment](CLIENT_CA_TRUST.md) can restore private-origin access;
+a timeout or unreachable address needs network diagnosis. Never bypass TLS.
 
 Agent-enabled T3 setups install T3-only preview guidance, or the combined
 Playwright/T3 skill when both capabilities are selected, plus focused T3 Code
@@ -158,11 +146,13 @@ T3 Code does not silently update after setup. A normal infra-tools rerun keeps
 the active healthy version. The T3 client can offer an explicit **Update
 server** action for this background service; prefer that action after active
 agent work and terminal commands finish. Keep the client open while the
-launcher downloads, installs, restarts, and reconnects. The following
-host-side commands are also supported:
+launcher downloads, installs, restarts, and reconnects. For a host-side update,
+set `T3_RELEASE` to the exact version required by the connected client. Use
+`latest` only when the client is also on the latest release:
 
 ```bash
 # As the target user, using T3 Code's documented updater:
+T3_RELEASE=CLIENT_VERSION
 T3_NPM_SHIM="$HOME/.local/share/infra-tools/t3-npm/bin"
 env -u npm_config_dangerously_allow_all_scripts \
   -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
@@ -173,36 +163,7 @@ env -u npm_config_dangerously_allow_all_scripts \
   CXX=g++ \
   npm_config_strict_allow_scripts=false \
   npm_config_foreground_scripts=true \
-  npx --yes --package=t3@latest -c \
-  'env -u npm_config_allow_scripts \
-    -u NPM_CONFIG_ALLOW_SCRIPTS \
-    -u npm_config_dangerously_allow_all_scripts \
-    -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
-    t3 service update'
-infra-tools agent doctor --capability t3code --fix
-
-# From infra-tools:
-infra-tools setup server_dev vm.example agent --refresh-packages ...
-```
-
-The direct `npx` command is expected to work after infra-tools setup because
-both commands operate on the same upstream-managed user service. `latest` is
-appropriate only when the connected client is also the latest release. If the
-desktop or mobile client and server differ, update the service to the exact
-client version shown in the warning:
-
-```bash
-T3_NPM_SHIM="$HOME/.local/share/infra-tools/t3-npm/bin"
-env -u npm_config_dangerously_allow_all_scripts \
-  -u NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_SCRIPTS \
-  -u npm_config_allow_scripts \
-  -u NPM_CONFIG_ALLOW_SCRIPTS \
-  PATH="$T3_NPM_SHIM:$PATH" \
-  CC=gcc \
-  CXX=g++ \
-  npm_config_strict_allow_scripts=false \
-  npm_config_foreground_scripts=true \
-  npx --yes --package=t3@CLIENT_VERSION -c \
+  npx --yes --package="t3@$T3_RELEASE" -c \
   'env -u npm_config_allow_scripts \
     -u NPM_CONFIG_ALLOW_SCRIPTS \
     -u npm_config_dangerously_allow_all_scripts \
@@ -210,6 +171,10 @@ env -u npm_config_dangerously_allow_all_scripts \
     t3 service update'
 infra-tools agent doctor --capability t3code --fix
 ```
+
+The direct command and infra-tools setup operate on the same upstream-managed
+user service. To update through setup, rerun the saved command with
+`--refresh-packages`, preserving its existing options.
 
 During a refresh, an upstream updater failure does not take down a previously
 working installation. If the managed service file and active runtime remain
