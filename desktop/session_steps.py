@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import pwd
+import re
 import shlex
 
 from desktop.session_runtime import CONFIG_PATH, SESSION_COMMANDS
@@ -18,6 +19,47 @@ from lib.validators import validate_username
 STARTWM = "/etc/xrdp/infra-tools-startwm.sh"
 DISPLAY_MANAGERS = ("gdm3", "gdm", "lightdm", "sddm", "lxdm", "xdm")
 DISPLAY_MANAGER_ALIAS = Path("/etc/systemd/system/display-manager.service")
+SESMAN_VENDOR_UNIT = Path("/usr/lib/systemd/system/xrdp-sesman.service")
+SESMAN_UNIT = Path("/etc/systemd/system/xrdp-sesman.service")
+SESMAN_MARKER = "# Managed by infra-tools shared desktop setup\n"
+
+
+def configure_session_service() -> None:
+    """Copy the vendor unit to remove its frontend lifetime dependency.
+
+    systemd dependencies cannot be cleared by an empty drop-in assignment.
+    Refresh the complete override from the packaged unit on every setup.
+    """
+    if SESMAN_UNIT.is_symlink() or (SESMAN_UNIT.exists()
+            and not SESMAN_UNIT.read_text().startswith(SESMAN_MARKER)):
+        raise RuntimeError("Custom xrdp-sesman unit requires administrator migration")
+    source = SESMAN_VENDOR_UNIT.read_text()
+    # Only transform the Unit section; preserve package-specific service details.
+    section = re.search(r"(?ms)^\[Unit\]\s*\n(.*?)(?=^\[|\Z)", source)
+    if section is None:
+        raise RuntimeError("Packaged xrdp-sesman unit has no Unit section")
+    lines = ["StopWhenUnneeded=false\n"]
+    for line in section[1].splitlines(keepends=True):
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "StopWhenUnneeded":
+            continue
+        if separator and key.strip() == "BindsTo":
+            if "\\" in value:
+                raise RuntimeError("Unsupported continued sesman dependency; migrate the unit first")
+            dependencies = [unit for unit in value.split() if unit != "xrdp.service"]
+            if dependencies:
+                lines.append("BindsTo=" + " ".join(dependencies) + "\n")
+            continue
+        lines.append(line)
+    content = SESMAN_MARKER + source[:section.start(1)] + "".join(lines) + source[section.end(1):]
+    write_text_atomic(str(SESMAN_UNIT), content, mode=0o644)
+    legacy = SESMAN_UNIT.parent / "xrdp-sesman.service.d/shared-desktop.conf"
+    legacy.unlink(missing_ok=True)
+    run(["systemctl", "daemon-reload"])
+    effective = run(["systemctl", "show", "xrdp-sesman.service", "--value",
+                     "-p", "BindsTo", "-p", "Requires", "-p", "PartOf"], capture_output=True)
+    if "xrdp.service" in effective.stdout.split():
+        raise RuntimeError("A sesman override still ties desktop lifetime to XRDP; migrate its dependencies")
 
 
 def assert_desktop_idle(config: SetupConfig) -> None:
@@ -81,6 +123,7 @@ def install_session_runtime(config: SetupConfig) -> None:
     account = pwd.getpwnam(config.username)
     if account.pw_uid == 0:
         raise ValueError("The desktop cannot run as root")
+    configure_session_service()
     source = str(Path(__file__).resolve().parents[1])
     validate_filesystem_path(source, must_exist=True)
     content = json.dumps({"version": 1, "username": config.username, "desktop": config.desktop}, indent=2) + "\n"

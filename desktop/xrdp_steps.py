@@ -469,15 +469,6 @@ def install_xrdp(config: SetupConfig) -> None:
         raise RuntimeError("could not create the per-user Xorg log directory")
     run(f"chmod 700 {shlex.quote(xorg_log_dir)}")
     _remove_legacy_xrdp_socket_environment()
-    # Debian ties sesman to the viewer daemon. Keep the session manager alive
-    # when the frontend restarts or fails; only deliberate desktop maintenance
-    # may restart sesman, after the idle guard above.
-    dropin_dir = "/etc/systemd/system/xrdp-sesman.service.d"
-    os.makedirs(dropin_dir, exist_ok=True)
-    with open(f"{dropin_dir}/shared-desktop.conf", "w") as dropin:
-        dropin.write("[Unit]\nBindsTo=\nStopWhenUnneeded=false\n")
-    run("systemctl daemon-reload")
-
     launcher_dir = os.path.dirname(_XRDP_XORG_LAUNCHER)
     os.makedirs(launcher_dir, exist_ok=True)
     with open(_XRDP_XORG_LAUNCHER, "w", encoding="utf-8") as launcher:

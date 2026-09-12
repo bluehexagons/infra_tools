@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from desktop import session_runtime as runtime
-from desktop.session_steps import assert_desktop_idle, install_session_runtime, prepare_shared_desktop
+from desktop.session_steps import assert_desktop_idle, configure_session_service, install_session_runtime, prepare_shared_desktop
 from lib.config import SetupConfig
 from lib.arg_parser import create_setup_argument_parser
 from lib.desktop_cli import add_desktop_subparser, run_desktop_command
@@ -91,6 +91,16 @@ class DesktopControlTests(unittest.TestCase):
         tool.assert_not_called()
 
     @patch.object(runtime, "run_tool")
+    def test_malformed_input_kind_is_rejected_without_losing_session(self, tool):
+        lease = self.acquire()
+        for kind in ([], {}, None):
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "input kind"):
+                self.session.handle({"action": "input", **lease,
+                                     "geometry": [1280, 720], "kind": kind})
+        self.assertEqual(self.session.snapshot_status()["state"], "running")
+        tool.assert_not_called()
+
+    @patch.object(runtime, "run_tool")
     def test_screenshot_reports_captured_pixels_and_private_permissions(self, tool):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "screen.png"
@@ -158,6 +168,11 @@ class DesktopStartTests(unittest.TestCase):
 
 
 class DesktopMigrationTests(unittest.TestCase):
+    def setUp(self):
+        capability = patch("desktop.session_steps.can_manage_system_services", return_value=True)
+        self.capability = capability.start()
+        self.addCleanup(capability.stop)
+
     @patch("common.agent_steps.install_managed_agent_skills")
     @patch("common.agent_steps.install_agent_cli_launcher")
     @patch("desktop.session_steps.pwd.getpwnam", return_value=Mock(pw_uid=1000))
@@ -169,7 +184,8 @@ class DesktopMigrationTests(unittest.TestCase):
             declaration = Path(directory) / "desktop.json"
             wrapper = Path(directory) / "startwm.sh"
             config = SetupConfig(host="vm", username="agent", system_type="agent_vm", agent_tools=["codex"])
-            with patch("desktop.session_steps.CONFIG_PATH", declaration), patch("desktop.session_steps.STARTWM", str(wrapper)):
+            with patch("desktop.session_steps.CONFIG_PATH", declaration), patch("desktop.session_steps.STARTWM", str(wrapper)), \
+                    patch("desktop.session_steps.configure_session_service"):
                 install_session_runtime(config)
                 first = declaration.read_text()
                 config.desktop = "i3"
@@ -220,13 +236,104 @@ class DesktopMigrationTests(unittest.TestCase):
 
     @patch("desktop.session_steps.run")
     def test_container_capability_failure_precedes_system_calls(self, run):
+        self.capability.return_value = False
         config = SetupConfig(host="vm", username="agent", system_type="agent_workstation", machine_type="oci")
         with self.assertRaisesRegex(ValueError, "systemd"):
             assert_desktop_idle(config)
         run.assert_not_called()
+        self.capability.assert_called_once_with("oci")
+
+
+class DesktopServiceTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.vendor = Path(directory.name) / "vendor.service"
+        self.unit = Path(directory.name) / "xrdp-sesman.service"
+        self.vendor.write_text(
+            "[Unit]\nAfter=network.target\nBindsTo=xrdp.service other.service\n"
+            "StopWhenUnneeded=true\n\n[Service]\nType=exec\n"
+            "ExecStart=/usr/sbin/xrdp-sesman $SESMAN_OPTIONS --nodaemon\n"
+            "[Install]\nWantedBy=multi-user.target\n")
+        for name, value in (("SESMAN_VENDOR_UNIT", self.vendor), ("SESMAN_UNIT", self.unit)):
+            patcher = patch(f"desktop.session_steps.{name}", value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        runner = patch("desktop.session_steps.run", return_value=Mock(stdout="other.service\n"))
+        self.run = runner.start()
+        self.addCleanup(runner.stop)
+
+    def test_full_override_removes_frontend_dependency_and_refreshes_vendor_changes(self):
+        legacy = self.unit.parent / "xrdp-sesman.service.d/shared-desktop.conf"
+        legacy.parent.mkdir()
+        legacy.write_text("[Unit]\nBindsTo=\nStopWhenUnneeded=false\n")
+        configure_session_service()
+        self.assertFalse(legacy.exists())
+        content = self.unit.read_text()
+        self.assertIn("BindsTo=other.service\n", content)
+        self.assertNotIn("xrdp.service", content)
+        self.assertIn("StopWhenUnneeded=false\n", content)
+        self.assertNotIn("StopWhenUnneeded=true", content)
+        self.assertIn("$SESMAN_OPTIONS --nodaemon", content)
+        self.vendor.write_text(self.vendor.read_text() + "Alias=example.service\n")
+        configure_session_service()
+        self.assertIn("Alias=example.service", self.unit.read_text())
+
+    def test_custom_override_is_preserved(self):
+        self.unit.write_text("[Unit]\nDescription=Administrator unit\n")
+        with self.assertRaisesRegex(RuntimeError, "administrator migration"):
+            configure_session_service()
+        self.assertEqual(self.unit.read_text(), "[Unit]\nDescription=Administrator unit\n")
+        self.run.assert_not_called()
+
+    def test_remaining_dropin_dependency_fails_closed(self):
+        self.run.return_value.stdout = "xrdp.service\n"
+        with self.assertRaisesRegex(RuntimeError, "still ties desktop"):
+            configure_session_service()
+
+
+class DesktopSupervisorTests(unittest.TestCase):
+    @patch.object(runtime, "configuration", return_value={"desktop": "xfce", "username": "agent"})
+    @patch.object(runtime, "session_lock")
+    @patch.object(runtime.pwd, "getpwnam")
+    @patch.object(runtime.os, "chdir")
+    @patch.object(runtime.os, "killpg")
+    @patch.object(runtime.signal, "signal")
+    @patch.object(runtime.subprocess, "Popen")
+    @patch.object(runtime.socket, "socket")
+    @patch.object(runtime, "receive", return_value={"action": "status"})
+    @patch.object(runtime.DesktopSession, "handle", return_value={"state": "running"})
+    def test_client_reset_does_not_end_desktop(self, handle, receive, socket, popen,
+                                             signal, killpg, chdir, account, lock, config):
+        process = popen.return_value
+        process.poll.side_effect = [None, None, 0]
+        server = socket.return_value.__enter__.return_value
+        connection = Mock()
+        connection.getsockopt.return_value = struct.pack("3i", 1, runtime.os.getuid(), 1)
+        connection.sendall.side_effect = ConnectionResetError("client left")
+        connection.__enter__ = Mock(return_value=connection)
+        connection.__exit__ = Mock(return_value=False)
+        server.accept.return_value = (connection, None)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runtime, "runtime_directory", return_value=Path(directory)), \
+                patch.dict("os.environ", {"DISPLAY": ":10"}), patch.object(runtime.os, "chmod"):
+            self.assertEqual(runtime.serve(), 0)
+        # A second request was accepted after the first client disconnected.
+        self.assertEqual(server.accept.call_count, 2)
 
 
 class DesktopCliTests(unittest.TestCase):
+    def test_lite_server_reconciles_firewall_before_enabling_rdp(self):
+        from plugins.server import build_server_steps
+        from security.steps import configure_firewall
+        from desktop.xrdp_steps import install_xrdp
+
+        config = SetupConfig(host="vm", username="agent", system_type="server_lite",
+                             include_desktop=True, enable_rdp=True)
+        steps = [step for _, step in build_server_steps(config)]
+        self.assertEqual(steps.count(configure_firewall), 1)
+        self.assertLess(steps.index(configure_firewall), steps.index(install_xrdp))
+
     def test_remote_parser_does_not_turn_headless_forwarding_into_desktop(self):
         parser = create_setup_argument_parser("Remote", for_remote=True)
         args = parser.parse_args(["--system-type", "agent_vm", "--username", "agent"])

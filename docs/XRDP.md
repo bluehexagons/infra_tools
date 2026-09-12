@@ -69,6 +69,7 @@ kind of source, XRDP remains reachable through the globally rate-limited rule.
 Use `--rdp-bind-address IP` to bind the listener to one local address. The
 firewall reconciles only rules tagged `infra_tools RDP` and does not remove
 unrelated UFW rules.
+This reconciliation also runs for `server_lite --rdp`, before starting XRDP.
 
 Client idle-disconnect and channel controls:
 
@@ -180,6 +181,15 @@ CLI join its desktop process group. Teardown never kills the entire user manager
 Applications explicitly launched as independent user services retain that
 service's lifecycle.
 
+Setup installs `/etc/systemd/system/xrdp-sesman.service` from the packaged unit,
+removing its `BindsTo=xrdp.service` dependency and disabling `StopWhenUnneeded`.
+This requires a full unit override: systemd cannot remove dependencies through
+drop-ins. Setup refreshes the copy on reruns, preserves other packaged settings,
+and rejects existing custom units or effective dependencies that still tie
+sesman to the frontend. Rerun desktop setup after XRDP package upgrades to
+incorporate vendor unit changes. The obsolete `shared-desktop.conf` drop-in is
+removed during migration.
+
 Managed XRDP files keep first-install `.bak` copies. Desktop configuration is
 versioned at `/etc/infra-tools/desktop.json`, with a `.json.bak` on replacement.
 The former display-manager symlink is retained as
@@ -187,7 +197,9 @@ The former display-manager symlink is retained as
 Setup failure stops the setup operation; inspect its error and rerun during a
 session-free window. There is no automatic rollback that logs users out.
 For administrator rollback, first log out, stop XRDP, restore the backed-up
-XRDP files and desired display-manager alias, unmask only the former display
+XRDP files and desired display-manager alias, remove the managed
+`/etc/systemd/system/xrdp-sesman.service` override and run `systemctl daemon-reload`,
+unmask only the former display
 manager and `display-manager.service`, and deliberately start that service.
 Rollback restores configuration, not unsaved applications. Keep SSH available.
 

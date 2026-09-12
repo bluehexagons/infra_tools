@@ -263,6 +263,8 @@ class DesktopSession:
             if payload.get("geometry") != geometry():
                 raise ValueError("Desktop geometry changed; capture a new screenshot")
             kind = payload.get("kind")
+            if not isinstance(kind, str):
+                raise ValueError("Unknown desktop input kind")
             if kind == "text":
                 text = payload.get("text")
                 if not isinstance(text, str) or len(text) > 1024 or "\0" in text:
@@ -326,7 +328,7 @@ def serve() -> int:
                             result = {"error": str(exc)}
                         try:
                             connection.sendall(json.dumps(result).encode() + b"\n")
-                        except (BrokenPipeError, TimeoutError):
+                        except OSError:
                             pass
             except KeyboardInterrupt:
                 pass

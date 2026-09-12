@@ -134,11 +134,13 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         or config.clear_lan_access
         or config.enable_mdns
         or config.clear_mdns
+        or config.enable_rdp
     ):
         from security.steps import configure_firewall
 
         steps.append(
-            ("Configuring firewall for requested web ports", configure_firewall)
+            ("Configuring firewall for requested services" if config.enable_rdp
+             else "Configuring firewall for requested web ports", configure_firewall)
         )
 
     steps.extend(get_security_steps(lite=config.system_type in {"server_web", "server_lite"}))
