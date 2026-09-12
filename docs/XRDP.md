@@ -17,6 +17,7 @@ use Xvnc or a Proxmox emulated display as the RDP display.
 | Disconnected sessions | Retained indefinitely |
 | Idle sessions | Not disconnected automatically |
 | Clipboard | Enabled |
+| Screen locking in the default XFCE session | Unsupported; Light Locker disabled, no managed automatic lock timer |
 | Drive, printer, device, audio, RemoteApp, and video redirection | Disabled |
 
 The session keeps `drdynvc` for dynamic resizing and `cliprdr` for clipboard
@@ -315,8 +316,25 @@ XFCE session 4.20.2-2, scrot 2.0.0-1) passed local peer-authenticated startup,
 native Mousepad launch, text input/save, desktop and application screenshots,
 screenshots during pause, and normal logout followed by a new session generation.
 T3 Code remained active. Application capture produced a 640×480 client-area PNG
-within the 1280×720 desktop. Human RDP reconnect/resize, cross-client clipboard,
-lock/unlock, and frontend restart still require live qualification.
+within the 1280×720 desktop. Frontend restart still requires live qualification.
+
+The operator subsequently tested Remmina: text clipboard worked in both
+directions and disconnect/reconnect retained the session. Resizing completed
+but caused a short black screen and reconnect. Xorg recorded the size change
+before a connection drop; the desktop PID and generation remained unchanged,
+and agent screenshots matched the final 1356×912 size. This is usable with a
+resize interruption, not qualified seamless resizing. Remmina/FreeRDP versions
+and client/frontend logs are still needed to identify the disconnect cause.
+The operator's Pause button blocked an agent launch while screenshot observation
+remained available. Human Resume and close-while-paused tests remain pending.
+
+The default XFCE Lock action did nothing: Light Locker is intentionally disabled
+for the display-manager-free XRDP session, and no replacement locker is installed.
+Lock/unlock is outside the default support contract. Do not treat disconnect or
+agent pause as a screen lock. No automatic lock timer is configured by infra-tools;
+an operator may deliberately add a locker and timers. An optional manual locker
+requires its own authentication, reconnect and recovery qualification before
+being offered as supported. Existing lock UI entries may remain visible.
 
 After setup installed wmctrl/python3-tk, the same VM passed window focus, move,
 resize, maximize, minimize/restore, normal close with an unsaved-work prompt,
