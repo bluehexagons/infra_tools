@@ -43,6 +43,34 @@ Exact name/role filters reduce returned rows but do not remove the traversal
 limit. A showing control may still be occluded. Use screenshots for visual
 judgment and when an application exposes insufficient accessibility information.
 
+## Scope to a dialog or subtree
+
+Inspect the application to find a dialog, panel, or other container, then use its
+reference as `--root`. The root and its showing descendants become the entire
+search scope, so unrelated menus and windows do not consume the scan budget:
+
+```bash
+infra-tools desktop inspect --pid PID --role dialog
+infra-tools desktop inspect --pid PID --root ROOT_REF --generation GENERATION
+infra-tools desktop wait-element --pid PID --root ROOT_REF --name Save \
+  --role button --state enabled --generation GENERATION
+```
+
+Scoped inspection requires an explicit generation from the original observation.
+References are opaque: copy them intact rather than constructing or parsing them.
+The helper walks the recorded ancestry and rechecks its identity on every call.
+A changed, hidden, or missing root is an error, including for an absence wait;
+it never falls back to the full application. Scope reads can reuse a root while
+its identity remains valid, including across actions; reobserve if it changes.
+An absence result refers only to showing controls inside that root.
+
+The usual node, depth, time and output limits still apply within the subtree.
+If needed, inspect a smaller container next. Descendant references work with the
+normal `element` commands, which now resolve targets directly along their
+recorded ancestry instead of rescanning unrelated UI.
+
+## Act on observed controls
+
 References are retained in a bounded session-local inventory for up to 60 seconds.
 Desktop mutations and human pause clear them. Actions recheck the application's
 D-Bus/object identity, tree position, name, role and enabled/showing state. These

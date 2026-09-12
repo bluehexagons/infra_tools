@@ -76,9 +76,11 @@ def wait_for_window(generation: str, *, window: str | None = None,
 
 def wait_for_element(generation: str, *, pid: int, name: str | None = None,
                      role: str | None = None, state: str = "present", text: str | None = None,
-                     timeout: float = 15) -> dict[str, Any]:
+                     timeout: float = 15, root: str | None = None) -> dict[str, Any]:
     """Poll semantic observations without a lease; require an unambiguous match."""
     query = {"action": "inspect", "generation": generation, "pid": pid, "name": name, "role": role}
+    if root is not None:
+        query["root"] = root
     validate_query(query)
     if name is None and role is None:
         raise ValueError("Select an exact accessible name or role")

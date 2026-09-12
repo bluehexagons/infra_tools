@@ -118,6 +118,69 @@ class BackendTests(unittest.TestCase):
         self.api.get_desktop.return_value = self.node("desktop", children=[closing, self.app])
         self.assertEqual(self.inspect(role="text")["elements"][0]["text"], "hello")
 
+    def scoped_tree(self):
+        other = self.node("Other", children=[self.node("Save", "button") for _ in range(12)])
+        save = self.node("Save", "button")
+        save.path = "/dialog/save"
+        dialog = self.node("Dialog", "dialog", children=[save])
+        self.app = self.node("Geany", "application", children=[other, dialog])
+        self.app.get_process_id.return_value = 42
+        self.api.get_desktop.return_value = self.node("desktop", children=[self.app])
+        return other, dialog, save
+
+    def test_scoping_avoids_unrelated_node_budget_and_preserves_references(self):
+        other, dialog, save = self.scoped_tree()
+        root = self.inspect(role="dialog")["elements"][0]["ref"]
+        expected = self.inspect(role="button")["elements"][-1]["ref"]
+        other.get_child_at_index.reset_mock()
+        with patch.object(a11y, "MAX_NODES", 3):
+            result = self.inspect(root=root, name="Save")
+            self.assertFalse(result["truncated"])
+            self.assertEqual([row["ref"] for row in result["elements"]], [expected])
+            self.assertEqual(result["root"], root)
+            self.assertEqual(self.inspect(operation="focus", ref=expected)["requested"], "focus")
+        other.get_child_at_index.assert_not_called()
+
+    def test_replaced_or_hidden_root_does_not_fall_back_to_whole_application(self):
+        other, dialog, save = self.scoped_tree()
+        root = self.inspect(role="dialog")["elements"][0]["ref"]
+        dialog.path = "/replacement"
+        with self.assertRaisesRegex(ValueError, "changed"):
+            self.inspect(root=root)
+        dialog.path = "/accessible/Dialog"
+        dialog.get_state_set.return_value.contains.side_effect = lambda _: False
+        with self.assertRaisesRegex(ValueError, "unavailable"):
+            self.inspect(root=root)
+
+    def test_scope_cannot_traverse_a_password_control(self):
+        child = self.node("secret", "text", text="secret")
+        self.field.get_child_count.return_value = 1
+        self.field.get_child_at_index.side_effect = lambda _: child
+        root = self.inspect(name="secret")["elements"][0]["ref"]
+        self.field.get_role.return_value = "password text"
+        child.get_text_iface.reset_mock()
+        with self.assertRaisesRegex(ValueError, "unavailable"):
+            self.inspect(root=root)
+        child.get_text_iface.assert_not_called()
+
+    def test_root_hiding_after_resolution_is_not_an_empty_complete_scan(self):
+        other, dialog, save = self.scoped_tree()
+        root = self.inspect(role="dialog")["elements"][0]["ref"]
+        resolve = a11y.resolve_reference
+        def hide(*args):
+            found = resolve(*args)
+            dialog.get_state_set.return_value.contains.side_effect = lambda _: False
+            return found
+        with patch.object(a11y, "resolve_reference", side_effect=hide):
+            with self.assertRaisesRegex(ValueError, "unavailable"):
+                self.inspect(root=root)
+
+    def test_invalid_scope_fails_before_application_lookup(self):
+        for root in ("ref", [], "-1:" + "a" * 32, "0." * 21 + "0:" + "a" * 32):
+            with self.subTest(root=root), self.assertRaises(ValueError):
+                self.inspect(root=root)
+        self.api.get_desktop.assert_not_called()
+
     def test_hidden_subtrees_are_not_read(self):
         self.field.get_state_set.return_value.contains.side_effect = lambda state: False
         result = self.inspect(role="text")
@@ -247,6 +310,30 @@ class SessionTests(unittest.TestCase):
 
 
 class WaitTests(unittest.TestCase):
+    @patch.object(runtime, "request", return_value={"generation": "g", "elements": [], "truncated": False})
+    def test_scoped_wait_keeps_root_on_each_observation(self, request):
+        root = "0:" + "a" * 32
+        client.wait_for_element("g", pid=42, root=root, name="Save", state="absent")
+        self.assertEqual(request.call_args.args[0]["root"], root)
+
+    @patch.object(runtime, "request", side_effect=RuntimeError("Element or root changed"))
+    def test_missing_scope_is_not_successful_absence(self, request):
+        with self.assertRaisesRegex(RuntimeError, "root changed"):
+            client.wait_for_element("g", pid=42, root="0:" + "a" * 32, name="Save", state="absent")
+
+    @patch.object(runtime, "status", return_value={"state": "running", "generation": "g"})
+    @patch.object(runtime, "request", return_value={"elements": [], "truncated": False})
+    def test_cli_requires_explicit_generation_for_scoped_inspection(self, request, status):
+        parser = argparse.ArgumentParser()
+        add_desktop_subparser(parser.add_subparsers())
+        argv = ["desktop", "inspect", "--pid", "42", "--root", "0:" + "a" * 32]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(run_desktop_command(parser.parse_args(argv)), 1)
+        request.assert_not_called()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(run_desktop_command(parser.parse_args([*argv, "--generation", "g"])), 0)
+        self.assertEqual(request.call_args.args[0]["root"], argv[-1])
+
     @patch.object(runtime, "request", return_value={"generation": "g", "elements": [
         {"ref": "editor", "states": ["focused"]}, {"ref": "search", "states": []}], "truncated": False})
     def test_state_disambiguates_editor_from_other_text_controls(self, request):

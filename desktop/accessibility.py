@@ -6,6 +6,7 @@ from collections import deque
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -39,6 +40,20 @@ def validate_query(payload: dict[str, Any]) -> None:
         value = payload.get(field)
         if value is not None and (not isinstance(value, str) or len(value) > 256 or "\0" in value):
             raise ValueError(f"Accessibility {field} must contain at most 256 characters")
+    if payload.get("root") is not None:
+        reference_path(payload["root"])
+
+
+def reference_path(ref: Any) -> list[int]:
+    """Decode a bounded location; its fingerprint is checked against the live tree."""
+    if (not isinstance(ref, str) or len(ref) > 256
+            or not re.fullmatch(r"(?:app|[0-9]+(?:\.[0-9]+){0,19}):[0-9a-f]{32}", ref)):
+        raise ValueError("Invalid element reference; inspect again")
+    location = ref.split(":", 1)[0]
+    path = [] if location == "app" else [int(index) for index in location.split(".")]
+    if any(index > 2147483647 for index in path):
+        raise ValueError("Invalid element reference; inspect again")
+    return path
 
 
 def worker_request(payload: dict[str, Any]) -> dict[str, Any]:
@@ -73,7 +88,8 @@ def describe(node: Any, path: list[int], api: Any, parent_ref: str) -> dict[str,
     states = node.get_state_set()
     present = [state for state in STATES if states.contains(getattr(api.StateType, state.upper()))]
     identity = [node.app.bus_name, node.path, path, role, full_name, parent_ref]
-    ref = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:32]
+    location = ".".join(map(str, path)) or "app"
+    ref = location + ":" + hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:32]
     actions = []
     if not protected and node.is_action():
         action = node.get_action_iface()
@@ -86,6 +102,27 @@ def describe(node: Any, path: list[int], api: Any, parent_ref: str) -> dict[str,
         count = text.get_character_count()
         row.update(text=api.Text.get_text(text, 0, min(count, 256)), text_truncated=count > 256)
     return row
+
+
+def resolve_reference(application: Any, ref: str, api: Any, deadline: float) -> tuple[Any, list[int], str]:
+    """Walk only the recorded ancestry and reject hidden, replaced or protected paths."""
+    path = reference_path(ref)
+    node, parent_ref = application, ""
+    application.clear_cache()
+    for depth in range(len(path) + 1):
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Accessibility reference lookup timed out")
+        if node is None or (depth and not node.get_state_set().contains(api.StateType.SHOWING)):
+            raise ValueError("Element or root is unavailable; inspect again")
+        row = describe(node, path[:depth], api, parent_ref)
+        if depth == len(path):
+            if row["ref"] != ref:
+                raise ValueError("Element or root changed; inspect again")
+            return node, path, parent_ref
+        if row["protected"] or path[depth] >= node.get_child_count():
+            raise ValueError("Element or root is unavailable; inspect again")
+        node, parent_ref = node.get_child_at_index(path[depth]), row["ref"]
+    raise ValueError("Invalid element reference")
 
 
 def inspect_application(payload: dict[str, Any], api: Any) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -106,7 +143,10 @@ def inspect_application(payload: dict[str, Any], api: Any) -> tuple[dict[str, An
             continue  # A closing unrelated application must not block this one.
     if application is None:
         raise RuntimeError("Application is not available through AT-SPI; check PID and accessibility support")
-    pending = deque([(application, [], "")])
+    target_ref = payload.get("ref") if payload.get("operation", "inspect") != "inspect" else None
+    root = target_ref or payload.get("root")
+    start = resolve_reference(application, root, api, deadline) if root is not None else (application, [], "")
+    pending = deque([start])
     elements: list[dict[str, Any]] = []
     targets = {}
     visited = 0
@@ -120,9 +160,12 @@ def inspect_application(payload: dict[str, Any], api: Any) -> tuple[dict[str, An
             continue
         try:
             if path and not node.get_state_set().contains(api.StateType.SHOWING):
+                if visited == 1 and root is not None:
+                    raise ValueError("Element or root is unavailable; inspect again")
                 continue  # Closed menus and inactive tabs can dwarf the usable UI.
             row = describe(node, path, api, parent_ref)
-            target_ref = payload.get("ref") if payload.get("operation", "inspect") != "inspect" else None
+            if visited == 1 and root is not None and row["ref"] != root:
+                raise ValueError("Element or root changed; inspect again")
             matches = (row["ref"] == target_ref if target_ref is not None else
                        all(payload.get(field) is None or row[field] == payload[field] for field in ("name", "role"))
                        and (payload.get("name") is None or not row["name_truncated"]))
@@ -147,7 +190,7 @@ def inspect_application(payload: dict[str, Any], api: Any) -> tuple[dict[str, An
                         pending.append((node.get_child_at_index(index), [*path, index], row["ref"]))
         except api.Error:
             truncated = True  # Applications can remove nodes while being inspected.
-    return {"pid": payload["pid"], "elements": elements,
+    return {"pid": payload["pid"], "root": payload.get("root"), "elements": elements,
             "truncated": truncated or bool(pending)}, targets
 
 
@@ -155,6 +198,8 @@ def perform(payload: dict[str, Any], api: Any) -> dict[str, Any]:
     operation = payload.get("operation", "inspect")
     if operation not in ("inspect", "invoke", "set-text", "focus"):
         raise ValueError("Unknown accessibility operation")
+    if operation != "inspect":
+        reference_path(payload.get("ref"))
     if operation == "set-text":
         text = payload.get("text")
         if not isinstance(text, str) or len(text) > 4096 or "\0" in text:

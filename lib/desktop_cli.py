@@ -58,6 +58,8 @@ def add_desktop_subparser(subparsers: argparse._SubParsersAction) -> None:
     inspect.add_argument("--pid", required=True, type=int)
     inspect.add_argument("--name", help="Exact accessible name")
     inspect.add_argument("--role", help="Exact accessible role")
+    inspect.add_argument("--root", help="Inspect only this observed element and its descendants")
+    inspect.add_argument("--generation", help="Required with --root; use the observed session generation")
     element = commands.add_parser("element", help="Act on a recent accessibility reference")
     element.add_argument("operation", choices=("invoke", "set-text", "focus"))
     element.add_argument("--ref", required=True)
@@ -68,6 +70,7 @@ def add_desktop_subparser(subparsers: argparse._SubParsersAction) -> None:
     semantic_wait.add_argument("--pid", required=True, type=int)
     semantic_wait.add_argument("--name")
     semantic_wait.add_argument("--role")
+    semantic_wait.add_argument("--root", help="Wait within this observed subtree")
     semantic_wait.add_argument("--state", choices=("present", "absent", "enabled", "showing", "focused"), default="present")
     semantic_wait.add_argument("--text", help="Exact complete text to wait for")
     semantic_wait.add_argument("--timeout", type=float, default=15)
@@ -115,10 +118,13 @@ def run_desktop_command(args: argparse.Namespace) -> int:
             if command == "windows":
                 result = runtime.request(payload)
             elif command == "inspect":
-                result = runtime.request({**payload, **{name: getattr(args, name) for name in ("pid", "name", "role")}})
+                if args.root is not None and args.generation is None:
+                    raise ValueError("Scoped inspection requires --generation from the observation")
+                result = runtime.request({**payload, "generation": args.generation or current["generation"],
+                    **{name: getattr(args, name) for name in ("pid", "name", "role", "root")}})
             elif command == "wait-element":
                 result = client.wait_for_element(args.generation,
-                    **{name: getattr(args, name) for name in ("pid", "name", "role", "state", "text", "timeout")})
+                    **{name: getattr(args, name) for name in ("pid", "name", "role", "state", "text", "timeout", "root")})
             elif command == "launch-status":
                 result = runtime.request({**payload, "launch": args.launch, "generation": args.generation})
             elif command == "wait":
