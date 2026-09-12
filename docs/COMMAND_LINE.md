@@ -47,6 +47,7 @@ infra-tools python-tools [options]
 infra-tools bootstrap [options]
 infra-tools self-setup [options]
 infra-tools local [subcommand]
+infra-tools desktop <status|start|exec|screenshot|input|control|logout> ...
 infra-tools firmware <audit|update> [options]
 infra-tools channel [CHANNEL]
 infra-tools upgrade
@@ -169,18 +170,15 @@ tools, not for an LXC container.
 | `--lan-access` / `--no-lan-access` | Infer or remove target-adjacent LAN access: a private IPv4 target uses its `/24`, a ULA IPv6 target uses `/64`, and an explicit static prefix is honored |
 | `--access-source IP_OR_CIDR [IP_OR_CIDR ...]` | Restrict managed inbound services to one or more sources; accepts multiple values and may be repeated |
 | `--no-access-source` | Clear saved custom generic access sources; use `--no-lan-access` separately to remove inferred LAN access |
-| `--rdp` / `--no-rdp` | Enable or disable XRDP |
+| `--rdp` / `--no-rdp` | Enable or disable remote RDP ingress; desktop profiles retain loopback XRDP |
 | `--rdp-existing-password` | Local setup only: reuse an existing non-root desktop account password; a missing profile password is requested securely |
 | `--rdp-bind-address IP` | Bind XRDP to one local IP; defaults to all IPv4 interfaces (`0.0.0.0`) |
 | `--rdp-source IP_OR_CIDR` | Restrict UFW RDP ingress to a source; repeatable; `--no-rdp-source` clears profile sources |
 | `--rdp-clipboard` / `--no-rdp-clipboard` | Control clipboard redirection; enabled by default |
 | `--rdp-drive-redirection` / `--no-rdp-drive-redirection` | Control drive, printer, and device redirection; disabled by default |
 | `--rdp-audio` / `--no-rdp-audio` | Control audio redirection; disabled by default |
-| `--rdp-max-sessions N` | Bound concurrent XRDP sessions; defaults to 10 |
-| `--rdp-kill-disconnected` / `--no-rdp-kill-disconnected` | End disconnected sessions after the configured retention period |
-| `--rdp-disconnected-timeout SECONDS` | Retention before ending a disconnected session; requires cleanup to be enabled |
 | `--rdp-idle-timeout SECONDS` | Disconnect an idle session after this interval; 0 disables |
-| `--desktop [xfce\|i3\|cinnamon\|lxqt]` | Desktop environment |
+| `--desktop [xfce\|i3\|cinnamon\|lxqt]` | Configure one shared XRDP desktop; explicitly enables desktop capability on headless profiles |
 | `--browser NAME` | Browser to install |
 | `--editor [geany\|vscode]` | Install an explicit graphical editor; requires a desktop-capable setup or `--rdp` |
 | `--flatpak` | Install desktop apps via Flatpak |
@@ -323,10 +321,10 @@ public Antistatic endpoints retain their own exposure policy.
 Without a generic source or `--rdp-source`, enabling RDP keeps a globally
 rate-limited UFW rule. On rerun, infra-tools installs requested source rules
 before removing broad rules and reconciles only its own comment-tagged rules.
-Disconnected sessions are retained indefinitely by default so a transient RDP
-disconnect does not destroy agent work. A positive disconnected timeout is
-accepted only with `--rdp-kill-disconnected`, making destructive cleanup an
-explicit paired choice.
+The single desktop is retained through disconnect until logout. Session-count
+and disconnect-cleanup flags are removed; saved legacy policies are migrated
+with warnings for nondefault behavior. See [XRDP](XRDP.md) for runtime commands,
+human takeover, console conversion, and rollback.
 
 Setup `--dry-run` validates the requested profile and prints the complete step
 plan without invoking setup functions, running target commands, or writing
@@ -443,9 +441,9 @@ sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_pla
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
-For a standard Debian GNOME desktop, keep GNOME for local logins, add XFCE
-for XRDP sessions, and install only the selected graphical agent tools (GitHub
-CLI and Codex CLI in this example):
+To convert a Debian desktop to one shared XFCE/XRDP session, first log out
+graphical sessions and run from SSH or a text console. Console graphical login
+is disabled. Select the agent tools needed (GitHub CLI and Codex here):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh

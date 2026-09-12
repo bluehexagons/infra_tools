@@ -81,6 +81,7 @@ from lib.plugin_registry import (
 )
 from lib.network_cli import add_network_subparser, run_network_command
 from lib.local_cli import add_local_subparser, run_local_command
+from lib.desktop_cli import add_desktop_subparser, run_desktop_command
 from lib.proxmox_guest import (
     ProvisionError,
     _build_guest_hostname,
@@ -578,6 +579,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
 
     add_network_subparser(subparsers)
     add_local_subparser(subparsers)
+    add_desktop_subparser(subparsers)
     add_firmware_subparser(subparsers)
     add_proxmox_subparser(subparsers)
     add_vm_subparser(subparsers)
@@ -2267,6 +2269,8 @@ def main() -> int:
         if not confirm_unsupported_environment("local maintenance"):
             return 1
         return run_local_command(args)
+    elif args.command == "desktop":
+        return run_desktop_command(args)
     elif args.command == "firmware":
         return run_firmware_command(args)
     elif args.command == "proxmox":

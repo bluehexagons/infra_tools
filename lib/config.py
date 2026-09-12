@@ -6,6 +6,7 @@ import argparse
 import ipaddress
 import shlex
 import socket
+import warnings
 from dataclasses import dataclass, asdict
 from functools import lru_cache
 from typing import Optional, cast
@@ -367,9 +368,6 @@ class SetupConfig:
     rdp_clipboard: bool = True
     rdp_drive_redirection: bool = False
     rdp_audio: bool = False
-    rdp_max_sessions: int = 10
-    rdp_kill_disconnected: bool = False
-    rdp_disconnected_timeout: int = 0
     rdp_idle_timeout: int = 0
     desktop: str = "xfce"
     browser: Optional[str] = "librewolf"  # Primary browser, or first from browsers list
@@ -966,15 +964,9 @@ class SetupConfig:
                 args.append("--rdp-drive-redirection")
             if self.rdp_audio:
                 args.append("--rdp-audio")
-            args.append(f"--rdp-max-sessions {self.rdp_max_sessions}")
-            if self.rdp_kill_disconnected:
-                args.append("--rdp-kill-disconnected")
-            args.append(
-                f"--rdp-disconnected-timeout {self.rdp_disconnected_timeout}"
-            )
             args.append(f"--rdp-idle-timeout {self.rdp_idle_timeout}")
         
-        if self.desktop:
+        if self.desktop and (self.include_desktop or self.enable_rdp):
             args.append(f"--desktop {shlex.quote(self.desktop)}")
         
         # Send browsers - only use browsers list if available, otherwise use browser
@@ -1430,18 +1422,12 @@ class SetupConfig:
                 cmd_parts.append("--rdp-drive-redirection")
             if self.rdp_audio:
                 cmd_parts.append("--rdp-audio")
-            if self.rdp_max_sessions != 10:
-                cmd_parts.append(f"--rdp-max-sessions {self.rdp_max_sessions}")
-            if self.rdp_kill_disconnected:
-                cmd_parts.append("--rdp-kill-disconnected")
-            if self.rdp_disconnected_timeout != 0:
-                cmd_parts.append(
-                    f"--rdp-disconnected-timeout {self.rdp_disconnected_timeout}"
-                )
             if self.rdp_idle_timeout != 0:
                 cmd_parts.append(f"--rdp-idle-timeout {self.rdp_idle_timeout}")
         
-        if self.desktop and self.desktop != "xfce":
+        if self.desktop and (self.include_desktop or self.enable_rdp) and (
+            self.desktop != "xfce" or self.system_type not in DESKTOP_SYSTEMS
+        ):
             cmd_parts.append(f"--desktop {shlex.quote(self.desktop)}")
         
         # Only include browser args if not default or if using multiple browsers
@@ -1873,6 +1859,22 @@ class SetupConfig:
     
     @classmethod
     def from_dict(cls, host: str, system_type: str, data: JSONDict) -> 'SetupConfig':
+        data = dict(data)
+        retired = {
+            "rdp_max_sessions": (None, 1, 10),
+            "rdp_kill_disconnected": (None, False),
+            "rdp_disconnected_timeout": (None, 0),
+        }
+        changed = [key for key, defaults in retired.items() if data.get(key) not in defaults]
+        if changed:
+            warnings.warn(
+                "Migrating legacy desktop policy to one persistent session; removed: "
+                + ", ".join(changed),
+                UserWarning,
+                stacklevel=2,
+            )
+        for key in retired:
+            data.pop(key, None)
         # Older cache entries may contain this one-shot flag. Never replay a
         # sensitive live handoff merely because a saved configuration is
         # loaded for deploy, patch, or reconstruction.
@@ -2034,6 +2036,7 @@ class SetupConfig:
         include_desktop = (
             system_type_definition.include_desktop
             or enable_rdp
+            or bool(getattr(args, 'desktop', None))
         )
         include_cli_tools = system_type_definition.include_cli_tools
         include_control_plane_tools = (
@@ -2312,9 +2315,6 @@ class SetupConfig:
             rdp_clipboard=getattr(args, 'rdp_clipboard', True),
             rdp_drive_redirection=getattr(args, 'rdp_drive_redirection', False),
             rdp_audio=getattr(args, 'rdp_audio', False),
-            rdp_max_sessions=getattr(args, 'rdp_max_sessions', 10),
-            rdp_kill_disconnected=getattr(args, 'rdp_kill_disconnected', False),
-            rdp_disconnected_timeout=getattr(args, 'rdp_disconnected_timeout', 0),
             rdp_idle_timeout=getattr(args, 'rdp_idle_timeout', 0),
             desktop=desktop,
             browser=browser,

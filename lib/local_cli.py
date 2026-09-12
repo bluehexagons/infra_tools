@@ -9,7 +9,7 @@ import os
 from common.common_steps import install_apt_packages, update_and_upgrade_packages
 from common.network_steps import configure_static_network, configure_system_hostname
 from desktop.browser_steps import configure_default_browser, install_browser
-from desktop.desktop_environment_steps import configure_dark_theme, install_desktop
+from plugins.desktop import extend_desktop_steps
 from lib.config import SetupConfig
 from lib.remote_utils import is_dry_run, run, set_dry_run
 from lib.types import StepFunc
@@ -220,11 +220,13 @@ def _run_desktop_command(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         desktop=args.environment,
         dark_theme=args.dark,
+        include_desktop=True,
     )
-    if _run_step(config, f"installing {args.environment} desktop", install_desktop) != 0:
-        return 1
-    if args.dark:
-        return _run_step(config, f"configuring {args.environment} dark theme", configure_dark_theme)
+    steps: list[tuple[str, StepFunc]] = []
+    extend_desktop_steps(config, steps)
+    for label, step in steps:
+        if _run_step(config, label, step) != 0:
+            return 1
     return 0
 
 

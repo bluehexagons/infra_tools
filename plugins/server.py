@@ -15,7 +15,7 @@ PLUGIN = PluginDefinition(
     name="server",
     module=__name__,
     plugin_kind="composition",
-    dependencies=("common", "core", "security", "sync", "web"),
+    dependencies=("common", "core", "desktop", "security", "sync", "web"),
     system_types=(
         SystemTypeDefinition(
             name="control_plane",
@@ -112,6 +112,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         get_final_steps,
     )
     from plugins.security import get_security_steps, get_web_firewall_steps
+    from plugins.desktop import extend_desktop_steps, extend_desktop_browser_and_office_steps
     from plugins.sync import extend_syncthing_steps
     from plugins.web import (
         extend_app_server_steps,
@@ -141,6 +142,8 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         )
 
     steps.extend(get_security_steps(lite=config.system_type in {"server_web", "server_lite"}))
+    extend_desktop_steps(config, steps)
+    extend_desktop_browser_and_office_steps(config, steps)
 
     if config.include_web_server:
         steps.extend(get_web_server_steps())

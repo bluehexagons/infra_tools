@@ -29,9 +29,6 @@ class TestSetupConfigDefaults(unittest.TestCase):
         self.assertTrue(config.rdp_clipboard)
         self.assertFalse(config.rdp_drive_redirection)
         self.assertFalse(config.rdp_audio)
-        self.assertEqual(config.rdp_max_sessions, 10)
-        self.assertFalse(config.rdp_kill_disconnected)
-        self.assertEqual(config.rdp_disconnected_timeout, 0)
         self.assertEqual(config.rdp_idle_timeout, 0)
         self.assertFalse(config.dry_run)
         self.assertFalse(config.refresh_packages)
@@ -125,6 +122,15 @@ class TestSetupConfigToDict(unittest.TestCase):
 
 
 class TestSetupConfigFromDict(unittest.TestCase):
+    def test_legacy_desktop_policy_migrates_without_mutating_saved_input(self):
+        data = {'username': 'agent', 'rdp_max_sessions': 3,
+                'rdp_kill_disconnected': True, 'rdp_disconnected_timeout': 60}
+        with self.assertWarns(UserWarning):
+            config = SetupConfig.from_dict('vm', 'agent_workstation', data)
+        self.assertEqual(data['rdp_max_sessions'], 3)
+        for name in ('rdp_max_sessions', 'rdp_kill_disconnected', 'rdp_disconnected_timeout'):
+            self.assertNotIn(name, config.to_dict())
+
     def test_from_dict_basic(self):
         data = {'username': 'testuser', 'timezone': 'UTC'}
         config = SetupConfig.from_dict('host1', 'server_lite', data)
@@ -197,9 +203,6 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
             rdp_clipboard=False,
             rdp_drive_redirection=True,
             rdp_audio=True,
-            rdp_max_sessions=2,
-            rdp_kill_disconnected=True,
-            rdp_disconnected_timeout=86400,
             rdp_idle_timeout=14400,
         )
         args = config.to_remote_args()
@@ -209,9 +212,6 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         self.assertIn('--no-rdp-clipboard', args)
         self.assertIn('--rdp-drive-redirection', args)
         self.assertIn('--rdp-audio', args)
-        self.assertIn('--rdp-max-sessions 2', args)
-        self.assertIn('--rdp-kill-disconnected', args)
-        self.assertIn('--rdp-disconnected-timeout 86400', args)
         self.assertIn('--rdp-idle-timeout 14400', args)
 
     def test_browser_single(self):
@@ -446,18 +446,12 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
             rdp_bind_address='10.0.0.25',
             rdp_allowed_sources=['10.0.0.0/24'],
             rdp_clipboard=False,
-            rdp_max_sessions=2,
-            rdp_kill_disconnected=True,
-            rdp_disconnected_timeout=86400,
             rdp_idle_timeout=14400,
         )
         cmd = ' '.join(config.to_setup_command())
         self.assertIn('--rdp-bind-address 10.0.0.25', cmd)
         self.assertIn('--rdp-source 10.0.0.0/24', cmd)
         self.assertIn('--no-rdp-clipboard', cmd)
-        self.assertIn('--rdp-max-sessions 2', cmd)
-        self.assertIn('--rdp-kill-disconnected', cmd)
-        self.assertIn('--rdp-disconnected-timeout 86400', cmd)
         self.assertIn('--rdp-idle-timeout 14400', cmd)
 
     def test_rdp_existing_password_is_included_without_a_secret(self):
@@ -581,9 +575,6 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             rdp_clipboard=True,
             rdp_drive_redirection=False,
             rdp_audio=False,
-            rdp_max_sessions=10,
-            rdp_kill_disconnected=False,
-            rdp_disconnected_timeout=0,
             rdp_idle_timeout=0,
             smb_mounts=None,
             enable_smbclient=None,
@@ -643,6 +634,15 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         self.assertTrue(config.include_desktop_apps)
         self.assertEqual(config.browser, 'firefox')
 
+    def test_headless_desktop_opt_in_survives_remote_forwarding(self):
+        config = SetupConfig.from_args(self._make_args(desktop='xfce'), 'agent_vm')
+        self.assertTrue(config.include_desktop)
+        self.assertIn('--desktop xfce', config.to_remote_args())
+        self.assertIn('--desktop xfce', config.to_setup_command())
+        headless = SetupConfig.from_args(self._make_args(), 'agent_vm')
+        self.assertFalse(headless.include_desktop)
+        self.assertFalse(any(arg.startswith('--desktop') for arg in headless.to_remote_args()))
+
     def test_workstation_rdp_can_be_enabled_explicitly(self):
         config = SetupConfig.from_args(self._make_args(enable_rdp=True), 'workstation_desktop')
         self.assertTrue(config.enable_rdp)
@@ -680,9 +680,6 @@ class TestSetupConfigFromArgs(unittest.TestCase):
                 rdp_clipboard=False,
                 rdp_drive_redirection=True,
                 rdp_audio=True,
-                rdp_max_sessions=2,
-                rdp_kill_disconnected=True,
-                rdp_disconnected_timeout=86400,
                 rdp_idle_timeout=14400,
             ),
             'workstation_dev',
@@ -692,9 +689,6 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         self.assertFalse(config.rdp_clipboard)
         self.assertTrue(config.rdp_drive_redirection)
         self.assertTrue(config.rdp_audio)
-        self.assertEqual(config.rdp_max_sessions, 2)
-        self.assertTrue(config.rdp_kill_disconnected)
-        self.assertEqual(config.rdp_disconnected_timeout, 86400)
         self.assertEqual(config.rdp_idle_timeout, 14400)
 
     def test_pc_dev_defaults_include_office_and_smbclient(self):

@@ -22,20 +22,18 @@ def install_desktop(config: SetupConfig) -> None:
 
     if config.desktop == "xfce":
         package = "xfce4"
-        install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
+        install_cmd = "apt-get install -y -qq --no-install-recommends xfce4 xfce4-goodies"
     elif config.desktop == "i3":
         package = "i3"
-        install_cmd = "apt-get install -y -qq i3 i3status i3lock dmenu"
+        install_cmd = "apt-get install -y -qq --no-install-recommends i3 i3status i3lock dmenu"
     elif config.desktop == "cinnamon":
         package = "cinnamon"
-        install_cmd = "apt-get install -y -qq cinnamon cinnamon-core"
+        install_cmd = "apt-get install -y -qq --no-install-recommends cinnamon cinnamon-core"
     elif config.desktop == "lxqt":
         package = "lxqt-core"
-        install_cmd = "apt-get install -y -qq lxqt-core lxqt-config lxqt-session sddm"
+        install_cmd = "apt-get install -y -qq --no-install-recommends lxqt-core lxqt-config lxqt-session"
     else:
-        print(f"  ⚠ Unknown desktop environment: {config.desktop}, defaulting to XFCE")
-        package = "xfce4"
-        install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
+        raise ValueError(f"Unsupported shared desktop environment: {config.desktop}")
     
     if is_package_installed(package):
         print(f"  ✓ {config.desktop.upper()} desktop already installed")

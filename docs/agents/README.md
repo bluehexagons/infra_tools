@@ -19,6 +19,7 @@ managed machine.
 | Seed, rotate, or recover coding-agent auth | [Agent authentication](../AGENT_AUTHENTICATION.md) | [Credentials overview](../CREDENTIALS.md) |
 | Configure GitHub or self-hosted Git access | [Git access](../GIT_ACCESS.md) | [Credentials overview](../CREDENTIALS.md) |
 | Use managed browser testing | [Agent browser automation](../BROWSER_AUTOMATION.md) | [Managed workflow skills](../AGENT_SKILLS.md) |
+| Share native desktop applications with an agent | [Shared XRDP desktop](../XRDP.md) | [Managed workflow skills](../AGENT_SKILLS.md) |
 | Install or operate T3 Code | [T3 Code server](../T3_CODE.md) | [Agent browser automation](../BROWSER_AUTOMATION.md) |
 | Understand installed skills and capability routing | [Managed workflow skills](../AGENT_SKILLS.md) | [Command-line agent flags](../COMMAND_LINE.md#agent-host-flags) |
 | Build or publish a Godot web project | [Godot Engine](../GODOT.md) | [Internal HTTPS sites](../INTERNAL_WEB.md) |

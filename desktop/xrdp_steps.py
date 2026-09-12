@@ -6,6 +6,8 @@ import glob
 import os
 import shlex
 
+from desktop.session_steps import STARTWM, assert_desktop_idle, install_session_runtime
+
 from lib.config import SetupConfig
 from lib.remote_utils import (
     get_os_id,
@@ -124,33 +126,32 @@ def _generate_sesman_ini(config: SetupConfig) -> str:
     Xvnc is NOT included because it doesn't emit RANDR events, causing desktop
     freezes when the RDP window is resized.
 
-    This path is tuned for VM-first desktops while still providing best-effort
-    compatibility for headless/container guests.
+    This path is tuned for VM-first desktops with persistent user services.
     """
     
     # Only Xorg backend - Xvnc disabled due to resize issues
     # Xorg+xorgxrdp: proper RANDR events, dynamic resize works correctly
     # Xvnc: doesn't emit RRScreenChangeNotify -> desktop freezes on resize
     return f'''[Globals]
-EnableUserWindowManager=true
-UserWindowManager=startwm.sh
-DefaultWindowManager=startwm.sh
+EnableUserWindowManager=false
+DefaultWindowManager={STARTWM}
 ReconnectScript=/bin/true
 
 [Security]
 AllowRootLogin=false
 MaxLoginRetry=3
-TerminalServerUsers=remoteusers
+TerminalServerUsers=infra-desktop
 AlwaysGroupCheck=true
+AllowAlternateShell=false
 SessionSockdirGroup=xrdp
 
 [Sessions]
 X11DisplayOffset=10
-MaxSessions={config.rdp_max_sessions}
-KillDisconnected={str(config.rdp_kill_disconnected).lower()}
-DisconnectedTimeLimit={config.rdp_disconnected_timeout}
+MaxSessions=1
+KillDisconnected=false
+DisconnectedTimeLimit=0
 IdleTimeLimit={config.rdp_idle_timeout}
-Policy=Default
+Policy=UB
 
 [Logging]
 LogFile=/var/log/xrdp-sesman.log
@@ -294,7 +295,10 @@ def _generate_xrdp_ini(config: SetupConfig, template: str) -> str:
     """Render validated XRDP listener and channel policy into its template."""
     from lib.validation import validate_network_ip
 
-    bind_address = validate_network_ip(config.rdp_bind_address, "RDP bind address")
+    bind_address = validate_network_ip(
+        config.rdp_bind_address if config.enable_rdp else "127.0.0.1",
+        "RDP bind address",
+    )
     replacements = {
         "{RDP_BIND_ADDRESS}": bind_address,
         "{RDP_CLIPBOARD}": str(config.rdp_clipboard).lower(),
@@ -339,11 +343,11 @@ def _refresh_services(*services: str, reload_running_services: bool = True) -> N
 
     if reload_running_services and active_services:
         active_list = " ".join(shlex.quote(service) for service in active_services)
-        run(f"systemctl reload-or-restart {active_list}", check=False)
+        run(f"systemctl reload-or-restart {active_list}")
 
     if inactive_services:
         inactive_list = " ".join(shlex.quote(service) for service in inactive_services)
-        run(f"systemctl start {inactive_list}", check=False)
+        run(f"systemctl start {inactive_list}")
 
 
 def _remove_legacy_xrdp_socket_environment() -> None:
@@ -393,9 +397,18 @@ def _validate_xrdp_tls_certificate() -> None:
         prefix = "⚠" if health.status == "warning" else "✗"
         print(f"  {prefix} {detail}")
     if health.status == "error":
-        run("systemctl stop xrdp xrdp-sesman", check=False)
+        run("systemctl stop xrdp", check=False)
         raise RuntimeError("XRDP TLS certificate validation failed")
     print("  ✓ XRDP TLS certificate and private key validated")
+
+
+def _require_peer_authenticated_sesrun() -> None:
+    """Older XRDP releases cannot perform the passwordless local start flow."""
+    version = run(["dpkg-query", "-W", "-f=${Version}", "xrdp"], capture_output=True)
+    value = version.stdout.strip()
+    if not value or run(["dpkg", "--compare-versions", value, "ge", "0.10.0"], check=False).returncode:
+        raise RuntimeError("Shared desktops require XRDP 0.10 or newer; rerun setup with --refresh-packages")
+    run(["test", "-x", "/usr/bin/xrdp-sesrun"])
 
 
 def install_xrdp(config: SetupConfig) -> None:
@@ -403,23 +416,13 @@ def install_xrdp(config: SetupConfig) -> None:
         print("  [DRY-RUN] Would install and configure xRDP")
         return
 
+    assert_desktop_idle(config)
+
     safe_username = shlex.quote(config.username)
     user_home = get_user_home(config.username)
-    xsession_path = os.path.join(user_home, "startwm.sh")
     xorg_log_dir = os.path.join(user_home, ".local", "share", "xorg")
     sesman_config = "/etc/xrdp/sesman.ini"
     xrdp_config = "/etc/xrdp/xrdp.ini"
-    
-    if config.desktop == "xfce":
-        session_cmd = "xfce4-session"
-    elif config.desktop == "i3":
-        session_cmd = "i3"
-    elif config.desktop == "cinnamon":
-        session_cmd = "cinnamon-session"
-    elif config.desktop == "lxqt":
-        session_cmd = "startlxqt"
-    else:
-        session_cmd = "xfce4-session"
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     required_packages = (
@@ -428,6 +431,8 @@ def install_xrdp(config: SetupConfig) -> None:
         "dbus-x11",
         "x11-xserver-utils",
         "x11-utils",
+        "xdotool",
+        "scrot",
     )
     missing_packages = [
         package for package in required_packages if not is_package_installed(package)
@@ -451,6 +456,7 @@ def install_xrdp(config: SetupConfig) -> None:
             + ", ".join(missing_packages)
         )
     print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")
+    _require_peer_authenticated_sesrun()
 
     # Debian's Xorg AppArmor profile denies XRDP's traditional
     # ~/.xorgxrdp.<display>.log path. Create the profile-approved log directory
@@ -463,6 +469,14 @@ def install_xrdp(config: SetupConfig) -> None:
         raise RuntimeError("could not create the per-user Xorg log directory")
     run(f"chmod 700 {shlex.quote(xorg_log_dir)}")
     _remove_legacy_xrdp_socket_environment()
+    # Debian ties sesman to the viewer daemon. Keep the session manager alive
+    # when the frontend restarts or fails; only deliberate desktop maintenance
+    # may restart sesman, after the idle guard above.
+    dropin_dir = "/etc/systemd/system/xrdp-sesman.service.d"
+    os.makedirs(dropin_dir, exist_ok=True)
+    with open(f"{dropin_dir}/shared-desktop.conf", "w") as dropin:
+        dropin.write("[Unit]\nBindsTo=\nStopWhenUnneeded=false\n")
+    run("systemctl daemon-reload")
 
     launcher_dir = os.path.dirname(_XRDP_XORG_LAUNCHER)
     os.makedirs(launcher_dir, exist_ok=True)
@@ -492,31 +506,11 @@ allowed_users=anybody
 needs_root_rights=no
 """
     
-    # Ensure directory exists
-    xwrapper_dir = os.path.dirname(xwrapper_config)
-    if not os.path.exists(xwrapper_dir):
-        try:
-            os.makedirs(xwrapper_dir, exist_ok=True)
-        except OSError as e:
-            print(f"  ⚠ ERROR: Could not create {xwrapper_dir}: {e}")
-            print(f"  ⚠ XRDP may experience session startup issues without proper Xwrapper configuration")
-            print(f"  ⚠ Manually create the directory and file if needed")
-    
-    # Backup existing Xwrapper.config before overwriting
+    os.makedirs(os.path.dirname(xwrapper_config), exist_ok=True)
     if os.path.exists(xwrapper_config) and not os.path.exists(f"{xwrapper_config}.bak"):
         run(f"cp {xwrapper_config} {xwrapper_config}.bak")
-    
-    try:
-        with open(xwrapper_config, "w") as f:
-            f.write(xwrapper_content)
-        print("  ✓ Xwrapper configured (allows XRDP to start X server)")
-    except (IOError, OSError) as e:
-        print(f"  ⚠ ERROR: Could not write to {xwrapper_config}: {e}")
-        print(f"  ⚠ CRITICAL: XRDP sessions may freeze or fail to start")
-        print(f"  ⚠ Manual fix required:")
-        print(f"      sudo mkdir -p {xwrapper_dir}")
-        print(f"      echo 'allowed_users=anybody' | sudo tee {xwrapper_config}")
-        print(f"      echo 'needs_root_rights=no' | sudo tee -a {xwrapper_config}")
+    with open(xwrapper_config, "w") as f:
+        f.write(xwrapper_content)
 
     # Ensure xrdp can create its runtime dirs/sockets
     run("systemctl enable xrdp-sesman", check=False)
@@ -528,33 +522,19 @@ needs_root_rights=no
     if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):
         run(f"cp {sesman_config} {sesman_config}.bak")
     
-    # Generate the managed sesman.ini.
-    try:
-        sesman_content = _generate_sesman_ini(config)
-        with open(sesman_config, "w") as f:
-            f.write(sesman_content)
-        print("  ✓ Session manager configuration deployed")
-    except Exception as e:
-        print(f"  ⚠ Error deploying sesman.ini: {e}")
-        return
-    
+    with open(sesman_config, "w") as f:
+        f.write(_generate_sesman_ini(config))
+    print("  ✓ Session manager configuration deployed")
+
     if os.path.exists(xrdp_config) and not os.path.exists(f"{xrdp_config}.bak"):
         run(f"cp {xrdp_config} {xrdp_config}.bak")
-    
-    # xrdp.ini doesn't need machine-type-specific changes, use template
-    config_template_dir = os.path.join(os.path.dirname(__file__), 'config')
-    xrdp_template_path = os.path.join(config_template_dir, 'xrdp.ini.template')
-    try:
-        with open(xrdp_template_path, 'r', encoding='utf-8') as f:
-            xrdp_content = _generate_xrdp_ini(config, f.read())
-        with open(xrdp_config, "w") as f:
-            f.write(xrdp_content)
-        print("  ✓ xRDP configuration deployed")
-    except FileNotFoundError:
-        print(f"  ⚠ xrdp.ini template not found: {xrdp_template_path}, using default config")
-    except Exception as e:
-        print(f"  ⚠ Error deploying xrdp.ini template: {e}")
-    
+    template_path = os.path.join(os.path.dirname(__file__), "config", "xrdp.ini.template")
+    with open(template_path, encoding="utf-8") as f:
+        xrdp_content = _generate_xrdp_ini(config, f.read())
+    with open(xrdp_config, "w") as f:
+        f.write(xrdp_content)
+    print("  ✓ xRDP configuration deployed")
+
     # Configure xorgxrdp - required for all XRDP environments
     # Fix for Debian Trixie/X.Org 21.1.16: glamoregl must be loaded before xorgxrdp
     # to resolve undefined glamor_xv_init symbol errors.
@@ -570,26 +550,9 @@ needs_root_rights=no
         f.write(_generate_xorg_conf(render_node))
     print("  ✓ xorgxrdp configuration deployed")
     
+    install_session_runtime(config)
     run("systemctl enable xrdp")
     _refresh_services("xrdp-sesman", "xrdp")
-
-    xsession_template_path = os.path.join(config_template_dir, 'xrdp_xsession.template')
-    try:
-        with open(xsession_template_path, 'r', encoding='utf-8') as f:
-            xsession_content = f.read()
-    except FileNotFoundError:
-        print(f"  ⚠ xsession template file not found: {xsession_template_path}")
-        return
-    except Exception as e:
-        print(f"  ⚠ Error reading xsession template: {e}")
-        return
-    
-    xsession_content = xsession_content.replace('{SESSION_CMD}', session_cmd)
-    
-    with open(xsession_path, "w") as f:
-        f.write(xsession_content)
-    run(f"chmod +x {shlex.quote(xsession_path)}")
-    run(f"chown {safe_username}:{safe_username} {shlex.quote(xsession_path)}")
 
     print("  ✓ xRDP configured")
 
@@ -601,6 +564,9 @@ def harden_xrdp(config: SetupConfig) -> None:
     This function ensures the xrdp user has proper permissions and only refreshes
     services when that access changes or the services are not running.
     """
+    if is_dry_run():
+        print("  [DRY-RUN] Would verify shared desktop TLS and owner access")
+        return
     xrdp_config = "/etc/xrdp/xrdp.ini"
     
     if not os.path.exists(xrdp_config):
@@ -609,6 +575,6 @@ def harden_xrdp(config: SetupConfig) -> None:
     
     # Ensure xrdp user has access to SSL certificates
     ssl_cert_changed = _ensure_user_in_group("xrdp", "ssl-cert")
-    _refresh_services("xrdp-sesman", "xrdp", reload_running_services=ssl_cert_changed)
+    _refresh_services("xrdp", reload_running_services=ssl_cert_changed)
     
     print("  ✓ xRDP hardened (TLS encryption, strong ciphers, group restrictions)")

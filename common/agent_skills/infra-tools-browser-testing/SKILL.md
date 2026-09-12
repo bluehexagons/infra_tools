@@ -13,6 +13,11 @@ is not part of the task.
 
 ## Choose the browser
 
+Prefer these browser tools over desktop pixel automation for almost all browser
+testing, including canvas/WebGL. If a shared desktop is also installed, use it
+only for desktop-specific browser integration or a justified fallback when these
+tools cannot cover the task; state the resulting coverage limits.
+
 Prefer VM-local Playwright when the task needs repeatable headless interactions,
 DOM/console/network inspection, loopback access, canvas input, or browser-engine
 verification that does not need to be shared live with the user. It remains

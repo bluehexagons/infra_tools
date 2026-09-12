@@ -1,6 +1,6 @@
 # XRDP configuration and troubleshooting
 
-`infra-tools` configures XRDP for secure, reconnectable desktop sessions with
+`infra-tools` configures one shared XRDP desktop owned by the setup account, with
 dynamic resolution. The supported path uses Xorg with `xorgxrdp`; it does not
 use Xvnc or a Proxmox emulated display as the RDP display.
 
@@ -11,9 +11,9 @@ use Xvnc or a Proxmox emulated display as the RDP display.
 | Backend | Xorg with the `xrdpdev` driver |
 | Rendering | Glamor acceleration when a supported, accessible DRM render node is detected; software fallback otherwise |
 | Desktop | XFCE is the recommended RDP desktop |
-| Listener | All IPv4 addresses on TCP 3389 |
+| Listener | Loopback TCP 3389; `--rdp` selects remote access, defaulting to all IPv4 addresses |
 | Firewall | Globally rate-limited access unless a generic or RDP-specific source is supplied |
-| Sessions | Ten concurrent sessions |
+| Sessions | One session; only the configured non-root account is admitted |
 | Disconnected sessions | Retained indefinitely |
 | Idle sessions | Not disconnected automatically |
 | Clipboard | Enabled |
@@ -70,20 +70,149 @@ Use `--rdp-bind-address IP` to bind the listener to one local address. The
 firewall reconciles only rules tagged `infra_tools RDP` and does not remove
 unrelated UFW rules.
 
-Session and channel controls:
+Client idle-disconnect and channel controls:
 
 ```bash
---rdp-max-sessions 3
 --rdp-idle-timeout 3600
---rdp-kill-disconnected --rdp-disconnected-timeout 86400
 --no-rdp-clipboard
 --rdp-drive-redirection
 --rdp-audio
 ```
 
-Ending a disconnected session also ends agents running only inside that
-session. Keep durable work in `tmux` or a supervised service before enabling
-disconnected-session cleanup.
+Session-count and disconnect-cleanup flags are removed. Old saved values are
+migrated to the fixed policy, with warnings for nondefault behavior changes.
+Idle timeout only disconnects a viewer. Logout ends desktop applications;
+keep independent long-running work in SSH, tmux, or supervised agent services.
+
+## Start and share the desktop
+
+As the configured account, without sudo:
+
+```bash
+infra-tools desktop status
+infra-tools desktop start
+infra-tools desktop exec -- thunar
+infra-tools desktop screenshot --output /tmp/desktop-1.png
+infra-tools desktop control pause
+infra-tools desktop control resume
+infra-tools desktop logout
+```
+
+All commands return JSON. `status` observes without starting a session; `start`
+reuses one already running. `exec` and screenshots require a running session.
+`exec` launches argument vectors with the desktop's X authority and D-Bus
+environment. It does not execute a shell or change unrelated user services.
+The local agent startup uses XRDP 0.10's `xrdp-sesrun` Unix peer authentication;
+it needs no stored password. This is for local Unix accounts; it does not
+unlock password-protected keyrings or provide AD/Kerberos login.
+See the [upstream explanation](https://github.com/neutrinolabs/xrdp/discussions/3467).
+
+A human can connect first using an RDP client and the same account's Unix
+password, or connect after the agent starts the desktop. Both see the same
+applications. Only one human viewer is supported; another connection takes
+over that display. The active RDP client controls resolution. Agent startup
+uses 1280×720 until a client resizes it. No VNC server or second GUI is started.
+
+With remote ingress disabled, connect through an SSH tunnel from the client:
+
+```bash
+ssh -N -L 13389:127.0.0.1:3389 agent@VM
+```
+
+Point the RDP client at `localhost:13389`. RDP authentication and certificate
+verification still apply. A passwordless account can start the desktop locally
+but needs a Unix password set by its administrator for human RDP login.
+
+Disconnecting either participant retains the session. Logout or VM shutdown
+ends it. No desktop autostarts at boot or restarts on failure. A new authenticated
+RDP login counts as a new start after logout, including clients that automatically
+reconnect: disable client auto-reconnect when intentionally logging out.
+`logout` requests the desktop's normal logout, so unsaved-work dialogs can cancel
+it. Observe `status` afterward; the request alone is not proof of completion.
+
+Screenshots return the session `generation` and full-display pixel `geometry`.
+Use those exact values for bounded input, then inspect the result:
+
+```bash
+infra-tools desktop input --generation GENERATION --geometry 1280 720 click --x 100 --y 200
+infra-tools desktop input --generation GENERATION --geometry 1280 720 key --key ctrl+s
+infra-tools desktop input --generation GENERATION --geometry 1280 720 text --text 'Example'
+```
+
+`move` takes coordinates; click buttons 4–7 scroll. Each mutation acquires a
+short exclusive lease. Human takeover with `control pause` revokes it and blocks
+agent mutations while leaving screenshots and RDP input available. `resume`
+is explicit. This is cooperative same-account coordination, not a sandbox.
+Human mouse movement does not automatically pause agents. Recapture after any
+resize, reconnect or stale-input error. Screenshots are private PNGs at new
+paths, never overwritten; delete temporary evidence after use.
+
+For almost all browser testing, use available T3 Code collaborative preview or
+managed Playwright. Desktop input is for native applications, desktop-specific
+integration, or a justified fallback. These browsers have separate profiles
+and authentication. The managed `infra-tools-desktop` skill provides routing
+and command guidance for Codex/OpenCode.
+
+## Migration and recovery
+
+All desktop profiles and `local desktop` use this stack. An explicit `--desktop`
+or `--rdp` enables it on server/agent profiles; `agent_vm` remains headless by
+default. `--no-rdp` retains a desktop profile's loopback listener. Omitting
+desktop capability on a later headless setup is not a desktop uninstaller.
+
+Run conversion from SSH or a text console after logging out every graphical
+session. Full setup checks before package upgrades and desktop steps check again
+before cutover. Active X11/Wayland or XRDP sessions defer setup without forced
+logout. The setup masks GDM, LightDM, SDDM, LXDM and XDM plus the systemd display
+manager alias, so graphical console login cannot create a second desktop.
+The VM/hardware console becomes a text/recovery surface; direct physical-console
+GUI attachment is not provided. Existing application packages and home data stay.
+Unknown display-manager aliases require operator migration. OCI and
+`--harden-user` configurations are rejected because persistent user services
+are required. XFCE is the primary target; other environments and LXC need the
+live qualification below before relying on them.
+
+The dedicated `infra-desktop` group contains only the configured owner. SSH's
+`remoteusers` group remains separate. User window-manager overrides and alternate
+RDP shells are disabled. Legacy `~/startwm.sh` files are no longer executed.
+The startup wrapper owns a private D-Bus session; applications launched by the
+CLI join its desktop process group. Teardown never kills the entire user manager.
+Applications explicitly launched as independent user services retain that
+service's lifecycle.
+
+Managed XRDP files keep first-install `.bak` copies. Desktop configuration is
+versioned at `/etc/infra-tools/desktop.json`, with a `.json.bak` on replacement.
+The former display-manager symlink is retained as
+`/etc/systemd/system/display-manager.service.infra-tools-backup`.
+Setup failure stops the setup operation; inspect its error and rerun during a
+session-free window. There is no automatic rollback that logs users out.
+For administrator rollback, first log out, stop XRDP, restore the backed-up
+XRDP files and desired display-manager alias, unmask only the former display
+manager and `display-manager.service`, and deliberately start that service.
+Rollback restores configuration, not unsaved applications. Keep SSH available.
+
+## Live qualification
+
+The implementation has mocked lifecycle/setup tests. End-to-end qualification
+is still required on a disposable Debian VM with standard emulated graphics;
+the development workspace cannot perform root setup. Record package versions,
+client name/version, application PID, display, and generation for each check:
+
+1. Fresh setup: start as agent, launch a native editor, connect as human and
+   verify the same visible document and PID. Repeat with the human starting first.
+2. Race multiple starts, disconnect every viewer and initiating agent, then
+   reconnect. Confirm one desktop and unchanged applications.
+3. Resize repeatedly, test clipboard, keyboard layouts, screenshot coordinates,
+   pause/resume and competing agents. Confirm stale generations are rejected.
+4. Cancel logout with unsaved work, then complete logout. Verify unrelated SSH,
+   tmux and T3 services survive and a later start has a new generation.
+5. Restart only the XRDP frontend, test network loss and a desktop crash, then
+   reboot. Verify the documented persistence and explicit-start boundaries.
+6. Test conversion with active sessions (must defer), idle conversion, rerun,
+   interrupted setup and administrator rollback. Repeat for each claimed desktop.
+
+Do not treat mocked success as evidence of live resize, keyring, lock/unlock,
+audio or multi-monitor compatibility.
 
 ## Managed configuration
 
@@ -97,7 +226,9 @@ disconnected-session cleanup.
 | `/etc/apt/preferences.d/infra-tools-sid.pref` | Keeps Sid packages low priority outside the XRDP transaction |
 | `/etc/apparmor.d/local/Xorg` | Allows xorgxrdp sockets, capture buffers, and the selected render node |
 | `~/.local/share/xorg/Xorg.<display>.log` | Per-session Xorg diagnostics |
-| `~/startwm.sh` | Desktop session startup |
+| `/etc/xrdp/infra-tools-startwm.sh` | Root-owned shared desktop supervisor entry point |
+| `/etc/infra-tools/desktop.json` | Versioned owner and environment declaration |
+| `/run/user/UID/infra-tools-desktop/control.sock` | Private same-UID control channel |
 
 The Xwrapper configuration requires:
 
@@ -269,10 +400,9 @@ test another RDP client. Confirm that the session uses `xrdpdev`, that
 RANDR. If the freeze persists, capture the XRDP, Xorg, and session logs while
 reproducing it.
 
-For a minimal diagnostic session, temporarily replace the command in
-`~/startwm.sh` with `exec xterm`, reconnect, and restore the managed script
-after testing. An xterm session that remains stable points to the desktop
-configuration rather than XRDP transport.
+Use `infra-tools desktop exec -- xterm` in a running session to isolate an
+application problem. Do not bypass the managed startup wrapper or restart
+sesman while applications are running.
 
 ### Verify a live session
 

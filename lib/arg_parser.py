@@ -49,6 +49,16 @@ class CommaSeparatedChoicesAction(argparse.Action):
         setattr(namespace, self.dest, selected)
 
 
+class RemovedDesktopPolicyAction(argparse.Action):
+    """Explain the one-time migration instead of silently ignoring old flags."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.error(
+            f"{option_string} was removed: desktops now use one shared session "
+            "which persists until logout; remove this option"
+        )
+
+
 class VMDiskSettingAction(argparse.Action):
     """Set a VM-wide disk default or one logical disk override."""
 
@@ -650,26 +660,10 @@ def add_setup_arguments(
         default=False,
         help="Allow RDP audio redirection (default: disabled)",
     )
-    parser.add_argument(
-        "--rdp-max-sessions",
-        type=int,
-        default=10,
-        metavar="N",
-        help="Maximum concurrent XRDP sessions (default: 10)",
-    )
-    parser.add_argument(
-        "--rdp-kill-disconnected",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="End disconnected sessions after --rdp-disconnected-timeout",
-    )
-    parser.add_argument(
-        "--rdp-disconnected-timeout",
-        type=int,
-        default=0,
-        metavar="SECONDS",
-        help="Seconds to retain disconnected sessions; requires --rdp-kill-disconnected",
-    )
+    for flag in ("--rdp-max-sessions", "--rdp-disconnected-timeout"):
+        parser.add_argument(flag, action=RemovedDesktopPolicyAction, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    for flag in ("--rdp-kill-disconnected", "--no-rdp-kill-disconnected"):
+        parser.add_argument(flag, action=RemovedDesktopPolicyAction, nargs=0, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     parser.add_argument(
         "--rdp-idle-timeout",
         type=int,
@@ -678,8 +672,8 @@ def add_setup_arguments(
         help="Seconds before disconnecting an idle session; 0 disables (default: 0)",
     )
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon", "lxqt"], 
-                       default="xfce" if for_remote else None,
-                       help="Desktop environment to install for setup/RDP sessions (default: xfce; an existing local GNOME desktop is left unchanged)")
+                       default=None,
+                       help="Environment for the one shared desktop session (default: xfce)")
     parser.add_argument("--browser", dest="browsers", 
                        action="append",
                        choices=["brave", "firefox", "browsh", "helium", "lynx", "librewolf"], 

@@ -304,9 +304,6 @@ class TestHostedFlagParsing(unittest.TestCase):
             "--no-rdp-clipboard",
             "--rdp-drive-redirection",
             "--rdp-audio",
-            "--rdp-max-sessions", "2",
-            "--rdp-kill-disconnected",
-            "--rdp-disconnected-timeout", "86400",
             "--rdp-idle-timeout", "14400",
         ])
         self.assertEqual(args.rdp_bind_address, "10.0.0.50")
@@ -314,10 +311,16 @@ class TestHostedFlagParsing(unittest.TestCase):
         self.assertFalse(args.rdp_clipboard)
         self.assertTrue(args.rdp_drive_redirection)
         self.assertTrue(args.rdp_audio)
-        self.assertEqual(args.rdp_max_sessions, 2)
-        self.assertTrue(args.rdp_kill_disconnected)
-        self.assertEqual(args.rdp_disconnected_timeout, 86400)
         self.assertEqual(args.rdp_idle_timeout, 14400)
+
+    def test_removed_desktop_policy_flags_report_migration(self):
+        for flags in (["--rdp-max-sessions", "1"], ["--rdp-kill-disconnected"],
+                      ["--no-rdp-kill-disconnected"], ["--rdp-disconnected-timeout", "0"]):
+            with self.subTest(flags=flags):
+                output = io.StringIO()
+                with contextlib.redirect_stderr(output), self.assertRaises(SystemExit):
+                    self.parser.parse_args(["vm", *flags])
+                self.assertIn("removed", output.getvalue())
 
     def test_rdp_existing_password_flag(self):
         args = self.parser.parse_args([

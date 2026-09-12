@@ -213,28 +213,12 @@ class TestValidateRdpSettings(unittest.TestCase):
             system_type="workstation_dev",
             enable_rdp=True,
             password="correct-horse-battery-staple",
-            rdp_max_sessions=2,
-            rdp_kill_disconnected=True,
-            rdp_disconnected_timeout=86400,
             rdp_idle_timeout=14400,
         )
 
         validate_rdp_settings(config)
 
     def test_rdp_rejects_unsafe_session_limits(self) -> None:
-        for max_sessions in (0, 101):
-            with self.subTest(max_sessions=max_sessions):
-                config = SetupConfig(
-                    host="agent-vm",
-                    username="agent",
-                    system_type="workstation_dev",
-                    enable_rdp=True,
-                    password="correct-horse-battery-staple",
-                    rdp_max_sessions=max_sessions,
-                )
-                with self.assertRaisesRegex(ValueError, "between 1 and 100"):
-                    validate_rdp_settings(config)
-
         negative_idle = SetupConfig(
             host="agent-vm",
             username="agent",
@@ -246,28 +230,6 @@ class TestValidateRdpSettings(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-negative integer"):
             validate_rdp_settings(negative_idle)
 
-    def test_rdp_disconnected_timeout_requires_explicit_cleanup(self) -> None:
-        missing_timeout = SetupConfig(
-            host="agent-vm",
-            username="agent",
-            system_type="workstation_dev",
-            enable_rdp=True,
-            password="correct-horse-battery-staple",
-            rdp_kill_disconnected=True,
-        )
-        with self.assertRaisesRegex(ValueError, "requires a positive"):
-            validate_rdp_settings(missing_timeout)
-
-        ignored_timeout = SetupConfig(
-            host="agent-vm",
-            username="agent",
-            system_type="workstation_dev",
-            enable_rdp=True,
-            password="correct-horse-battery-staple",
-            rdp_disconnected_timeout=86400,
-        )
-        with self.assertRaisesRegex(ValueError, "requires --rdp-kill-disconnected"):
-            validate_rdp_settings(ignored_timeout)
 
 
 if __name__ == "__main__":

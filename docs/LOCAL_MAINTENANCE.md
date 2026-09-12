@@ -42,22 +42,22 @@ sudo infra-tools setup workstation_dev localhost "$USER" \
 
 ## Desktop environments
 
-Install an additional supported desktop environment directly:
+Configure the machine's one shared XRDP desktop while all graphical sessions
+are logged out:
 
 ```bash
 sudo infra-tools local desktop xfce
 sudo infra-tools local desktop cinnamon --dark
 ```
 
-Supported environments are `xfce`, `i3`, `cinnamon`, and `lxqt`. This command
-installs the selected environment alongside any existing desktop; it does not
-remove GNOME or another environment. At the next graphical login, select the
-session from the display manager. `--dark` applies the existing supported
-theme configuration where available.
+Environment choices are `xfce`, `i3`, `cinnamon`, and `lxqt`. This command
+installs the shared session runtime and XRDP on loopback, and disables console
+graphical login. Existing applications and home files remain. It does not add
+a second desktop beside GNOME. `--dark` applies the selected theme.
+Use SSH or a text console for setup. See [shared desktop operation and
+migration](XRDP.md) before converting an existing graphical workstation.
 
-For a complete RDP setup—including XRDP installation, TLS hardening, session
-configuration, and firewall rules—use a workstation setup with `--rdp` rather
-than the focused desktop command:
+To expose RDP remotely and configure its firewall policy, use setup with `--rdp`:
 
 ```bash
 sudo infra-tools setup workstation_dev localhost "$USER" \

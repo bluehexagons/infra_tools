@@ -440,6 +440,12 @@ def _run_main() -> int:
         return 0
 
     _begin_setup_operation(config)
+
+    if config.include_desktop:
+        from desktop.session_steps import assert_desktop_idle
+
+        # Check before common package upgrades can disturb a graphical session.
+        assert_desktop_idle(config)
     
     setup_errors: list[str] = []
     report = get_setup_report()

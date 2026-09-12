@@ -48,16 +48,17 @@ def extend_desktop_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
     if not config.include_desktop:
         return
 
+    from desktop.session_steps import prepare_shared_desktop
+
+    steps.append(("Preparing single-session desktop and disabling console graphical login", prepare_shared_desktop))
     steps.append(("Installing desktop environment", install_desktop))
-    if config.enable_rdp:
-        steps.append(("Installing xRDP", install_xrdp))
-        steps.append(("Configuring desktop for RDP compatibility", configure_xfce_for_rdp))
+    steps.append(("Installing single-session XRDP desktop", install_xrdp))
+    steps.append(("Configuring desktop for RDP compatibility", configure_xfce_for_rdp))
     if config.enable_smbclient:
         steps.append(("Installing SMB client packages", install_smbclient))
     if config.dark_theme:
         steps.append(("Configuring dark theme", configure_dark_theme))
-    if config.enable_rdp:
-        steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
+    steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
 
 
 def extend_desktop_app_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:

@@ -88,6 +88,7 @@ class ManagedAgentSkillTests(unittest.TestCase):
             *BROWSER_AGENT_SKILL_NAMES,
             *T3_AGENT_SKILL_NAMES,
             *GODOT_AGENT_SKILLS,
+            "infra-tools-desktop",
         }
 
         self.assertEqual(source_names, installed_names)
@@ -121,6 +122,15 @@ class ManagedAgentSkillTests(unittest.TestCase):
                     set(agent_workflow_skill_names(config)),
                     expected_names,
                 )
+
+    def test_desktop_skill_is_conditional_and_keeps_browser_selection(self) -> None:
+        config = SetupConfig(host="vm", username="agent", system_type="agent_vm",
+                             include_desktop=True, agent_tools=["codex"],
+                             browser_automation="playwright")
+        self.assertIn("infra-tools-desktop", agent_workflow_skill_names(config))
+        self.assertIn("infra-tools-playwright-testing", agent_workflow_skill_names(config))
+        config.include_desktop = False
+        self.assertNotIn("infra-tools-desktop", agent_workflow_skill_names(config))
 
     def test_reconciles_obsolete_managed_browser_skill_variants(self) -> None:
         with tempfile.TemporaryDirectory() as home:

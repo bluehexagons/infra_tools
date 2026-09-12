@@ -74,7 +74,7 @@ class TestRdpDisplay(unittest.TestCase):
         self.assertIn("RDP bind address: 0.0.0.0", rendered)
         self.assertIn("RDP allowed sources: global (rate-limited", rendered)
         self.assertIn("RDP enabled channels: dynamic-resize, clipboard", rendered)
-        self.assertIn("RDP maximum sessions: 10", rendered)
+        self.assertIn("RDP maximum sessions: 1", rendered)
         self.assertIn("RDP disconnected session retention: unlimited", rendered)
         self.assertIn("RDP idle disconnect: disabled", rendered)
 
@@ -89,9 +89,6 @@ class TestRdpDisplay(unittest.TestCase):
             rdp_clipboard=False,
             rdp_drive_redirection=True,
             rdp_audio=True,
-            rdp_max_sessions=2,
-            rdp_kill_disconnected=True,
-            rdp_disconnected_timeout=86400,
             rdp_idle_timeout=14400,
         )
 
@@ -103,8 +100,8 @@ class TestRdpDisplay(unittest.TestCase):
         self.assertIn("RDP bind address: 10.0.0.25", rendered)
         self.assertIn("RDP allowed sources: 10.0.0.0/24, 100.64.0.0/10", rendered)
         self.assertIn("RDP enabled channels: dynamic-resize, drive/device, audio", rendered)
-        self.assertIn("RDP maximum sessions: 2", rendered)
-        self.assertIn("RDP disconnected session retention: 86400 seconds", rendered)
+        self.assertIn("RDP maximum sessions: 1", rendered)
+        self.assertIn("RDP disconnected session retention: unlimited", rendered)
         self.assertIn("RDP idle disconnect: 14400 seconds", rendered)
 
     def test_connection_info_repeats_the_effective_boundary(self) -> None:

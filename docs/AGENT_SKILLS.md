@@ -40,6 +40,13 @@ Other provisioned capabilities add focused skills:
 | `infra-tools-t3code` | T3 Code web service |
 | `infra-tools-web-gateway` | T3 Code setup or the Godot web bundle; the skill publishes and verifies managed static snapshots or live forwards |
 | `infra-tools-godot-web` | Godot web bundle |
+| `infra-tools-desktop` | Shared desktop capability, including an explicit `--desktop` or `--rdp` on an agent VM |
+
+Desktop guidance describes the one shared XRDP session, native application
+launch, screenshot/input commands, and human takeover. Browser tests almost
+always use T3 Code or Playwright when available; a running desktop is not a
+reason to switch to pixel automation. Desktop-specific integration and a
+justified fallback remain available. See [XRDP](XRDP.md).
 
 A skill does not install the capability it describes. A setup with neither T3
 Code nor managed Playwright receives no browser skill, avoiding instructions
@@ -52,7 +59,7 @@ Claude-only setup receives the agent management command but not this skill set.
 
 Setup copies repository-owned `SKILL.md` files into the target account. A rerun
 refreshes files containing `managed-by: infra_tools` and leaves identical files
-alone. It removes obsolete infra-tools-managed browser variants when the
+alone. It removes obsolete infra-tools-managed desktop/browser skills when the
 selected capability combination changes, while preserving unrelated skills and
 user configuration. It refuses symlinked paths, directories owned by another
 user, and a same-name skill without the managed marker.

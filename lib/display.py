@@ -359,14 +359,8 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         if config.rdp_audio:
             enabled_channels.append("audio")
         print(f"RDP enabled channels: {', '.join(enabled_channels)}")
-        print(f"RDP maximum sessions: {config.rdp_max_sessions}")
-        if config.rdp_kill_disconnected:
-            print(
-                "RDP disconnected session retention: "
-                f"{config.rdp_disconnected_timeout} seconds"
-            )
-        else:
-            print("RDP disconnected session retention: unlimited")
+        print("RDP maximum sessions: 1 (shared by the desktop owner and agents)")
+        print("RDP disconnected session retention: unlimited, until logout")
         if config.rdp_idle_timeout:
             print(f"RDP idle disconnect: {config.rdp_idle_timeout} seconds")
         else:

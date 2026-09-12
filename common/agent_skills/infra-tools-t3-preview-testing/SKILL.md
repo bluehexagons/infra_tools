@@ -13,6 +13,11 @@ client's routes and certificate trust.
 
 ## Preview availability
 
+Prefer this browser workflow over an installed shared desktop for ordinary web
+testing, including canvas/WebGL. Desktop browser input is a fallback only when
+preview is unavailable or the task requires desktop-specific integration; explain
+its reduced coverage. Use the desktop skill if that capability is installed.
+
 Call `preview_status` first. If no automation-capable tab is attached, call
 `preview_open` once. Do not repeatedly reopen or poll. A closed or minimized T3
 application is a normal coverage limitation, not evidence that the web

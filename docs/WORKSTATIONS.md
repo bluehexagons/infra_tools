@@ -17,9 +17,10 @@ rm -f "$HOME/.infra_tools-install.sh"
 
 This keeps the graphical workstation setup while adding the SSH, rsync,
 diagnostic, terminal, and package-management tools used to administer other
-VMs and containers. It assumes the standard Debian GNOME desktop and existing
-local account password: GNOME remains the console desktop, while XFCE is used
-for XRDP sessions. Select only the graphical agents needed with repeatable
+VMs and containers. Run it from SSH or a text console after logging out existing
+graphical sessions. It converts graphical access to one shared XRDP desktop;
+console graphical logins are disabled and the existing account password is reused.
+Select only the agents needed with repeatable
 `--agent-tool` flags; language runtimes remain separate explicit options.
 
 Agent installation, authentication, and non-secret configuration are separate
@@ -163,7 +164,7 @@ the target Unix
 account's password; provide it through a secret-sourced environment variable,
 not a literal value in shell history. For a local Debian GNOME machine, use
 the [installer handoff](INSTALLATION.md#set-up-a-debian-gnome-desktop-control-plane), which
-keeps GNOME for console logins and uses XFCE for RDP.
+converts graphical access to the shared XRDP session after console logout.
 
 Agent updates are deliberate rather than automatic; host APT, security,
 cleanup, and restart maintenance still runs as described in
@@ -290,8 +291,10 @@ required.
 
 ## Desktop and RDP choices
 
-`--desktop` accepts `xfce`, `i3`, `cinnamon`, or `lxqt`. `--rdp` installs and
-hardens XRDP; the detailed session, TLS, and dynamic-resolution behavior is in
+`--desktop` accepts `xfce`, `i3`, `cinnamon`, or `lxqt`. All desktop setups use
+one XRDP session, reachable on loopback without `--rdp`. An explicit `--desktop`
+also enables it on a headless profile. `--rdp` enables remote ingress;
+the detailed session, TLS, and dynamic-resolution behavior is in
 [`XRDP.md`](./XRDP.md). `--dark` configures XFCE, LXQt, or Cinnamon themes;
 i3 receives an informational message because its theme is normally configured
 in the user's i3 setup.
@@ -322,14 +325,12 @@ drive/device, printer, audio, RemoteApp, and video redirection are disabled.
 Use `--no-rdp-clipboard`, `--rdp-drive-redirection`, or `--rdp-audio` to change
 the explicitly managed channel policy.
 
-XRDP permits ten sessions and retains disconnected sessions indefinitely by
-default. A single-user host can set a smaller `--rdp-max-sessions`; abandoned
-sessions can be bounded only by explicitly pairing `--rdp-kill-disconnected`
-with a positive `--rdp-disconnected-timeout SECONDS`. `--rdp-idle-timeout`
-disconnects an idle client but does not itself end the session. Ending a
-disconnected session also ends agents running only inside that graphical
-session, so keep durable work in `tmux` or a supervised service before enabling
-cleanup.
+XRDP permits one session owned by the setup account. Human RDP login or
+`infra-tools desktop start` creates it; disconnect retains it until logout.
+`--rdp-idle-timeout` disconnects an idle client without ending applications.
+Session-count and disconnect-cleanup flags have been removed. Use
+`infra-tools desktop exec -- APPLICATION` to launch into the same session.
+For browser testing, prefer T3 Code or managed Playwright over desktop input.
 
 The `pc_dev` profile includes Remmina with RDP and VNC plugins. Other profiles
 can install it through the explicit custom step `install_remmina` when using

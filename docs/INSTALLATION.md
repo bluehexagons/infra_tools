@@ -112,9 +112,11 @@ container. `--qemu-guest-agent` requires root and system-package installation.
 
 ### Set up a Debian GNOME desktop control plane
 
-Use this for a standard Debian desktop that already has GNOME. It leaves GNOME
-available for local logins, adds XFCE for RDP sessions, enables RDP, and
-installs the selected agent tools (GitHub CLI and Codex CLI in this example):
+This converts graphical access to one shared XFCE/XRDP desktop and installs
+GitHub CLI and Codex. Log out of GNOME first and run from SSH or a text console.
+Console graphical login is disabled; applications and home data remain.
+See [XRDP migration and recovery](XRDP.md#migration-and-recovery) before converting
+a machine that currently relies on local graphical login.
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh

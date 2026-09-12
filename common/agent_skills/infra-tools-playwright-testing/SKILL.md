@@ -13,6 +13,10 @@ a collaborative preview.
 
 ## Readiness and origin
 
+Prefer managed Playwright over an installed shared desktop for almost all browser
+testing, including canvas/WebGL. Desktop input is reserved for desktop-specific
+integration or a justified fallback when Playwright cannot cover the task.
+
 Before the first browser action, run:
 
 ```bash

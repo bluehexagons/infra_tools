@@ -146,12 +146,15 @@ def browser_agent_skill_name(config: SetupConfig) -> str | None:
 
 
 def agent_workflow_skill_names(config: SetupConfig) -> tuple[str, ...]:
-    """Return base skills plus the capability-specific browser workflow."""
+    """Return workflow skills matching the declared desktop and browser tools."""
 
+    names = BASE_AGENT_SKILL_NAMES
+    if config.include_desktop or config.enable_rdp:
+        names = (*names, "infra-tools-desktop")
     browser_skill = browser_agent_skill_name(config)
     if browser_skill is None:
-        return BASE_AGENT_SKILL_NAMES
-    return (*BASE_AGENT_SKILL_NAMES, browser_skill)
+        return names
+    return (*names, browser_skill)
 
 
 def _validate_managed_agent_skill_name(skill_name: str) -> None:
@@ -275,7 +278,7 @@ def reconcile_agent_workflow_skills(config: SetupConfig) -> bool:
         config.username,
         config.selected_agent_tools(),
         agent_workflow_skill_names(config),
-        reconcile_skill_names=BROWSER_AGENT_SKILL_NAMES,
+        reconcile_skill_names=(*BROWSER_AGENT_SKILL_NAMES, "infra-tools-desktop"),
     )
 
 

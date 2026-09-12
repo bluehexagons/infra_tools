@@ -1,6 +1,10 @@
 # One shared desktop session per machine
 
-Status: proposed project plan, 2026-09-12. Implementation has not started.
+Status: implementation in progress, 2026-09-12. XRDP retained per user decision.
+Runtime, CLI, setup wiring, migration guards, and managed skills are implemented;
+disposable-VM qualification remains open. See [the operator guide](../XRDP.md)
+for the implemented behavior and live smoke procedure. The acceptance criteria
+below remain qualification targets, not a claim that live testing has passed.
 
 ## Objective and scope
 
@@ -59,11 +63,10 @@ its acceptance suite.
 | VM reboot or shutdown | End the session; do not claim to preserve live processes across reboot. |
 | Boot after shutdown | Make the start/connect endpoint available; leave the desktop stopped until requested. |
 
-The lifecycle controller may be supervised and restarted. The desktop must
-not have an unconditional restart policy. Remote viewers must not silently
-create a replacement desktop through automatic reconnection after logout:
-attachment carries a session generation, and starting a new generation
-requires a fresh user/agent start request.
+The desktop must not have an unconditional restart policy. Agent input carries
+a session generation. Native XRDP clients do not carry that agent generation:
+a new authenticated login is an explicit start, including automatic client
+reconnection. Operators must disable client auto-reconnect when logging out.
 
 Use states `stopped`, `starting`, `running`, `stopping`, and `failed`, with a
 machine-wide startup lock and a unique generation for each session. Treat
@@ -78,46 +81,26 @@ D-Bus or user services are accounted for during teardown.
 
 ## Architecture and backend decision
 
-The architectural decision is fixed: one desktop lifecycle owner, one
-configured owner account, and transports that attach to that desktop. The
-display backend is selected by an initial compatibility prototype, not by
-assuming the existing backend can be changed without regressions.
+XRDP sesman remains the single display/session owner. Both human RDP login and
+local `xrdp-sesrun` use it. `MaxSessions=1`, reconnect policy `UB`, a dedicated
+single-owner admission group, and a root-owned window-manager wrapper replace
+the former per-user startup scripts. The wrapper supervises the chosen desktop
+and a private control socket; no VNC backend or competing X server is added.
 
-Evaluate these two candidates, then select one default implementation:
+The Debian sesman unit is decoupled from frontend `BindsTo`/`StopWhenUnneeded`
+behavior so frontend restarts do not deliberately tear down the session manager.
+Existing xorgxrdp software-rendering, AppArmor, TLS, and resize fixes remain.
+Agent startup uses Unix peer authentication without a password; human access
+uses the account password. Password-protected keyrings are not automatically
+unlocked by agent startup.
 
-| Candidate | Why evaluate it | Required evidence |
-| --- | --- | --- |
-| Supervised XFCE/X11 on TigerVNC's virtual X server | Natural independent startup on VMs; remote clients share the same virtual display. | Resize, application compatibility, logout, remote-first startup, and RDP attachment if retained. |
-| Supervised console Xorg with an existing-display sharing server | Can make local console and remote access show the same desktop; relevant to bare-metal workstations. | Rootless/seat permissions, operation without a human console login, emulated graphics, and sharing/resize behavior. |
-
-[TigerVNC documents](https://tigervnc.org/doc/Xvnc.html) a virtual X display,
-shared connections, desktop-size requests, and disconnect-related lifetime
-settings. These make it a candidate, not proof of compatibility with this
-repository's supported applications or clients.
-[x0vncserver](https://tigervnc.org/doc/x0vncserver.html) instead shares an
-existing X display and does not create the desktop.
-
-The current XRDP implementation explicitly excludes Xvnc because of recorded
-resize/freezing problems. Reproduce that scenario against the exact candidate
-package versions. Do not delete the existing workaround based only on
-upstream feature descriptions. Prefer the virtual backend for VM simplicity
-only if it passes the compatibility gate. If physical-console requirements
-require a distinct display adapter, both adapters must use the same lifecycle
-and only one may be selected on a machine; do not retain parallel independent
-desktop stacks.
-
-Start qualification with XFCE/X11. Test i3, LXQt, and Cinnamon before claiming
-continued support. Existing GNOME/Wayland installations need either a tested
-adoption adapter or a documented conversion to a qualified environment; a
-second XFCE desktop is no longer the fallback. Do not silently replace an
-existing user's desktop during routine setup.
-
-For VMs, the hypervisor console may remain a text/recovery console, as it is
-not a second user desktop. If graphical console access is offered, it must
-show or attach to the shared session. For physical workstations, local human
-login/start must reach that same session, and remote-first startup must not
-prevent later local attachment. Include this in backend selection rather
-than leaving it as a post-release exception.
+The console is a text/recovery surface on managed machines. Setup masks known
+console display managers after all graphical sessions are logged out, retaining
+the former alias for administrator rollback. This deliberately removes the
+independent GNOME-console/XFCE-RDP model. Direct physical-console GUI attachment
+is not implemented; do not convert a workstation that requires it. XFCE is the
+primary VM target; i3, LXQt and Cinnamon remain selectable and require live
+qualification before compatibility claims.
 
 ## Session implementation and human access
 
@@ -142,20 +125,12 @@ The connection entry point calls the same start-or-attach operation as agents.
 Prototype this end to end; a VNC listener that exists only after an agent
 starts the desktop does not satisfy the requirement.
 
-Preserve RDP access if a qualified adapter can attach to the managed desktop
-without delegating desktop creation back to sesman. Explicitly test the
-authentication-to-start bridge and existing client behavior. If this cannot
-meet the contract, document RDP retirement and a replacement human connection
-workflow before migration. Do not silently reinterpret `--rdp` as VNC.
-
-Native VNC and an optional browser viewer are alternative access surfaces,
-not requirements to ship three transports. Deliver one fully supported human
-entry point first. Keep display/backend sockets private, preserve current
-access-source restrictions, and carry forward TLS and certificate health
-checks for whichever network-facing service remains. Loopback alone is not
-authentication against other local accounts. Reuse existing gateway and
-authentication infrastructure where suitable rather than adding a public,
-unauthenticated remote-desktop port.
+The supported human entry point is native XRDP. Desktop profiles install a
+loopback listener even without remote ingress; `--rdp` enables the configured
+remote listener and firewall policy. No browser viewer or VNC transport is added.
+Retain TLS, certificate health checks, channel policy and source restrictions.
+The session runtime's same-UID socket requires the configured owner; it never
+exposes a network automation endpoint.
 
 Define a single desktop geometry and resize owner. Other viewers scale the
 same framebuffer; competing clients must not continually resize it. Preserve
@@ -178,7 +153,7 @@ infra-tools desktop control resume
 infra-tools desktop logout
 ```
 
-These are planned commands, not currently available commands. Keep
+These commands are implemented through the local CLI shell-tool adapter. Keep
 `infra-tools desktop ...` runtime operations distinct from the existing
 `infra-tools local desktop ENVIRONMENT` installation command. Default `exec`
 and screenshot to requiring a running session; `start` is the explicit
@@ -298,7 +273,7 @@ defer disruptive display/package changes to a session-free maintenance window.
 
 | Phase | Deliverable | Exit gate |
 | --- | --- | --- |
-| 1. Compatibility prototype | Disposable standard-graphics VM; compare candidate backends, human-first startup, RDP feasibility, resize, and local-console requirements. | Record versions and live evidence; choose the default backend and supported transport/environment matrix. |
+| 1. Compatibility prototype | Disposable standard-graphics VM; qualify retained XRDP, human-first startup, resize, and console conversion. | Record versions and live evidence; choose the default backend and supported transport/environment matrix. |
 | 2. Shared runtime | Lifecycle owner, private runtime state, startup locking, readiness, launch, logout, crash cleanup, and JSON status. | Race/lifecycle tests pass; no automatic recreation after logout; independent agents survive. |
 | 3. Human attachment | Authenticated start/connect and reconnect, lock behavior, geometry policy, and access restrictions. | Human and agent see the same application process across disconnects; transport restart preserves it. |
 | 4. Agent control | Screenshot/input adapter, application launch, generation checks, takeover, managed tool/skill registration, and browser/desktop task routing. | Native application task completed while a human observes and takes over; routine browser tasks select T3 or Playwright when suitable and available. |
@@ -325,7 +300,7 @@ Retain a reproducible live smoke procedure on disposable machines:
 | Human connects first from stopped state | Authentication starts exactly one desktop; agent can discover and operate it. |
 | Simultaneous starts/repeated connects | One graphical session and no duplicate desktop process tree. |
 | Disconnect all viewers and end initiating agent | Applications remain alive and reconnect returns to them. |
-| Logout with viewer auto-reconnect enabled | Desktop ends and remains stopped until a fresh explicit start. |
+| Logout and subsequent client login | Desktop ends; a new authenticated RDP login may start another generation. Test with automatic client reconnection disabled. |
 | Unsaved-document logout prompt | Cancel leaves the same session usable; force termination is a separate explicit action. |
 | Display crash, stale runtime state, or startup failure | Bounded cleanup, useful diagnostics, and successful later explicit start. |
 | Gateway restart or network interruption | Desktop process identity remains unchanged. |
@@ -336,7 +311,7 @@ Retain a reproducible live smoke procedure on disposable machines:
 | Capability-specific skill installation/removal | Installed skills describe available tools and consistent routing; browser-only VMs are not instructed to use an absent desktop. |
 | Resize, keyboard layout, clipboard, lock/unlock | Works for each claimed client; reproduce the previous XRDP resize failure case. |
 | Standard emulated graphics | Browser, editor, terminal, file manager, and an applicable native GUI workflow operate without passthrough. Record responsiveness and resource usage. |
-| Local and remote workstation access | Both reach the same desktop; no independent GNOME/XFCE sessions are created. |
+| Console and remote workstation access | Console graphical login is disabled; GUI access uses XRDP. Direct console GUI attachment remains outside the current implementation. |
 | Migration with active legacy sessions | No application is killed; cutover reports why it is pending. |
 | Headless profile and unrelated services | No implicit desktop install; logout leaves SSH, tmux, and agent services intact. |
 | Reboot, maintenance, rollback, and setup rerun | Documented lifecycle holds; no unintended desktop restart or access expansion. |

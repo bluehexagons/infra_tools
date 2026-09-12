@@ -71,20 +71,19 @@ class TestGenerateSesmanIni(unittest.TestCase):
         
         # Security settings
         self.assertIn("AllowRootLogin=false", result)
-        self.assertIn("TerminalServerUsers=remoteusers", result)
+        self.assertIn("TerminalServerUsers=infra-desktop", result)
+        self.assertIn("AllowAlternateShell=false", result)
+        self.assertIn("EnableUserWindowManager=false", result)
         self.assertIn("AlwaysGroupCheck=true", result)
 
     def test_renders_native_session_lifecycle_policy(self):
-        self.config.rdp_max_sessions = 2
-        self.config.rdp_kill_disconnected = True
-        self.config.rdp_disconnected_timeout = 86400
         self.config.rdp_idle_timeout = 14400
 
         result = _generate_sesman_ini(self.config)
 
-        self.assertIn("MaxSessions=2", result)
-        self.assertIn("KillDisconnected=true", result)
-        self.assertIn("DisconnectedTimeLimit=86400", result)
+        self.assertIn("MaxSessions=1", result)
+        self.assertIn("KillDisconnected=false", result)
+        self.assertIn("DisconnectedTimeLimit=0", result)
         self.assertIn("IdleTimeLimit=14400", result)
         self.assertIn("SessionSockdirGroup=xrdp", result)
         self.assertIn("param=/usr/local/libexec/infra-tools-xrdp-Xorg", result)
@@ -133,7 +132,7 @@ class TestGenerateXrdpIni(unittest.TestCase):
 
         rendered = _generate_xrdp_ini(config, template)
 
-        self.assertIn("address=0.0.0.0", rendered)
+        self.assertIn("address=127.0.0.1", rendered)
         self.assertIn("rdpdr=false", rendered)
         self.assertIn("rdpsnd=false", rendered)
         self.assertIn("cliprdr=true", rendered)
@@ -150,6 +149,7 @@ class TestGenerateXrdpIni(unittest.TestCase):
             username="agent",
             system_type="workstation_dev",
             rdp_bind_address="10.0.0.25",
+            enable_rdp=True,
             rdp_clipboard=False,
             rdp_drive_redirection=True,
             rdp_audio=True,
@@ -278,7 +278,7 @@ class TestValidateXrdpTlsCertificate(unittest.TestCase):
             _validate_xrdp_tls_certificate()
 
         mock_run.assert_called_once_with(
-            "systemctl stop xrdp xrdp-sesman", check=False
+            "systemctl stop xrdp", check=False
         )
 
 
@@ -295,6 +295,10 @@ class TestInstallXrdp(unittest.TestCase):
     """Test XRDP installation and configuration."""
 
     def setUp(self):
+        for name in ("assert_desktop_idle", "install_session_runtime", "_require_peer_authenticated_sesrun"):
+            runtime_patcher = patch(f"desktop.xrdp_steps.{name}")
+            self.addCleanup(runtime_patcher.stop)
+            runtime_patcher.start()
         source_patcher = patch("desktop.xrdp_steps.get_os_id", return_value="")
         self.addCleanup(source_patcher.stop)
         source_patcher.start()
@@ -346,7 +350,7 @@ class TestInstallXrdp(unittest.TestCase):
         mock_exists.return_value = True
         mock_is_active.return_value = True
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
-        package_states = iter([False] * 5 + [True] * 5)
+        package_states = iter([False] * 7 + [True] * 7)
 
         with patch('desktop.xrdp_steps.is_package_installed', side_effect=package_states):
             config = SetupConfig(
@@ -582,8 +586,9 @@ class TestInstallXrdp(unittest.TestCase):
 
         write_calls = [c for c in mock_open_func().write.call_args_list]
         combined_content = ''.join([str(c[0][0]) for c in write_calls if c[0]])
-        self.assertIn("exec startlxqt", combined_content)
-        self.assertNotIn("exec xfce4-session", combined_content)
+        self.assertIn("DefaultWindowManager=/etc/xrdp/infra-tools-startwm.sh", combined_content)
+        from desktop.session_runtime import SESSION_COMMANDS
+        self.assertEqual(SESSION_COMMANDS[config.desktop], ["startlxqt"])
         
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')
@@ -699,7 +704,8 @@ class TestHardenXrdp(unittest.TestCase):
         
         run_commands = [call.args[0] for call in mock_run.call_args_list]
         self.assertIn("getent group ssl-cert && adduser xrdp ssl-cert", run_commands)
-        self.assertIn("systemctl reload-or-restart xrdp-sesman xrdp", run_commands)
+        self.assertIn("systemctl reload-or-restart xrdp", run_commands)
+        self.assertFalse(any("xrdp-sesman" in command for command in run_commands))
 
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')
