@@ -318,10 +318,22 @@ T3 Code remained active. Application capture produced a 640×480 client-area PNG
 within the 1280×720 desktop. Human RDP reconnect/resize, cross-client clipboard,
 lock/unlock, and frontend restart still require live qualification.
 
-The productivity client also found the existing Mousepad window with a bounded
-title wait and correctly diagnosed missing wmctrl/python3-tk on this VM. The new
-window mutations and human control UI require a setup rerun and live verification;
-they have not yet passed the productivity qualification procedure in the plan.
+After setup installed wmctrl/python3-tk, the same VM passed window focus, move,
+resize, maximize, minimize/restore, normal close with an unsaved-work prompt,
+canceled-close timeout, and save/capture sequences. Default document opening
+selected Geany; parent-directory reveal opened the file manager. The handoff
+window's Pause button blocked agent mutations while application screenshots
+remained available; CLI resume restored control. The human Resume button and
+closing the handoff window while paused still need separate UI qualification.
+
+Startup inspection found XFCE's notification autostart attempting a display-less
+user service before falling back, plus PulseAudio receiving an empty X authority
+filename. Setup now launches notifyd directly in the XFCE session, and the
+supervisor declares Xlib's default ~/.Xauthority path when XAUTHORITY is unset or
+empty, preserving an explicit value. A fresh session on this VM loaded the X11
+audio integration and notification daemon without those startup errors. This
+does not enable or qualify RDP audio redirection. GUI variables remain private
+to the desktop, never imported into the global user manager.
 
 The setup logout helper subsequently logged out that running managed desktop
 successfully using the existing supervisor protocol; T3 Code remained active.

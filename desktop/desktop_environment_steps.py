@@ -1,10 +1,12 @@
 """Desktop environment setup steps."""
 
 from __future__ import annotations
+import glob
 import os
 import shlex
 
 from lib.config import SetupConfig
+from lib.validation import validate_filesystem_path
 from lib.remote_utils import (
     get_user_home,
     install_package,
@@ -71,6 +73,17 @@ def configure_xfce_for_rdp(config: SetupConfig) -> None:
     
     # Create autostart directory
     os.makedirs(autostart_dir, exist_ok=True)
+
+    # The shared desktop has a private bus/display; the global user manager
+    # deliberately has neither. Start notifications directly in this session.
+    notify_paths = sorted(glob.glob("/usr/lib/*/xfce4/notifyd/xfce4-notifyd")
+                          + glob.glob("/usr/lib/xfce4/notifyd/xfce4-notifyd"))
+    if notify_paths:
+        notifyd = notify_paths[0]
+        validate_filesystem_path(notifyd)
+        with open(f"{autostart_dir}/xfce4-notifyd.desktop", "w") as f:
+            f.write("[Desktop Entry]\nType=Application\nName=XFCE Notifications\n"
+                    f"Exec={notifyd}\nOnlyShowIn=XFCE;\nTerminal=false\n")
     
     # 1. Disable light-locker (crashes in RDP sessions without display manager)
     light_locker_desktop = f"{autostart_dir}/light-locker.desktop"

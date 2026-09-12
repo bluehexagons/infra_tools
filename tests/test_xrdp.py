@@ -763,12 +763,26 @@ class TestConfigureXfceForRdp(unittest.TestCase):
     """Test XFCE RDP compatibility configuration."""
 
     def setUp(self):
+        glob_patcher = patch("desktop.desktop_environment_steps.glob.glob", return_value=[])
+        self.glob = glob_patcher.start()
+        self.addCleanup(glob_patcher.stop)
         home_patcher = patch(
             "desktop.desktop_environment_steps.get_user_home",
             return_value="/home/testuser",
         )
         self.addCleanup(home_patcher.stop)
         home_patcher.start()
+
+    @patch('desktop.desktop_environment_steps.run')
+    @patch('desktop.desktop_environment_steps.os.makedirs')
+    @patch('desktop.desktop_environment_steps.os.path.exists', return_value=False)
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    def test_notifications_use_session_environment(self, opened, exists, makedirs, run):
+        self.glob.side_effect = [["/usr/lib/aarch64-linux-gnu/xfce4/notifyd/xfce4-notifyd"], []]
+        configure_xfce_for_rdp(SetupConfig(host="vm", username="testuser", system_type="agent_workstation"))
+        content = ''.join(call.args[0] for call in opened().write.call_args_list)
+        self.assertIn("Exec=/usr/lib/aarch64-linux-gnu/xfce4/notifyd/xfce4-notifyd", content)
+        self.assertNotIn("systemctl --user", content)
     
     @patch('desktop.desktop_environment_steps.run')
     @patch('desktop.desktop_environment_steps.os.makedirs')

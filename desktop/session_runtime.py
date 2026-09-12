@@ -473,6 +473,9 @@ def serve() -> int:
     if not re.fullmatch(r":[0-9]+(?:\.0)?", os.environ.get("DISPLAY", "")):
         raise RuntimeError("The session supervisor must be started by sesman")
     os.chdir(pwd.getpwnam(config["username"]).pw_dir)
+    # Xlib defaults to ~/.Xauthority, but clients such as PulseAudio pass an
+    # explicitly empty authority filename unless the session declares it.
+    os.environ["XAUTHORITY"] = os.environ.get("XAUTHORITY") or str(Path.home() / ".Xauthority")
     with session_lock("session.lock"):
         path = runtime_directory() / "control.sock"
         path.unlink(missing_ok=True)
