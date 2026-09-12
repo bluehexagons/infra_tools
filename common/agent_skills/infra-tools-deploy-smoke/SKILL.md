@@ -7,13 +7,16 @@ metadata:
 
 # Deployment smoke checks
 
-Use this workflow after the application and infra-tools test suites pass and
-before declaring a test deployment ready.
+Use this workflow to prepare and verify the requested test deployment. Run the
+application's required checks; run infra-tools tests when infrastructure code
+changes are part of the task.
 
 ## Preflight
 
-Keep application and infrastructure changes in their own repositories and
-confirm both checkouts are clean except for the intended commits:
+Identify the exact revision or build artifact to deploy. Inspect each checkout
+involved and preserve unrelated changes; use an isolated worktree if the build
+would otherwise include them. Keep application and infrastructure changes in
+their owning repositories:
 
 ```bash
 git status --short --branch

@@ -12,12 +12,12 @@ redacted.
 
 ## Readiness and updates
 
-Check host health and only the tools the VM is expected to provide:
+Select the relevant checks; these are alternatives, not a checklist to run in
+full. Combine capabilities and explicit tools in one invocation when needed:
 
 ```bash
 infra-tools agent doctor --capability host --json
-infra-tools agent doctor --capability development --json
-infra-tools agent doctor --tool codex --json
+infra-tools agent doctor --capability development --tool codex --json
 infra-tools agent doctor --all-capabilities --json
 ```
 
@@ -40,10 +40,13 @@ infra-tools agent doctor --last-record --json
 ```
 
 `agent update` manages Codex, Claude Code, and OpenCode. It does not update
-GitHub CLI, T3 Code, infra-tools itself, or system packages. Do not substitute a
-vendor updater unless the user requests it; the managed path verifies the tool,
-retains one prior executable, rolls back a broken update, and records redacted
-post-update readiness.
+GitHub CLI, T3 Code, infra-tools itself, managed skills, or system packages.
+Refresh managed skills by rerunning saved setup from the updated control plane;
+editing a VM's installed copy is overwritten by setup. `--last-record` reads
+saved evidence, not a fresh check; inspect its timestamp and `current_boot`.
+Do not substitute a vendor updater unless the user requests it; the managed
+path verifies the tool, retains one prior executable, rolls back a broken
+update, and records redacted post-update readiness.
 
 From a control system, add `HOST USER` to `doctor` or `update`. Run the remote
 dry run first.

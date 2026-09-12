@@ -27,6 +27,17 @@ clones or run multiple editing agents in the primary checkout.
 
 The default base is the primary checkout's current `HEAD`. Supply a specific
 verified branch or commit with `--base` when the task must start elsewhere.
+For work targeting current remote main, fetch that ref and use `--base
+origin/main`; creating a workspace does not fetch or update the primary branch.
+Uncommitted primary-checkout changes are not included in the new worktree.
+
+## Integration
+
+Commit and validate inside the returned worktree. When merging or pushing is
+requested, inspect the destination branch and integrate the task's commits
+without overwriting unrelated work. Push the intended destination explicitly
+and verify the remote result. If the remote advanced, integrate and validate
+the new changes before retrying; do not force-push to bypass divergence.
 
 ## Cleanup
 

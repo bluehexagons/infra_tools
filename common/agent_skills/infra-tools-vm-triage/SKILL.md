@@ -22,16 +22,17 @@ cover memory, swap, disk headroom, bounded agent storage, maintenance timers,
 and pending reboots. Only critical disk pressure or failed maintenance makes
 the host capability unhealthy.
 
-If the service is unhealthy, inspect its user unit and bounded recent output:
+If the T3 service is unhealthy, inspect its user unit and bounded recent output:
 
 ```bash
 systemctl --user status t3code.service --no-pager
 journalctl --user -u t3code.service -n 100 --no-pager
 ```
 
-Use `infra-tools agent doctor --capability t3code --fix` only for its documented
-safe repairs: GitHub's Git credential helper, an incomplete T3 native runtime,
-or an inactive managed T3 service.
+When repair is in scope, `infra-tools agent doctor --capability t3code --fix`
+can configure GitHub's Git credential helper, rebuild an incomplete active T3
+native runtime, enable the managed service at boot, and restart it if inactive.
+It is a mutation, not an additional read-only diagnostic.
 
 ## Support snapshot
 

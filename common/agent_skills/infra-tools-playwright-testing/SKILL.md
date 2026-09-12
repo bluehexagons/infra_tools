@@ -27,6 +27,8 @@ Proceed only when `healthy` is true. Use the stable `issues` list and primary
 `remediation` code when it is not. A missing capability or unhealthy launcher
 is a coverage gap, not permission to install another browser stack, bypass the
 managed MCP wrapper, or expose a service.
+For `stale_processes`, restart the affected agent session so it loads the
+current launcher; repeatedly probing the old process does not repair it.
 
 Playwright and its Chromium traffic originate on the VM. Keep development
 servers on loopback and use their reported URL. This is usually the best path

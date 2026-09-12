@@ -89,6 +89,22 @@ behavior. Add a base skill to `BASE_AGENT_SKILL_NAMES` in
 tuples should extend the base constant so standalone capability setup remains
 complete.
 
+The installer currently copies only `SKILL.md`; sibling `references/`,
+`scripts/`, and `agents/` files are not deployed. Keep essential commands and
+fallbacks in the entrypoint. Link optional detailed procedures to the maintained
+operator documentation with an absolute repository URL, and mention the local
+checkout path as an alternative. Do not assume the agent's application checkout
+contains infra-tools documentation. Supporting skill files require installer
+and reconciliation support before skills can depend on them.
+
+During an audit, check command examples against their parsers and implementation,
+check readiness claims against doctor results, and review all three browser
+variants together. Select diagnostics for the task instead of treating examples
+as a mandatory checklist. Keep deployment checks scoped to the repositories
+being changed and make mutation effects explicit. Platform-specific certificate
+enrollment lives in [Client CA trust](CLIENT_CA_TRUST.md), while browser skills
+retain the trust-verification boundary and fallback behavior.
+
 Validate changes with the repository tests and the Codex skill validator when
 it is available:
 

@@ -63,11 +63,14 @@ inspect client-side routes, or prove that JavaScript rendered. After updating a
 hosted site, verify at least one changed public artifact against the build:
 
 ```bash
+set -o pipefail
 published_url="$(infra-web site url NAME)"
 curl --fail --silent --show-error "${published_url}PATH" | sha256sum
 sha256sum OUTPUT/PATH
 ```
 
+Require the download pipeline to succeed before comparing hashes; `pipefail`
+keeps a failed HTTP request from being hidden by a successful `sha256sum`.
 Replace `PATH` with a non-sensitive changed file and `OUTPUT` with the detected
 build directory. Never add `-k`. A URL fragment such as `#/README.md` is used
 only by the browser and is not sent to Nginx; verify the underlying file URL or
