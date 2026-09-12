@@ -323,8 +323,14 @@ directions and disconnect/reconnect retained the session. Resizing completed
 but caused a short black screen and reconnect. Xorg recorded the size change
 before a connection drop; the desktop PID and generation remained unchanged,
 and agent screenshots matched the final 1356×912 size. This is usable with a
-resize interruption, not qualified seamless resizing. Remmina/FreeRDP versions
-and client/frontend logs are still needed to identify the disconnect cause.
+resize interruption, not qualified seamless resizing. Subsequent client logs
+identified Remmina 1.4.43 running FreeRDP 3.31.1 on CachyOS. Both native Wayland
+and an XWayland reproduction failed with `Fastpath update Cached Pointer [a]
+failed` after the resize, then automatically reconnected. The server completed
+the first recorded resize in 286 ms before the client error; server connection
+reset errors followed. This identifies the failing protocol update, not which
+peer caused the cache inconsistency. FreeRDP's cache recreation during
+reactivation is a candidate interaction, not a confirmed client regression.
 The operator's Pause button blocked an agent launch while screenshot observation
 remained available. The operator confirmed closing and reopening the control
 window preserved pause, then clicked Resume. Agent status reported unpaused and
@@ -559,6 +565,26 @@ If Xorg logs `rdpClientConInit: g_tcp_local_bind failed` and then repeats
 the user-specific directory (for example, `/run/xrdp/sockdir/1000`).
 
 ### Freeze while resizing
+
+Distribution-packaged Remmina clients are the compatibility target; an older
+client comparison is diagnostic, not a deployment requirement. Record the
+running FreeRDP version as well as Remmina's version.
+
+XRDP 0.10.6.1 does not recognize `enable_gfx=false`. Older infra-tools templates
+included that ineffective setting while claiming to force classic RDP. The
+template now documents actual negotiation: `max_bpp=32` permits GFX/H.264.
+Removing the ignored setting does not change behavior or fix the cached-pointer
+disconnect. `use_fastpath=both` and `new_cursors=true` match upstream defaults.
+
+For the cached-pointer failure recorded above, compare the same installed
+client with a 24-bit color-depth profile, reconnect, and repeat dynamic resizing.
+XRDP rejects GFX negotiation below 32 bpp, so this tests the classic path without
+changing client packages or disabling the dynamic virtual channel needed for
+resizing. Verify the negotiated pipeline in the server log. A passing comparison
+would justify further server-side compatibility work; it would not establish
+that all clients should lose GFX by default. Relevant upstream sources are the
+[XRDP negotiation code](https://github.com/neutrinolabs/xrdp/blob/v0.10.6.1/libxrdp/xrdp_sec.c)
+and [FreeRDP cache recreation change](https://github.com/FreeRDP/FreeRDP/pull/13196).
 
 Try a fixed client resolution first. If that works, resize more slowly and
 test another RDP client. Confirm that the session uses `xrdpdev`, that

@@ -28,8 +28,8 @@ key_file=/etc/xrdp/key.pem
 ; Color depth and display settings
 max_bpp=32
 
-; Use classic RDP pipeline (non-egfx) for best compatibility
-enable_gfx=false
+; Graphics pipeline is negotiated with the client. XRDP 0.10 does not
+; recognize enable_gfx; max_bpp=32 permits GFX-capable clients to use it.
 blue=009cb5
 grey=dedede
 ls_top_window_bg_color=009cb5
