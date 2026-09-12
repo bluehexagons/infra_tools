@@ -8,7 +8,9 @@ It is deliberately not a boot service and never restarts a logged-out desktop.
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime, timezone
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -193,10 +195,64 @@ def window_details(window_id: str) -> dict[str, Any]:
             raise RuntimeError("Could not inspect application window geometry")
         fields[name] = int(match[1])
     title = re.search(r'^xwininfo: Window id: \S+ "(.*)"$', value, re.MULTILINE)
-    return {"id": window_id, "title": title[1] if title else "",
+    properties = run_tool(["xprop", "-id", window_id, "_NET_WM_PID", "WM_CLASS", "_NET_WM_WINDOW_TYPE"], timeout=3)
+    pid = re.search(r"_NET_WM_PID\(CARDINAL\) = (\d+)", properties)
+    wm_class = re.search(r'^WM_CLASS\(STRING\) = (.*)$', properties, re.MULTILINE)
+    name = title[1] if title else ""
+    pid_value = int(pid[1]) if pid else None
+    class_value = wm_class[1] if wm_class else ""
+    identity = hashlib.sha256(json.dumps([window_id, pid_value, class_value, name]).encode()).hexdigest()[:24]
+    return {"id": window_id, "title": name, "pid": pid_value, "class": class_value,
+            "identity": identity,
+            "system_window": any(kind in properties for kind in ("_NET_WM_WINDOW_TYPE_DESKTOP", "_NET_WM_WINDOW_TYPE_DOCK")),
             "origin": [fields["Absolute upper-left X"], fields["Absolute upper-left Y"]],
             "geometry": [fields["Width"], fields["Height"]],
             "visible": re.search(r"Map State:\s*IsViewable", value) is not None}
+
+
+def normalize_window_id(selected: Any) -> str:
+    if not isinstance(selected, str) or not re.fullmatch(r"(?:0x[0-9a-fA-F]+|[0-9]+)", selected):
+        raise ValueError("Window ID must be decimal or hexadecimal")
+    return hex(int(selected, 16 if selected.startswith("0x") else 10))
+
+
+def change_window(payload: dict[str, Any]) -> dict[str, Any]:
+    """Request normal WM operations, never destroy an X client or its process."""
+    selected = normalize_window_id(payload.get("window"))
+    if selected not in window_ids():
+        raise ValueError("Window closed; list windows again")
+    window = window_details(selected)
+    if window["system_window"]:
+        raise ValueError("Desktop and panel windows cannot be controlled as applications")
+    if payload.get("identity") != window["identity"]:
+        raise ValueError("Window identity changed; list windows again")
+    operation = payload.get("operation")
+    if operation == "focus":
+        argv = ["wmctrl", "-ia", selected]
+    elif operation == "close":
+        argv = ["wmctrl", "-ic", selected]
+    elif operation == "minimize":
+        argv = ["xdotool", "windowminimize", selected]
+    elif operation in ("maximize", "restore"):
+        mode = "add" if operation == "maximize" else "remove"
+        argv = ["wmctrl", "-ir", selected, "-b", f"{mode},maximized_vert,maximized_horz"]
+    elif operation in ("move", "resize"):
+        width, height = geometry()
+        names = ("x", "y") if operation == "move" else ("width", "height")
+        first, second = (payload.get(name) for name in names)
+        lower = 0 if operation == "move" else 1
+        if (type(first) is not int or type(second) is not int
+                or not lower <= first <= width or not lower <= second <= height
+                or (operation == "move" and (first == width or second == height))):
+            raise ValueError("Window coordinates or dimensions are outside the desktop")
+        placement = f"0,{first},{second},-1,-1" if operation == "move" else f"0,-1,-1,{first},{second}"
+        argv = ["wmctrl", "-ir", selected, "-e", placement]
+    else:
+        raise ValueError("Unknown window operation")
+    run_tool(argv)
+    if operation == "restore":
+        run_tool(["wmctrl", "-ia", selected])
+    return {"requested": operation, "window": selected, "identity": window["identity"]}
 
 
 def capture_window(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -211,9 +267,7 @@ def capture_window(payload: dict[str, Any]) -> dict[str, Any] | None:
         selected = ids[0]
     if selected is None:
         return None
-    if not isinstance(selected, str) or not re.fullmatch(r"(?:0x[0-9a-fA-F]+|[0-9]+)", selected):
-        raise ValueError("Window ID must be decimal or hexadecimal")
-    selected = hex(int(selected, 16 if selected.startswith("0x") else 10))
+    selected = normalize_window_id(selected)
     if selected not in window_ids():
         raise ValueError("Window is no longer managed by this desktop; list windows again")
     window = window_details(selected)
@@ -233,6 +287,7 @@ class DesktopSession:
         self.lease: str | None = None
         self.lease_until = 0.0
         self.children: list[subprocess.Popen[Any]] = []
+        self.launches: dict[str, subprocess.Popen[Any]] = {}
 
     def snapshot_status(self) -> dict[str, Any]:
         state = "stopping" if self.process.poll() is not None else "starting"
@@ -252,6 +307,7 @@ class DesktopSession:
             "username": self.config["username"], "display": os.environ["DISPLAY"],
             "geometry": size, "paused": self.paused,
             "pid": self.process.pid,
+            "control_active": self.lease is not None and time.monotonic() < self.lease_until,
         }
         if detail:
             result["detail"] = detail
@@ -277,6 +333,7 @@ class DesktopSession:
             ids = window_ids()
             deadline = time.monotonic() + 10
             inspected = 0
+            incomplete = False
             for window_id in ids[:64]:
                 if time.monotonic() >= deadline:
                     break
@@ -284,8 +341,19 @@ class DesktopSession:
                 try:
                     windows.append(window_details(window_id))
                 except (RuntimeError, OSError, subprocess.SubprocessError):
+                    incomplete = True
                     continue  # A window may close while we enumerate it.
-            return {"generation": self.generation, "windows": windows, "truncated": len(ids) > inspected}
+            active = window_ids("_NET_ACTIVE_WINDOW")
+            return {"generation": self.generation, "windows": windows, "truncated": incomplete or len(ids) > inspected,
+                    "active_window": active[0] if active else None}
+        if action == "launch-status":
+            launch = payload.get("launch")
+            if not isinstance(launch, str) or launch not in self.launches:
+                raise ValueError("Unknown application launch in this session")
+            process = self.launches[launch]
+            code = process.poll()
+            return {"generation": self.generation, "launch": launch, "pid": process.pid,
+                    "state": "running" if code is None else "exited", "returncode": code}
         if action == "screenshot":
             window = capture_window(payload)
             path = payload.get("output")
@@ -324,7 +392,7 @@ class DesktopSession:
                 output.unlink(missing_ok=True)
                 raise
             return {**snapshot, "image_geometry": captured_geometry,
-                    "window": window, "output": str(output)}
+                    "window": window, "output": str(output), "captured_at": datetime.now(timezone.utc).isoformat()}
         if self.paused:
             raise RuntimeError("Agent desktop control is paused for human use")
         if action == "acquire":
@@ -338,6 +406,8 @@ class DesktopSession:
         if action == "release":
             self.lease = None
             return {"released": True}
+        if action == "window":
+            return {**change_window(payload), "generation": self.generation}
         if action == "exec":
             argv = payload.get("argv")
             if not isinstance(argv, list) or not argv or not all(isinstance(v, str) and "\0" not in v for v in argv):
@@ -351,7 +421,11 @@ class DesktopSession:
                     raise ValueError("Application working directory must be a directory")
             process = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, process_group=self.process.pid)
             self.children.append(process)
-            return {"pid": process.pid, "generation": self.generation}
+            launch = secrets.token_hex(16)
+            self.launches[launch] = process
+            while len(self.launches) > 128:
+                del self.launches[next(iter(self.launches))]
+            return {"pid": process.pid, "generation": self.generation, "launch": launch}
         if action == "logout":
             commands = {
                 "xfce": ["xfce4-session-logout", "--logout"],

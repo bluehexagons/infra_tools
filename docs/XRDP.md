@@ -181,6 +181,77 @@ integration, or a justified fallback. These browsers have separate profiles
 and authentication. The managed `infra-tools-desktop` skill provides routing
 and command guidance for Codex/OpenCode.
 
+## Native application productivity
+
+Setup installs `wmctrl` and `python3-tk` from the normal package repositories
+and adds **Shared Desktop Control** to the application menu. Rerun setup after
+logging out existing graphical sessions to install these additions. The control
+window shows agent status and offers pause/resume; closing it leaves pause in
+effect. Agents can open it with `infra-tools desktop handoff` before handing over.
+
+```bash
+infra-tools desktop doctor
+infra-tools desktop open /home/agent/document.txt
+infra-tools desktop open /home/agent/document.txt --reveal
+infra-tools desktop exec --wait-window Mousepad --timeout 15 -- mousepad
+infra-tools desktop windows
+infra-tools desktop window focus --window WINDOW --identity IDENTITY --generation GENERATION
+infra-tools desktop window resize --window WINDOW --identity IDENTITY --generation GENERATION --width 800 --height 600
+infra-tools desktop wait --window WINDOW --condition active --generation GENERATION
+infra-tools desktop screenshot --active-window
+```
+
+Use the configured account's actual document paths. `open` accepts existing local
+paths and uses `xdg-open`; application packages and file associations must exist.
+`--reveal` opens the parent directory. `exec` flags precede `-- APPLICATION`.
+Launch results include a PID and a `launch` token; inspect it using
+`desktop launch-status LAUNCH --generation GENERATION`. Records are session-local
+and limited to the latest 128 launches. Launchers can exit successfully after
+delegating to an existing process. `--wait-window` uses a literal title substring,
+reports matching windows and which IDs existed before launch, and never promises
+that a match belongs to the new process or that a document has finished loading.
+Inspect PID/class and the document; do not retry a timed-out launch blindly.
+
+Window inventory adds PID/class where available, an identity fingerprint, and
+the active window ID. Mutations require current generation and identity; title
+changes invalidate the fingerprint. It reduces stale targeting but cannot prove
+an X window ID was never reused. Available operations are focus, move, resize,
+maximize, minimize, restore, and close. Desktop/panel windows are rejected.
+`close` requests normal window-manager closure, allowing unsaved-work prompts;
+it never destroys the X client. Verify completion with a fresh observation.
+
+`wait` supports present, visible, active, and absent conditions. Window ID, title,
+and PID selectors combine with AND. Absence requires a complete inventory.
+Polling takes place outside the supervisor without holding a control lease;
+human pause remains available. Timeout defaults to 15 seconds (maximum 120),
+plus any in-flight bounded request. A timeout does not kill or relaunch the app.
+
+Screenshots without `--output` receive unique persistent paths under private
+`~/Pictures/infra-tools/` and return a capture timestamp. These files are never
+automatically removed; retain linked response artifacts and clean disposable ones.
+
+`sequence PATH --generation GENERATION` accepts a JSON list of 1–20 `input`,
+`window`, `screenshot`, or `windows` requests with their normal payload fields.
+Do not embed leases or generations. A single revocable 30-second lease prevents
+other agents from interleaving mutations; human input remains independent.
+Steps are not transactional: a failure reports partial results and releases
+control without rollback or retries. Long waits belong outside a sequence.
+For example, after observing current desktop geometry, a short save-and-capture
+file can contain:
+
+```json
+[
+  {"action": "input", "geometry": [1280, 720], "kind": "key", "key": "ctrl+s"},
+  {"action": "screenshot", "active_window": true, "output": "/tmp/save-check-1.png"}
+]
+```
+
+`doctor` reports session state, executable availability, handoff dependencies,
+and XRDP service activity. It returns nonzero for detected problems and suggests
+next steps without starting/restarting services or capturing content. Human RDP
+reconnect/resize, clipboard, and application responsiveness remain explicitly
+unverified by this check.
+
 ## Migration and recovery
 
 All desktop profiles and `local desktop` use this stack. An explicit `--desktop`
@@ -239,6 +310,11 @@ screenshots during pause, and normal logout followed by a new session generation
 T3 Code remained active. Application capture produced a 640×480 client-area PNG
 within the 1280×720 desktop. Human RDP reconnect/resize, cross-client clipboard,
 lock/unlock, and frontend restart still require live qualification.
+
+The productivity client also found the existing Mousepad window with a bounded
+title wait and correctly diagnosed missing wmctrl/python3-tk on this VM. The new
+window mutations and human control UI require a setup rerun and live verification;
+they have not yet passed the productivity qualification procedure in the plan.
 
 The implementation has mocked lifecycle/setup tests. End-to-end qualification
 is still required on a disposable Debian VM with standard emulated graphics;

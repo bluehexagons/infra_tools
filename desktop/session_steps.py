@@ -12,7 +12,7 @@ from desktop.session_runtime import CONFIG_PATH, SESSION_COMMANDS
 from lib.atomic_io import write_text_atomic
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_system_services
-from lib.remote_utils import is_dry_run, run
+from lib.remote_utils import install_package, is_dry_run, run
 from lib.validation import validate_filesystem_path
 from lib.validators import validate_username
 
@@ -22,6 +22,8 @@ DISPLAY_MANAGER_ALIAS = Path("/etc/systemd/system/display-manager.service")
 SESMAN_VENDOR_UNIT = Path("/usr/lib/systemd/system/xrdp-sesman.service")
 SESMAN_UNIT = Path("/etc/systemd/system/xrdp-sesman.service")
 SESMAN_MARKER = "# Managed by infra-tools shared desktop setup\n"
+HANDOFF_LAUNCHER = "/usr/local/bin/infra-tools-desktop-control"
+HANDOFF_ENTRY = "/usr/share/applications/infra-tools-desktop-control.desktop"
 
 
 def configure_session_service() -> None:
@@ -123,6 +125,9 @@ def install_session_runtime(config: SetupConfig) -> None:
     account = pwd.getpwnam(config.username)
     if account.pw_uid == 0:
         raise ValueError("The desktop cannot run as root")
+    for package in ("wmctrl", "python3-tk"):
+        if not install_package(package, package, ["apt-get", "install", "-y", "-qq", "--no-install-recommends", package]):
+            raise RuntimeError(f"Desktop productivity tools require {package}")
     configure_session_service()
     source = str(Path(__file__).resolve().parents[1])
     validate_filesystem_path(source, must_exist=True)
@@ -160,6 +165,12 @@ def install_session_runtime(config: SetupConfig) -> None:
         "exec dbus-run-session -- /usr/bin/python3 -m desktop.session_runtime\n"
     )
     write_text_atomic(STARTWM, script, mode=0o755)
+    write_text_atomic(HANDOFF_LAUNCHER,
+                      "#!/bin/sh\nexec /usr/bin/python3 " + shlex.quote(source + "/desktop/handoff.py") + "\n", mode=0o755)
+    write_text_atomic(HANDOFF_ENTRY,
+                      "[Desktop Entry]\nType=Application\nName=Shared Desktop Control\n"
+                      "Comment=Pause or resume agent input in the shared desktop\n"
+                      f"Exec={HANDOFF_LAUNCHER}\nIcon=input-mouse\nTerminal=false\nCategories=System;\n", mode=0o644)
     run(["loginctl", "enable-linger", config.username])
     run(["systemctl", "start", f"user@{account.pw_uid}.service"])
     from common.agent_steps import install_agent_cli_launcher, install_managed_agent_skills

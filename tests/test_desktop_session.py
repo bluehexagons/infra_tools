@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from desktop import session_runtime as runtime
+from desktop import client
 from desktop.session_steps import assert_desktop_idle, configure_session_service, install_session_runtime, prepare_shared_desktop
 from lib.config import SetupConfig
 from lib.arg_parser import create_setup_argument_parser
@@ -80,6 +81,24 @@ class DesktopControlTests(unittest.TestCase):
             self.session.handle({"action": "exec", **self.acquire(),
                                  "argv": ["editor", "relative.txt"], "cwd": directory})
             self.assertEqual(popen.call_args.kwargs["cwd"], directory)
+
+    @patch.object(runtime.subprocess, "Popen")
+    def test_launch_exit_status_remains_observable_during_pause(self, popen):
+        popen.return_value.pid = 42
+        popen.return_value.poll.return_value = 7
+        result = self.session.handle({"action": "exec", **self.acquire(), "argv": ["editor"]})
+        self.session.handle({"action": "pause"})
+        observed = self.session.handle({"action": "launch-status", "generation": self.session.generation,
+                                        "launch": result["launch"]})
+        self.assertEqual(observed["returncode"], 7)
+        self.assertEqual(observed["state"], "exited")
+
+    @patch.object(runtime, "window_ids", side_effect=[["0x123"], []])
+    @patch.object(runtime, "window_details", side_effect=RuntimeError("inspection failed"))
+    def test_failed_window_inspection_marks_inventory_incomplete(self, details, ids):
+        observed = self.session.handle({"action": "windows", "generation": self.session.generation})
+        self.assertTrue(observed["truncated"])
+        self.assertEqual(observed["windows"], [])
 
     @patch.object(runtime.subprocess, "Popen")
     def test_invalid_application_directory_does_not_launch(self, popen):
@@ -247,6 +266,115 @@ xwininfo: Window id: 0x123 "Editor"
         self.process.terminate.assert_not_called()
 
 
+class DesktopProductivityTests(unittest.TestCase):
+    @patch.object(runtime, "status", return_value={"state": "stopped"})
+    @patch.object(runtime, "runtime_directory", return_value=Path("/private/runtime"))
+    @patch.object(client.shutil, "which", return_value=None)
+    @patch.object(client.importlib.util, "find_spec", return_value=None)
+    @patch.object(client.subprocess, "run", return_value=Mock(stdout="active\n"))
+    @patch.object(runtime, "start")
+    def test_doctor_reports_missing_tools_without_starting_or_repairing(self, start, run, spec, which, directory, status):
+        result = client.doctor()
+        self.assertFalse(result["healthy"])
+        self.assertIn("python3-tk", result["suggestions"][0])
+        self.assertEqual([call.args[0] for call in run.call_args_list],
+                         [["systemctl", "is-active", "xrdp"], ["systemctl", "is-active", "xrdp-sesman"]])
+        start.assert_not_called()
+
+    @patch.object(runtime, "window_ids", return_value=["0x123"])
+    @patch.object(runtime, "window_details", return_value={"identity": "fresh", "system_window": False})
+    @patch.object(runtime, "run_tool")
+    def test_window_changes_reject_stale_identity_and_use_normal_close(self, tool, details, ids):
+        payload = {"window": "0x123", "identity": "stale", "operation": "close"}
+        with self.assertRaisesRegex(ValueError, "identity changed"):
+            runtime.change_window(payload)
+        tool.assert_not_called()
+        payload["identity"] = "fresh"
+        self.assertEqual(runtime.change_window(payload)["requested"], "close")
+        tool.assert_called_once_with(["wmctrl", "-ic", "0x123"])
+        tool.reset_mock()
+        details.return_value["system_window"] = True
+        with self.assertRaisesRegex(ValueError, "panel"):
+            runtime.change_window(payload)
+        tool.assert_not_called()
+
+    @patch.object(runtime, "window_ids", return_value=["0x123"])
+    @patch.object(runtime, "window_details", return_value={"identity": "fresh", "system_window": False})
+    @patch.object(runtime, "geometry", return_value=[1280, 720])
+    @patch.object(runtime, "run_tool")
+    def test_invalid_placement_never_moves_window(self, tool, geometry, details, ids):
+        for x in (-1, True, 1280):
+            with self.subTest(x=x), self.assertRaisesRegex(ValueError, "outside"):
+                runtime.change_window({"window": "0x123", "identity": "fresh", "operation": "move", "x": x, "y": 0})
+        tool.assert_not_called()
+
+    @patch.object(client.time, "sleep")
+    @patch.object(runtime, "request", side_effect=[
+        {"generation": "g", "windows": [], "truncated": True},
+        {"generation": "g", "windows": [], "truncated": False}])
+    def test_absence_wait_requires_complete_inventory_without_control(self, request, sleep):
+        self.assertEqual(client.wait_for_window("g", window="0x123", condition="absent")["windows"], [])
+        self.assertEqual([call.args[0]["action"] for call in request.call_args_list], ["windows", "windows"])
+        sleep.assert_called_once()
+
+    @patch.object(runtime, "request", return_value={"generation": "new", "windows": []})
+    def test_wait_aborts_when_session_changes(self, request):
+        with self.assertRaisesRegex(RuntimeError, "session changed"):
+            client.wait_for_window("old", title="Editor")
+
+    @patch.object(runtime, "request", return_value={"returncode": 7})
+    def test_failed_launch_is_reported_without_relaunching(self, request):
+        with self.assertRaisesRegex(RuntimeError, "code 7"):
+            client.wait_for_window("g", title="Editor", launch="launch")
+        request.assert_called_once_with({"action": "launch-status", "generation": "g", "launch": "launch"})
+
+    @patch.object(client.time, "monotonic", side_effect=[0, 2])
+    @patch.object(runtime, "request", return_value={"generation": "g", "windows": [{"id": "0x123", "title": "unsaved"}]})
+    def test_canceled_close_times_out_instead_of_claiming_success(self, request, clock):
+        with self.assertRaisesRegex(RuntimeError, "Timed out"):
+            client.wait_for_window("g", window="0x123", condition="absent", timeout=1)
+
+    @patch.object(runtime, "request", side_effect=[{"lease": "l"}, {"ok": True}, RuntimeError("paused"), {}])
+    def test_sequence_releases_control_and_reports_partial_completion(self, request):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "steps.json"
+            path.write_text(json.dumps([{"action": "windows"}, {"action": "input"}]))
+            result = client.run_sequence(str(path), "g")
+        self.assertEqual(result["completed"], 1)
+        self.assertEqual(result["error"], "paused")
+        self.assertEqual(request.call_args.args[0], {"action": "release", "generation": "g", "lease": "l"})
+
+    @patch.object(runtime, "request")
+    def test_sequence_rejects_embedded_control_before_acquiring(self, request):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "steps.json"
+            path.write_text('[{"action":"input","lease":"other"}]')
+            with self.assertRaisesRegex(ValueError, "embedded"):
+                client.run_sequence(str(path), "g")
+        request.assert_not_called()
+
+    def test_capture_artifact_paths_are_private_unique_and_reject_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(client.Path, "home", return_value=Path(directory)):
+            first, second = Path(client.artifact_path()), Path(client.artifact_path())
+            self.assertNotEqual(first, second)
+            self.assertEqual(first.parent.stat().st_mode & 0o777, 0o700)
+            first.parent.rmdir()
+            first.parent.symlink_to(Path(directory), target_is_directory=True)
+            with self.assertRaisesRegex(RuntimeError, "owned by you"):
+                client.artifact_path()
+
+    @patch.object(runtime, "status", return_value={"state": "running", "generation": "g"})
+    @patch.object(runtime, "request")
+    def test_invalid_launch_wait_does_not_start_an_application(self, request, status):
+        parser = argparse.ArgumentParser()
+        add_desktop_subparser(parser.add_subparsers())
+        for title in ("", "x" * 513):
+            args = parser.parse_args(["desktop", "exec", "--wait-window", title, "--", "editor"])
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(run_desktop_command(args), 1)
+        request.assert_not_called()
+
+
 class DesktopStartTests(unittest.TestCase):
     @patch.object(runtime, "configuration")
     @patch.object(runtime, "session_lock")
@@ -317,7 +445,10 @@ class DesktopMigrationTests(unittest.TestCase):
             wrapper = Path(directory) / "startwm.sh"
             config = SetupConfig(host="vm", username="agent", system_type="agent_vm", agent_tools=["codex"])
             with patch("desktop.session_steps.CONFIG_PATH", declaration), patch("desktop.session_steps.STARTWM", str(wrapper)), \
-                    patch("desktop.session_steps.configure_session_service"):
+                    patch("desktop.session_steps.configure_session_service"), \
+                    patch("desktop.session_steps.install_package", return_value=True), \
+                    patch("desktop.session_steps.HANDOFF_LAUNCHER", str(Path(directory) / "control")), \
+                    patch("desktop.session_steps.HANDOFF_ENTRY", str(Path(directory) / "control.desktop")):
                 install_session_runtime(config)
                 first = declaration.read_text()
                 self.assertIn("export XDG_CURRENT_DESKTOP=XFCE\n", wrapper.read_text())
@@ -474,6 +605,23 @@ class DesktopSupervisorTests(unittest.TestCase):
 
 
 class DesktopCliTests(unittest.TestCase):
+    @patch.object(runtime, "status", return_value={"state": "running", "generation": "g"})
+    @patch.object(runtime, "request", side_effect=[{"windows": []}, {"lease": "l"},
+                                                 {"pid": 42, "launch": "token", "generation": "g"}, {}])
+    @patch.object(client, "wait_for_window", side_effect=RuntimeError("Timed out"))
+    def test_launch_wait_failure_preserves_pid_and_releases_control(self, wait, request, status):
+        parser = argparse.ArgumentParser()
+        add_desktop_subparser(parser.add_subparsers())
+        args = parser.parse_args(["desktop", "exec", "--wait-window", "Editor", "--", "editor"])
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(run_desktop_command(args), 1)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["launch"], "token")
+        self.assertEqual(result["pid"], 42)
+        self.assertEqual(result["error"], "Timed out")
+        self.assertEqual(request.call_args.args[0]["action"], "release")
+
     @patch.object(runtime, "status", return_value={"state": "running", "generation": "current"})
     @patch.object(runtime, "request", return_value={"output": "/tmp/app.png"})
     def test_window_screenshot_routes_without_acquiring_control(self, request, status):

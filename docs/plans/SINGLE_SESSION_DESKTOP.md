@@ -28,9 +28,9 @@ concurrent coding agents remain possible. Infra-tools does not support
 creating additional managed graphical sessions. It does not attempt to
 prevent an administrator from manually launching an unrelated X server.
 
-## Current implementation and resulting changes
+## Original implementation and planned changes
 
-| Current behavior | Required change |
+| Original behavior before this project | Required change |
 | --- | --- |
 | `desktop/xrdp_steps.py` lets XRDP sesman create Xorg/xorgxrdp desktops; `MaxSessions` defaults to ten. | A single lifecycle owner creates the desktop; remote access attaches to it. Setting `MaxSessions=1` alone is insufficient. |
 | `desktop/config/xrdp_xsession.template` starts the desktop and D-Bus from RDP login. | Move transport-independent startup and teardown into the shared session implementation. |
@@ -333,3 +333,50 @@ applications, disconnect preserves it, logout ends it without recreation,
 and legacy session creation/configuration paths have been removed after a
 tested migration. Multi-user desktops, persistent GUI processes across
 reboots, and GPU passthrough are outside this project.
+
+## Productivity refinements — 2026-09-12
+
+The first productivity milestone builds on the shared XRDP runtime. CLI,
+operator documentation and managed skills evolve together. The preference for
+suitable shell/API tools and T3/Playwright browser testing remains unchanged.
+
+| Refinement | Delivered scope and follow-on work |
+| --- | --- |
+| Window management | Focus/move/resize/maximize/minimize/restore and normal close, requiring generation and current window identity. Desktop/panel windows are excluded. Title/PID/class/X-ID fingerprints reduce stale targeting but cannot guarantee against ID reuse. |
+| Semantic accessibility | Deferred: prototype bounded read-only AT-SPI role/name/state trees first; qualify GTK, Qt and office applications independently. Omit password values and cap depth, nodes and time. Add semantic actions only after identity, pause and verification contracts work. |
+| Readiness waits | Present/visible/active/absent polling outside the supervisor and lease. Incomplete inventories cannot establish absence. Document/export readiness needs application adapters. |
+| Launch results | Session-local launch token, PID, running/exited state, optional title wait and pre-existing window detection. Retain latest 128 records. Title matches do not prove process ownership or document readiness. |
+| Visible human handoff | Application-menu control window with status and pause/resume; closing preserves pause. Permanent tray indicator and optional task labels deferred pending desktop-specific qualification. |
+| Screenshot artifacts | Unique default paths in private Pictures/infra-tools storage, timestamps, window metadata and response-sharing guidance. Region selection, annotations and opt-in recordings deferred; retain original evidence alongside future annotations. |
+| Coordinated sequences | 1–20 JSON actions under one revocable 30-second lease, partial results and release attempts on failure. No rollback, automatic retries or lease extension; slow waits stay outside sequences. |
+| Diagnostics | Read-only doctor checks session, executables, handoff dependency and XRDP services. No automatic repairs or content capture. Human transport behavior remains unverified. |
+| Document workflows | Open existing local documents using default applications and reveal their parent directory. Future export adapters must verify output content and canceled dialogs; prefer domain CLIs when suitable. |
+| Repeatable qualification | Operator smoke matrix retained and expanded below. Automated opt-in disposable-VM harness and broader desktop/client matrix remain open. |
+
+Setup adds wmctrl and python3-tk from normal distribution repositories and the
+human control menu entry. Existing VMs need a session-free setup rerun for new
+dependencies and the updated supervisor. Do not mix old and new runtime behavior
+by replacing only parts of an active session.
+
+Productivity qualification, using disposable documents and windows:
+
+1. Run doctor before/after setup; missing dependencies must be reported without
+   starting a session. Start explicitly; record generation and geometry.
+2. Launch an editor, wait for visibility, compare PID/class/title and inspect
+   launch status. Repeat with an application that reuses its existing process.
+3. Exercise window operations and capture its client area. Rename its document;
+   the previous identity must be rejected. Do not target unrelated windows.
+4. Enter unsaved text, close normally, cancel the prompt and verify absence wait
+   times out. Save and close, then observe absence.
+5. Pause through Shared Desktop Control; verify mutation rejection and continued
+   screenshots. Resume through its human button. Closing while paused must not
+   resume agents.
+6. Run successful and deliberately failing short sequences; verify partial
+   results and released control. Human takeover between steps revokes mutations.
+7. Open/reveal a local document and share an inspected application PNG in an
+   agent response. Retain the linked artifact outside Git.
+
+Mocked regressions cover stale targeting, normal close, canceled-close timeout,
+incomplete inventory, launch failure, sequence release and artifact privacy.
+The operator guide records live evidence separately. Human RDP reconnect/resize
+and broader client qualification remain release gates, regardless of unit results.

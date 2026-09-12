@@ -49,6 +49,22 @@ Do not guess `DISPLAY`, copy authority cookies,
 start a second X server, or import GUI variables into the global user manager.
 Output is JSON; failures return a nonzero exit code and an `error` field.
 
+Use `desktop open /absolute/document` to use its default native application,
+or add `--reveal` to open the parent directory. For launch readiness:
+
+```bash
+infra-tools desktop exec --wait-window Mousepad --timeout 15 -- mousepad
+infra-tools desktop wait --title Mousepad --condition visible --timeout 15
+infra-tools desktop launch-status LAUNCH --generation GENERATION
+```
+
+Launch results include a session-local `launch` token and PID. Only the latest
+128 launches are tracked. A title match can be an existing application window;
+inspect returned PID/class and `existing_window_ids` before acting. A running
+process or visible window does not prove document readiness. A launcher may exit
+successfully after asking an existing process to open a document. On timeout,
+inspect before retrying; never automatically launch a duplicate application.
+
 ## Observe, act, verify
 
 Capture a new private PNG (existing files are never overwritten), then inspect
@@ -57,6 +73,10 @@ it using your available image viewer:
 ```bash
 infra-tools desktop screenshot --output /tmp/desktop-check-1.png
 ```
+
+Omit `--output` to retain a unique capture in private `~/Pictures/infra-tools/`.
+The response includes its absolute path and `captured_at` timestamp. No automatic
+cleanup removes response artifacts; delete disposable captures yourself.
 
 Prefer an application screenshot when the result concerns one application:
 
@@ -104,6 +124,40 @@ session or geometry errors require a fresh screenshot; never retry old clicks.
 Desktop automation provides pixels and input, not DOM/network assertions.
 Delete disposable captures when finished; retain screenshots linked in responses.
 
+## Window operations and short sequences
+
+`windows` returns PID/class when available, active window, and an `identity`.
+Use the current identity and generation to target an application:
+
+```bash
+infra-tools desktop window focus --window WINDOW --identity IDENTITY --generation GENERATION
+infra-tools desktop window resize --window WINDOW --identity IDENTITY --generation GENERATION --width 800 --height 600
+infra-tools desktop wait --window WINDOW --generation GENERATION --condition active
+```
+
+Other operations are `move --x X --y Y`, `maximize`, `minimize`, `restore`, and
+`close`. Title changes invalidate the identity; list again. Desktop and panel
+windows are excluded from these mutations. This fingerprint reduces stale
+targeting but cannot guarantee an X window ID has never been reused.
+Operations report requests, not completion: verify their result. `close` asks
+the window manager to close normally; an unsaved-work dialog can cancel it.
+Use `wait --condition absent` afterward, and inspect dialogs on timeout.
+Wait selectors combine window ID, literal title substring, and PID with AND.
+Waits release control between observations and remain usable during human pause.
+
+For a brief, already-observed interaction, `desktop sequence /absolute/steps.json
+--generation GENERATION` accepts 1–20 JSON action objects (`input`, `window`,
+`screenshot`, `windows`), using the same fields as the underlying operations.
+Omit generation/lease inside steps; one revocable 30-second lease covers them.
+Input requires current full-desktop geometry, window actions require identity,
+and screenshots require an explicit new output path. Errors report the completed
+prefix and release control; there is no rollback, lease renewal, or automatic
+retry. Keep waits and slow application work outside sequences.
+
+Run `desktop doctor` for session, dependency and XRDP service diagnostics. It
+does not start or restart anything and does not capture user content. A healthy
+report does not qualify RDP reconnect, clipboard, or application responsiveness.
+
 ## Human handoff and logout
 
 Before the human takes control, run `infra-tools desktop control pause`. This
@@ -111,6 +165,12 @@ revokes agent control while preserving screenshots and human RDP input. Resume
 with `infra-tools desktop control resume` when the human hands control back.
 Agents must honor pause; it coordinates same-account tools rather than isolating
 untrusted code. Ordinary RDP input does not automatically pause agent input.
+
+The human can open **Shared Desktop Control** from the application menu to see
+control status and pause/resume agents. `desktop handoff` opens the same window
+while agent control is enabled. Closing it does not resume paused agents; its
+buttons remain available during pause. It is a control window, not an automatic
+mouse-activity detector or permanent tray indicator.
 
 The human connects with their RDP client using the setup account's Unix password.
 They can disconnect and reconnect without ending applications. An SSH tunnel
