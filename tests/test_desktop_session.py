@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 
 from desktop import session_runtime as runtime
 from desktop import client
+from desktop import setup_logout
 from desktop.session_steps import assert_desktop_idle, configure_session_service, install_session_runtime, prepare_shared_desktop
 from lib.config import SetupConfig
 from lib.arg_parser import create_setup_argument_parser
@@ -429,9 +430,28 @@ class DesktopStartTests(unittest.TestCase):
 
 class DesktopMigrationTests(unittest.TestCase):
     def setUp(self):
+        logout = patch("desktop.session_steps.logout_managed_desktop", return_value=False)
+        self.logout = logout.start()
+        self.addCleanup(logout.stop)
         capability = patch("desktop.session_steps.can_manage_system_services", return_value=True)
         self.capability = capability.start()
         self.addCleanup(capability.stop)
+
+    @patch("desktop.session_steps.is_dry_run", return_value=False)
+    @patch("desktop.session_steps.time.sleep")
+    @patch("desktop.session_steps._assert_no_graphical_sessions", side_effect=[RuntimeError("teardown"), None])
+    def test_setup_waits_for_logind_after_managed_logout(self, idle, sleep, dry):
+        self.logout.return_value = True
+        assert_desktop_idle(SetupConfig(host="vm", username="agent", system_type="agent_vm"))
+        self.logout.assert_called_once()
+        self.assertEqual(idle.call_count, 2)
+
+    @patch("desktop.session_steps.is_dry_run", return_value=True)
+    @patch("desktop.session_steps.run")
+    def test_dry_run_never_logs_out(self, run, dry):
+        assert_desktop_idle(SetupConfig(host="vm", username="agent", system_type="agent_vm"))
+        self.logout.assert_not_called()
+        run.assert_not_called()
 
     @patch("common.agent_steps.install_managed_agent_skills")
     @patch("common.agent_steps.install_agent_cli_launcher")
@@ -509,6 +529,46 @@ class DesktopMigrationTests(unittest.TestCase):
             assert_desktop_idle(config)
         run.assert_not_called()
         self.capability.assert_called_once_with("oci")
+
+
+class DesktopSetupLogoutTests(unittest.TestCase):
+    def setUp(self):
+        for patcher in (patch.object(runtime, "configuration"), patch.object(runtime, "session_lock"),
+                        patch.object(setup_logout.Path, "exists", return_value=True),
+                        patch.object(setup_logout.time, "sleep")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    @patch.object(runtime, "status", side_effect=[{"state": "running", "generation": "g", "paused": True},
+                                                 {"state": "stopping", "generation": "g"}, {"state": "stopped"}])
+    @patch.object(runtime, "request", return_value={"generation": "g", "lease": "l"})
+    def test_paused_session_logs_out_once_and_waits(self, request, status):
+        self.assertTrue(setup_logout.logout_for_setup())
+        actions = [call.args[0]["action"] for call in request.call_args_list]
+        self.assertEqual(actions, ["pause", "resume", "acquire", "logout", "release", "pause"])
+        self.assertEqual(status.call_count, 3)
+
+    @patch.object(runtime, "status", return_value={"state": "stopped"})
+    @patch.object(runtime, "request")
+    def test_stopped_desktop_is_not_started(self, request, status):
+        self.assertFalse(setup_logout.logout_for_setup())
+        request.assert_not_called()
+
+    @patch.object(setup_logout.time, "monotonic", side_effect=[0, 61])
+    @patch.object(runtime, "status", return_value={"state": "running", "generation": "g"})
+    @patch.object(runtime, "request", return_value={"generation": "g", "lease": "l"})
+    def test_canceled_logout_stops_setup_and_leaves_control_paused(self, request, status, clock):
+        with self.assertRaisesRegex(RuntimeError, "did not finish"):
+            setup_logout.logout_for_setup()
+        self.assertEqual(request.call_args.args[0], {"action": "pause"})
+
+    @patch.object(runtime, "status", side_effect=[{"state": "stopping", "generation": "g"},
+                                                 {"state": "running", "generation": "new"}])
+    @patch.object(runtime, "request")
+    def test_reconnect_does_not_log_out_replacement_session(self, request, status):
+        with self.assertRaisesRegex(RuntimeError, "restarted"):
+            setup_logout.logout_for_setup()
+        request.assert_not_called()
 
 
 class DesktopServiceTests(unittest.TestCase):

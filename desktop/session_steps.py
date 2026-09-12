@@ -7,6 +7,7 @@ from pathlib import Path
 import pwd
 import re
 import shlex
+import time
 
 from desktop.session_runtime import CONFIG_PATH, SESSION_COMMANDS
 from lib.atomic_io import write_text_atomic
@@ -65,7 +66,7 @@ def configure_session_service() -> None:
 
 
 def assert_desktop_idle(config: SetupConfig) -> None:
-    """Refuse disruptive setup while any user graphical session exists."""
+    """Log out the managed desktop, then require all graphical sessions idle."""
     if config.desktop not in SESSION_COMMANDS:
         raise ValueError("Unsupported shared desktop environment")
     if not validate_username(config.username) or config.username == "root":
@@ -75,8 +76,35 @@ def assert_desktop_idle(config: SetupConfig) -> None:
     if config.harden_user:
         raise ValueError("Shared desktops require user services and cannot use --harden-user")
     if is_dry_run():
-        print("  [DRY-RUN] Would require graphical sessions to be logged out before desktop changes")
+        print("  [DRY-RUN] Would log out the managed desktop and verify graphical sessions are stopped")
         return
+    logged_out = logout_managed_desktop(config)
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            _assert_no_graphical_sessions()
+            return
+        except RuntimeError:
+            if not logged_out or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)  # sesman/logind may briefly outlive the control socket.
+
+
+def logout_managed_desktop(config: SetupConfig) -> bool:
+    """Run the owner-authenticated logout client from the staged setup source."""
+    if not CONFIG_PATH.exists():
+        return False
+    helper = Path(__file__).with_name("setup_logout.py").resolve()
+    validate_filesystem_path(str(helper), must_exist=True)
+    print("  Logging out the shared desktop before setup (waiting for normal logout)...", flush=True)
+    result = run(["runuser", "-u", config.username, "--", "/usr/bin/python3", str(helper)],
+                 capture_output=True, check=False, timeout=240)
+    if result.returncode:
+        raise RuntimeError(f"Desktop setup logout failed: {result.stderr.strip()}")
+    return json.loads(result.stdout)["logged_out"] is True
+
+
+def _assert_no_graphical_sessions() -> None:
     sessions = run(["loginctl", "list-sessions", "--no-legend"], capture_output=True)
     for line in sessions.stdout.splitlines():
         if not line.strip():

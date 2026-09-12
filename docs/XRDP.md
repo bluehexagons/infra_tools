@@ -184,8 +184,8 @@ and command guidance for Codex/OpenCode.
 ## Native application productivity
 
 Setup installs `wmctrl` and `python3-tk` from the normal package repositories
-and adds **Shared Desktop Control** to the application menu. Rerun setup after
-logging out existing graphical sessions to install these additions. The control
+and adds **Shared Desktop Control** to the application menu. Rerun setup to
+install these additions; setup handles managed desktop logout. The control
 window shows agent status and offers pause/resume; closing it leaves pause in
 effect. Agents can open it with `infra-tools desktop handoff` before handing over.
 
@@ -259,10 +259,17 @@ or `--rdp` enables it on server/agent profiles; `agent_vm` remains headless by
 default. `--no-rdp` retains a desktop profile's loopback listener. Omitting
 desktop capability on a later headless setup is not a desktop uninstaller.
 
-Run conversion from SSH or a text console after logging out every graphical
-session. Full setup checks before package upgrades and desktop steps check again
-before cutover. Active X11/Wayland or XRDP sessions defer setup without forced
-logout. The setup masks GDM, LightDM, SDDM, LXDM and XDM plus the systemd display
+Run setup from SSH or a text console when desktop work is saved. Before package
+upgrades, setup automatically requests normal logout of the configured account's
+managed desktop, including a paused desktop, and waits up to 60 seconds plus
+in-flight request time. It then allows up to 10 seconds for logind/sesman cleanup.
+No separate logout command or confirmation is required. A canceled logout stops
+setup and leaves agent input paused; no applications are force-killed. Disable
+RDP automatic reconnect during setup. A replacement generation aborts the logout
+wait, and desktop steps recheck idle state before cutover. Unmanaged/legacy
+X11/Wayland or XRDP sessions still require manual logout. Setup leaves the desktop
+stopped until the next explicit start or authenticated RDP login.
+The setup masks GDM, LightDM, SDDM, LXDM and XDM plus the systemd display
 manager alias, so graphical console login cannot create a second desktop.
 The VM/hardware console becomes a text/recovery surface; direct physical-console
 GUI attachment is not provided. Existing application packages and home data stay.
@@ -316,6 +323,9 @@ title wait and correctly diagnosed missing wmctrl/python3-tk on this VM. The new
 window mutations and human control UI require a setup rerun and live verification;
 they have not yet passed the productivity qualification procedure in the plan.
 
+The setup logout helper subsequently logged out that running managed desktop
+successfully using the existing supervisor protocol; T3 Code remained active.
+
 The implementation has mocked lifecycle/setup tests. End-to-end qualification
 is still required on a disposable Debian VM with standard emulated graphics;
 the development workspace cannot perform root setup. Record package versions,
@@ -331,7 +341,7 @@ client name/version, application PID, display, and generation for each check:
    tmux and T3 services survive and a later start has a new generation.
 5. Restart only the XRDP frontend, test network loss and a desktop crash, then
    reboot. Verify the documented persistence and explicit-start boundaries.
-6. Test conversion with active sessions (must defer), idle conversion, rerun,
+6. Test managed-session automatic logout, active legacy sessions (must defer), idle conversion, rerun,
    interrupted setup and administrator rollback. Repeat for each claimed desktop.
 
 Do not treat mocked success as evidence of live resize, keyring, lock/unlock,

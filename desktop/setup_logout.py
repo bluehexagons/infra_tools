@@ -1,0 +1,62 @@
+"""Request normal logout as the desktop owner before setup changes packages."""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+from pathlib import Path
+import sys
+import time
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from desktop import session_runtime as runtime
+
+
+def logout_for_setup() -> bool:
+    """Handle existing supervisors without requiring a protocol upgrade first."""
+    runtime.configuration()
+    # A never-started owner may not yet have a logind runtime directory.
+    if not Path(f"/run/user/{os.getuid()}").exists():
+        return False
+    with runtime.session_lock("start.lock"):
+        current = runtime.status()
+        if current["state"] == "stopped":
+            return False
+        generation = current["generation"]
+        if current["state"] == "running":
+            lease = None
+            try:
+                # Setup is an explicit maintenance handoff, including when paused.
+                runtime.request({"action": "pause"})
+                runtime.request({"action": "resume"})
+                lease = runtime.request({"action": "acquire", "generation": generation})
+                runtime.request({"action": "logout", **lease})
+            finally:
+                if lease is not None:
+                    with contextlib.suppress(OSError, RuntimeError, ValueError):
+                        runtime.request({"action": "release", **lease})
+                # Keep automation paused during logout or a canceled dialog.
+                with contextlib.suppress(OSError, RuntimeError, ValueError):
+                    runtime.request({"action": "pause"})
+        elif current["state"] != "stopping":
+            raise RuntimeError("Desktop is starting; wait for readiness and rerun setup")
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            current = runtime.status()
+            if current["state"] == "stopped":
+                return True
+            if current.get("generation") != generation:
+                raise RuntimeError("Desktop restarted during setup logout; disconnect automatic RDP reconnect and rerun setup")
+            time.sleep(0.25)
+        raise RuntimeError("Desktop logout did not finish within 60 seconds; dismiss any logout dialog and rerun setup. Agent input remains paused")
+
+
+if __name__ == "__main__":
+    try:
+        print(json.dumps({"logged_out": logout_for_setup()}))
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1)

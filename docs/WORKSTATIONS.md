@@ -17,8 +17,9 @@ rm -f "$HOME/.infra_tools-install.sh"
 
 This keeps the graphical workstation setup while adding the SSH, rsync,
 diagnostic, terminal, and package-management tools used to administer other
-VMs and containers. Run it from SSH or a text console after logging out existing
-graphical sessions. It converts graphical access to one shared XRDP desktop;
+VMs and containers. Run it from SSH or a text console with desktop work saved.
+Setup logs out an existing managed desktop automatically; legacy graphical
+sessions require manual logout. It converts access to one shared XRDP desktop;
 console graphical logins are disabled and the existing account password is reused.
 Select only the agents needed with repeatable
 `--agent-tool` flags; language runtimes remain separate explicit options.

@@ -266,8 +266,11 @@ Back up managed configuration and package state before cutover. Rollback
 restores the previous configuration/access stack, not unsaved GUI processes.
 Do not force logout for an automatic rollback after users have begun working
 in the new session. Keep deployment markers sufficient to resume a failed
-cutover. Ordinary reruns and maintenance must not restart an active desktop;
-defer disruptive display/package changes to a session-free maintenance window.
+cutover. Explicit setup reruns now request normal managed-desktop logout before
+package changes, per the operator decision on 2026-09-12. Run setup with work
+saved; canceled logout aborts setup without force-killing applications. Automatic
+maintenance retains its separate policy. Legacy sessions still require manual
+logout. Setup leaves the desktop stopped until explicitly started again.
 
 ## Delivery sequence
 
@@ -354,7 +357,7 @@ suitable shell/API tools and T3/Playwright browser testing remains unchanged.
 | Repeatable qualification | Operator smoke matrix retained and expanded below. Automated opt-in disposable-VM harness and broader desktop/client matrix remain open. |
 
 Setup adds wmctrl and python3-tk from normal distribution repositories and the
-human control menu entry. Existing VMs need a session-free setup rerun for new
+human control menu entry. Existing VMs need a setup rerun, which handles logout, for new
 dependencies and the updated supervisor. Do not mix old and new runtime behavior
 by replacing only parts of an active session.
 
