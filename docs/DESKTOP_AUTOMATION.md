@@ -33,9 +33,8 @@ Each row includes a reference, name, role, states and advertised action names.
 Name and text previews stop at 256 characters and report `name_truncated` and
 `text_truncated`. A shortened name does not match an exact name selector; select
 by role and inspect the returned reference instead. Identity checks use the full
-name. Marked password
-controls omit their names, text and descendants. Other document content may be
-private; inspect output before sharing it.
+name. Marked password controls omit their names, text and descendants. Other
+document content may be private; inspect output before sharing it.
 
 Scans skip hidden subtrees and stop at 512 visited nodes, depth 20, 128 returned
 rows, or a response size/time limit. `truncated` reports incomplete results.
@@ -64,7 +63,8 @@ it never falls back to the full application. Scope reads can reuse a root while
 its identity remains valid, including across actions; reobserve if it changes.
 An absence result refers only to showing controls inside that root.
 
-The usual node, depth, time and output limits still apply within the subtree.
+The usual node, time and output limits still apply within the subtree; the depth
+limit remains relative to the application root.
 If needed, inspect a smaller container next. Descendant references work with the
 normal `element` commands, which now resolve targets directly along their
 recorded ancestry instead of rescanning unrelated UI.
@@ -110,6 +110,27 @@ Verify task results with ordinary file tools: compare saved text, inspect an
 export, or reopen the output. There is no separate artifact-verification service.
 
 ## Small Geany check
+
+Run the repeatable live check on a running desktop:
+
+```bash
+infra-tools desktop smoke
+```
+
+It launches a new Geany instance with a private temporary profile and an English
+UTF-8 locale, edits Unicode text, verifies the saved file's exact bytes, and
+exercises a scoped Find dialog wait. Success closes its own window, verifies
+that the instance has no remaining windows, and removes its temporary files.
+The shared desktop stays running. No packages are installed by this command.
+
+JSON output lists completed stages. Failure returns a nonzero exit code with the
+failed stage, temporary directory and launch/PID/window identities when known.
+It retains the test instance and files for inspection; it does not retry actions,
+force-close applications, or resume paused control. Inspect and close that test
+instance before rerunning. Waits are bounded individually, not by a single overall
+deadline. This is an explicit live check, separate from `doctor` and unit tests.
+
+To reproduce the edit/save portion manually:
 
 Geany ships in the `agent_code_vm` profile. This check uses its normal editor and
 Save button. On other profiles, first check `command -v geany`.

@@ -95,7 +95,7 @@ a missing, hidden or changed root is an error, never successful absence or a
 fallback to the whole application. Root references can be reused for reads while
 their identity stays valid. Descendant actions still require recent observations.
 
-Use only returned references and action names. References expire after 60
+Use only returned references and action names. Action references expire after 60
 seconds and are cleared by desktop mutations and human pause. Each action
 rechecks the element's identity and state. Reinspect after every action or error;
 never retry a timed-out mutation automatically. `set-text` replaces the whole
@@ -108,8 +108,13 @@ Actions use the same generation and control lease as pointer input.
 Waits do not hold control, and timeout responses include the last observation.
 Accessibility support varies by application; use screenshots and existing input
 when controls are unavailable. No application-specific adapter is required.
-For a small Geany open/edit/save check, see `docs/DESKTOP_AUTOMATION.md` in the
-infra-tools source. Verify the saved file's contents with ordinary file tools.
+Run `infra-tools desktop smoke` for a live Geany edit/save/scoped-dialog check
+on a running desktop. It uses a private test profile, verifies saved UTF-8 bytes,
+and closes its own window and removes test files on success. On failure it
+reports the stage and retains the test instance/files for inspection; inspect
+and close that instance before rerunning. It never resumes paused control.
+See `docs/DESKTOP_AUTOMATION.md` for details and manual steps. Verify ordinary
+task outputs with file tools as well.
 
 Capture a new private PNG (existing files are never overwritten), then inspect
 it using your available image viewer:

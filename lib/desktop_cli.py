@@ -17,6 +17,7 @@ def add_desktop_subparser(subparsers: argparse._SubParsersAction) -> None:
     commands = parser.add_subparsers(dest="desktop_command", required=True)
     for name in ("status", "start", "logout", "windows", "doctor", "handoff"):
         commands.add_parser(name).add_argument("--json", action="store_true")
+    commands.add_parser("smoke", help="Live Geany edit/save/dialog check in an isolated test instance")
     screenshot = commands.add_parser("screenshot")
     screenshot.add_argument("--output", help="New PNG path; defaults to private Pictures/infra-tools artifact storage")
     screenshot.add_argument("--json", action="store_true")
@@ -115,7 +116,10 @@ def run_desktop_command(args: argparse.Namespace) -> int:
                 if not 0 < args.timeout <= 120:
                     raise ValueError("Wait timeout must be greater than zero and at most 120 seconds")
                 baseline = runtime.request({"action": "windows", "generation": current["generation"]})["windows"]
-            if command == "windows":
+            if command == "smoke":
+                from desktop.smoke import run_smoke_check
+                result = run_smoke_check(current["generation"])
+            elif command == "windows":
                 result = runtime.request(payload)
             elif command == "inspect":
                 if args.root is not None and args.generation is None:
