@@ -2,19 +2,19 @@
 
 Use `--cicd` during `setup` or `patch` to install the webhook receiver and
 executor. Repository-specific scripts live in
-`/etc/infra_tools/cicd/webhook_config.json`.
+`/etc/basaltwater/cicd/webhook_config.json`.
 
 Example setup:
 
 ```bash
-infra-tools setup server_web ci.example.com deploy \
+basaltw setup server_web ci.example.com deploy \
   --cicd --ssl --ssl-email admin@example.com
 ```
 
 After setup, edit the generated configuration and add a GitHub webhook. The
 secret is generated once and stored root-only at
-`/etc/infra_tools/cicd/webhook_secret`; the systemd environment file is
-`/etc/infra_tools/cicd/webhook.env`.
+`/etc/basaltwater/cicd/webhook_secret`; the systemd environment file is
+`/etc/basaltwater/cicd/webhook.env`.
 
 Setup reconciles both secret files to `root:root`/`0600` and regenerates the
 environment from the canonical secret on every run. Empty, multiline, oversized,
@@ -31,7 +31,7 @@ root access on the app server.
 Set up the app server first:
 
 ```bash
-infra-tools setup server_web app.example.com deploy \
+basaltw setup server_web app.example.com deploy \
   --app-server --ssl --ssl-email admin@example.com
 ```
 
@@ -41,13 +41,13 @@ storage and mount the bulk disk directly at the CI state directory. A nominal
 3500 GiB rather than assuming the full advertised capacity is allocatable:
 
 ```bash
-infra-tools setup server_web 192.168.1.60 deploy \
+basaltw setup server_web 192.168.1.60 deploy \
   --provision-on pve1 --hostname build \
   --memory 16G --cores 8 \
   --storage root local-lvm 96G \
   --disk-ssd root --disk-discard root --disk-backup root \
   --storage cicd-data ts1-storage 3500G \
-  --storage-mount cicd-data /var/lib/infra_tools/cicd ext4 empty \
+  --storage-mount cicd-data /var/lib/basaltwater/cicd ext4 empty \
   --no-disk-ssd cicd-data --disk-discard cicd-data --disk-backup cicd-data \
   --build-server --node --python --go
 ```
@@ -64,14 +64,14 @@ backup inclusion on both disks.
 
 For an existing Debian server rather than a newly provisioned VM, omit the
 `--provision-on`, capacity, and `--storage*` flags and mount the bulk disk at
-`/var/lib/infra_tools/cicd` before setup.
+`/var/lib/basaltwater/cicd` before setup.
 
 Bootstrap the build server once without deployment targets so its managed
 runtime and workspace exist. The storage-aware command above already performs
 this phase. Then connect the two saved setups from the controller:
 
 ```bash
-infra-tools cicd connect 192.168.1.60 app.example.com
+basaltw cicd connect 192.168.1.60 app.example.com
 ```
 
 Saved host names, friendly `--name` values, and exact tags are accepted. If the
@@ -80,7 +80,7 @@ fingerprint for independent verification. Non-interactive automation can pin
 that verified identity explicitly:
 
 ```bash
-infra-tools cicd connect 192.168.1.60 app.example.com \
+basaltw cicd connect 192.168.1.60 app.example.com \
   --target-name production \
   --fingerprint SHA256:REPLACE_WITH_VERIFIED_FINGERPRINT
 ```
@@ -92,8 +92,8 @@ tests SSH as the unprivileged `webhook` credential owner. It is safe to rerun. I
 or retest connections with:
 
 ```bash
-infra-tools cicd status 192.168.1.60
-infra-tools cicd test 192.168.1.60 app.example.com
+basaltw cicd status 192.168.1.60
+basaltw cicd test 192.168.1.60 app.example.com
 ```
 
 The target entries default to the `deploy` user, SSH port 22, and `/var/www`.
@@ -101,7 +101,7 @@ Use `cicd connect --port` or `--base-dir` when a target differs. The target name
 used by a repository must match its JSON key. A custom base directory must
 already exist as a real directory and be writable by the `deploy` account.
 For generated nginx sites using a custom base, also authorize that directory
-on the app server in root-owned `/etc/infra_tools/cicd/deploy_policy.json`:
+on the app server in root-owned `/etc/basaltwater/cicd/deploy_policy.json`:
 
 ```json
 {"allowed_base_dirs": ["/var/www", "/srv/sites"]}
@@ -126,7 +126,7 @@ of valid branch names. Script paths must be relative to the checkout, with no
 parent traversal; resolved scripts cannot escape through symlinks. Existing
 configurations using absolute scripts must move those scripts into the repository.
 
-Edit `/etc/infra_tools/cicd/webhook_config.json` on the build server. Each
+Edit `/etc/basaltwater/cicd/webhook_config.json` on the build server. Each
 repository entry selects accepted branches and scripts. A remote deployment
 uses `deploy_target` (a key from `deploy_targets.json`) and an optional
 `deploy_spec` (`domain` or `domain/path`):
@@ -168,7 +168,7 @@ event only verifies webhook connectivity and does not build a repository.
 
 ## Delivery receipts and queue limits
 
-Accepted pushes are recorded in `/var/lib/infra_tools/cicd/deliveries.sqlite3`
+Accepted pushes are recorded in `/var/lib/basaltwater/cicd/deliveries.sqlite3`
 before their job file is published. The receipt retains the GitHub delivery ID
 when supplied, repository, commit, and job payload. Deduplication uses the
 authenticated body digest: changing the unsigned delivery-ID header cannot
@@ -195,7 +195,7 @@ receiver journal and restore capacity before retrying rejected deliveries.
 These limits bound admission, not disk usage by trusted build scripts.
 
 Each attempt gets an exclusively created log named with repository, commit,
-job, and a unique suffix under `/var/lib/infra_tools/cicd/logs/`. Its header and
+job, and a unique suffix under `/var/lib/basaltwater/cicd/logs/`. Its header and
 the executor journal record the job-to-log mapping. Rebuilding the same commit
 does not truncate an earlier log; the existing 30-day log cleanup still applies.
 
@@ -204,7 +204,7 @@ does not truncate an earlier log; the existing 30-day log cleanup still applies.
 The root executor is a credential broker; it never executes repository code
 as root. Git, local scripts and artifact export run as `cicd-build`, with a
 separate UID/group, no supplementary groups or capabilities, no new privileges,
-and a clean environment. The managed home is `/var/lib/infra_tools/cicd/build`
+and a clean environment. The managed home is `/var/lib/basaltwater/cicd/build`
 (0700); workspaces live in its `workspaces` subdirectory. Deployment keys remain
 private under the separate `webhook` home and are not passed to build commands.
 The broker starts Python in isolated mode, so build-managed Python packages
@@ -236,7 +236,7 @@ the separate account/home and reinstalls selected Node/uv toolchains there;
 old workspaces and toolchains under the `webhook` home are left untouched for
 operator cleanup. Move only reviewed read-only Git credentials to the new
 home, not the old home wholesale. Patch app servers for the restricted remote
-sudo policy. Existing bulk mounts at `/var/lib/infra_tools/cicd` still contain
+sudo policy. Existing bulk mounts at `/var/lib/basaltwater/cicd` still contain
 the new build home, snapshots and logs.
 
 - the receiver is localhost-only behind Nginx; expose it through Cloudflare
@@ -251,7 +251,7 @@ the new build home, snapshots and logs.
 - HTTP repository URLs with embedded credentials are rejected so secrets cannot
   leak through queue files or build logs; use the configured Git credential helper
 - app-server privilege is exposed only through the validating
-  `infra-tools-deploy-admin` helper; the deploy account has no wildcarded root
+  `basaltwater-deploy-admin` helper; the deploy account has no wildcarded root
   `rm`, `mkdir`, or `touch` access
 - nginx requests contain only a domain, route, artifact directory, and project
   type. The app server validates them and renders configuration using its own
@@ -261,10 +261,10 @@ the new build home, snapshots and logs.
   Each upload uses a per-run staged filename, and the privileged helper
   serializes nginx writes, validation, and rollback on the app server
 - existing nginx sites can only be replaced or removed when their file starts
-  with the infra-tools deployment generator marker and their enabled link
+  with the Basaltwater deployment generator marker and their enabled link
   references that file. Administrator-owned or unrelated service sites are
   preserved; adopting an unmarked legacy site requires administrator review
-- build logs live under `/var/lib/infra_tools/cicd/logs/`
+- build logs live under `/var/lib/basaltwater/cicd/logs/`
 - build scripts run as the dedicated `cicd-build` user
 - `--build-server --node` and `--build-server --python` bootstrap the build
   toolchains for that user

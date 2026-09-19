@@ -24,6 +24,11 @@ temporary passwordless rule. Key-only root SSH is the stable privileged setup
 and recovery channel, while SSH password authentication remains disabled;
 protect the authorized private key as a root credential.
 
+Brokered setup reruns never temporarily add the coding account to `sudo`.
+Uploaded runtime code uses administrator-writable-only permissions even when
+the controller checkout is group-writable; setup disables Python bytecode
+writes so imported cache directories cannot weaken that boundary.
+
 `--harden-agent` does not lock the login itself. SSH and an explicitly
 configured desktop remain usable. `--harden-user` locks Unix password
 authentication, including an account that previously had no password, rather
@@ -33,12 +38,12 @@ and prevents `~/.ssh/rc` execution. It disables systemd lingering too; an
 explicitly selected T3 Code service enables lingering again because that
 service requires a persistent user manager.
 
-Infra-tools journals group removals and the original wider account settings in
-`/var/lib/infra_tools/agent-user-security/UID.json` before changing them.
+Basaltwater journals group removals and the original wider account settings in
+`/var/lib/basaltwater/agent-user-security/UID.json` before changing them.
 Use `--no-harden-user` to return to agent-only hardening, or combine it with
 `--no-harden-agent` to restore all recorded settings. An omitted hardening
 option preserves the saved posture during a patch. The root-owned mode-`0600`
-state follows the numeric user identity, so an infra-tools user rename does not
+state follows the numeric user identity, so a Basaltwater user rename does not
 orphan the rollback information. If a recorded group is temporarily absent,
 the journal retains it and a later setup rerun retries the restoration. An
 explicit rollback restores a recorded passwordless state too, so use the
@@ -65,7 +70,7 @@ network access still begins outside the workspace boundary and can be requested
 through the normal approval flow instead of being silently enabled.
 
 `--harden-agent` also writes `/etc/codex/requirements.toml` and selects `never`
-within an infra-tools-defined workspace profile. That profile explicitly
+within an basaltwater-defined workspace profile. That profile explicitly
 disables command networking, so a user cannot re-enable it through the legacy
 workspace network setting. In that mode there is no approval path to add
 permissions. Live web search, login shells, apps and plugins, MCP servers,
@@ -83,10 +88,10 @@ Codex requirements schema does not make that environment setting an enforced
 constraint, so do not inject sensitive environment variables into an
 untrusted session and assume the filter is an isolation boundary.
 Hardened setup also disables Codex's in-app updater; apply reviewed agent
-updates deliberately with `infra-tools agent update --tool codex`.
+updates deliberately with `basaltw agent update --tool codex`.
 
 Hardened requirements are constraints, not warning preferences. Returning to
-the default posture removes an infra-tools-owned requirements file so all Codex
+the default posture removes a Basaltwater-owned requirements file so all Codex
 choices are available again. Administrator-owned defaults and requirements are
 preserved in the default posture; hardened setup refuses to replace them, so
 organization policy must be merged deliberately.
@@ -124,7 +129,7 @@ For unfamiliar packages or unattended builds, prefer a fresh VM and enable the
 hardened posture at creation:
 
 ```bash
-infra-tools setup agent_vm 10.0.0.40 agent \
+basaltw setup agent_vm 10.0.0.40 agent \
   --provision-on pve1 \
   --harden-user \
   --git-access read \

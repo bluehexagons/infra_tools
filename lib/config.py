@@ -1131,6 +1131,8 @@ class SetupConfig:
 
         for tool in self.selected_agent_tools():
             args.append(f"--agent-tool {shlex.quote(tool)}")
+        for tool in self.agent_tools_removed or []:
+            args.append(f"--no-agent-tool {shlex.quote(tool)}")
 
         for interface in self.web_interfaces or []:
             args.append(f"--web-interface {shlex.quote(interface)}")
@@ -1356,7 +1358,7 @@ class SetupConfig:
                     setup_host = str(guest_interface)
 
         cmd_parts: StrList = [
-            f"infra-tools setup {shlex.quote(self.system_type)}",
+            f"basaltw setup {shlex.quote(self.system_type)}",
             shlex.quote(setup_host),
         ]
 

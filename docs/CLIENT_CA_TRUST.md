@@ -1,6 +1,6 @@
-# Trust the infra-tools CA on a client
+# Trust the Basaltwater CA on a client
 
-An infra-tools internal web gateway can use a VM-local certificate authority
+A Basaltwater internal web gateway can use a VM-local certificate authority
 (CA) when a publicly trusted certificate is not available for its private IP
 address or internal hostname. The VM enrolls that CA for its own tools, but a
 T3 Code preview or browser running on another device uses that device's trust
@@ -23,15 +23,15 @@ workaround.
 On the VM, run:
 
 ```bash
-infra-web ca
+basaltwater-web ca
 ```
 
 If the command says that the endpoint uses a publicly trusted certificate,
 client enrollment is not required. Otherwise it prints three values:
 
 ```text
-/srv/infra-tools/web/infra-tools-ca.crt
-https://VM:8443/infra-tools-ca.crt
+/srv/basaltwater/web/basaltwater-ca.crt
+https://VM:8443/basaltwater-ca.crt
 SHA-256 EXPECTED_FILE_SHA256
 ```
 
@@ -47,17 +47,17 @@ document with `net::ERR_CERT_AUTHORITY_INVALID` is the certificate case.
 
 ## Obtain and verify the public certificate
 
-The URL printed by `infra-web ca` is convenient after at least one client
+The URL printed by `basaltwater-web ca` is convenient after at least one client
 already trusts the VM. A new client may block that download for the same reason
 it blocks the application. In that case, copy the public certificate over the
 existing SSH trust path instead of bypassing TLS:
 
 ```bash
-scp USER@VM:/srv/infra-tools/web/infra-tools-ca.crt .
+scp USER@VM:/srv/basaltwater/web/basaltwater-ca.crt .
 ```
 
 Another trusted transfer channel is also acceptable. Transfer only
-`infra-tools-ca.crt`; never request or copy the CA private key.
+`basaltwater-ca.crt`; never request or copy the CA private key.
 
 The web panel's download scripts require a client that already trusts the
 HTTPS endpoint. They retain TLS verification and stop on a certificate error;
@@ -65,7 +65,7 @@ they cannot bootstrap an untrusted connection. Obtain first-enrollment
 instructions and the fingerprint through SSH or the VM console. Do not trust
 a script or checksum from a page opened past a certificate warning.
 
-Infra-tools webhook senders have a separate compatibility setting. They accept
+Basaltwater webhook senders have a separate compatibility setting. They accept
 self-signed HTTPS receiver certificates by default, so a sender can notify a
 panel that uses this VM-local CA without installing that CA on the sender. Use
 `--notification-strict-https` on the sender setup or patch when certificate
@@ -78,19 +78,19 @@ Compare the downloaded file with the `SHA-256` value printed on the VM. On
 Linux:
 
 ```bash
-sha256sum infra-tools-ca.crt
+sha256sum basaltwater-ca.crt
 ```
 
 On Windows PowerShell:
 
 ```powershell
-(Get-FileHash .\infra-tools-ca.crt -Algorithm SHA256).Hash
+(Get-FileHash .\basaltwater-ca.crt -Algorithm SHA256).Hash
 ```
 
 On macOS:
 
 ```bash
-shasum -a 256 infra-tools-ca.crt
+shasum -a 256 basaltwater-ca.crt
 ```
 
 Ignore letter case and spacing when comparing the hexadecimal values. On
@@ -102,23 +102,23 @@ connection.
 ## Linux
 
 The commands below install the CA system-wide. Run them from the directory
-containing the verified `infra-tools-ca.crt` file.
+containing the verified `basaltwater-ca.crt` file.
 
 ### Debian, Ubuntu, and derivatives
 
 ```bash
-sudo install -m 0644 infra-tools-ca.crt \
-  /usr/local/share/ca-certificates/infra-tools-ca.crt
+sudo install -m 0644 basaltwater-ca.crt \
+  /usr/local/share/ca-certificates/basaltwater-ca.crt
 sudo update-ca-certificates
 ```
 
 `update-ca-certificates` requires a PEM certificate with a `.crt` extension;
-the file emitted by infra-tools has that format.
+the file emitted by Basaltwater has that format.
 
 ### Arch Linux, Manjaro, and derivatives
 
 ```bash
-sudo trust anchor infra-tools-ca.crt
+sudo trust anchor basaltwater-ca.crt
 sudo update-ca-trust
 ```
 
@@ -126,16 +126,16 @@ If `trust anchor` reports that there is no writable location, use Arch's local
 anchor directory explicitly:
 
 ```bash
-sudo install -Dm0644 infra-tools-ca.crt \
-  /etc/ca-certificates/trust-source/anchors/infra-tools-ca.crt
+sudo install -Dm0644 basaltwater-ca.crt \
+  /etc/ca-certificates/trust-source/anchors/basaltwater-ca.crt
 sudo update-ca-trust
 ```
 
 ### Fedora, RHEL, and derivatives
 
 ```bash
-sudo install -m 0644 infra-tools-ca.crt \
-  /etc/pki/ca-trust/source/anchors/infra-tools-ca.crt
+sudo install -m 0644 basaltwater-ca.crt \
+  /etc/pki/ca-trust/source/anchors/basaltwater-ca.crt
 sudo update-ca-trust extract
 ```
 
@@ -155,7 +155,7 @@ guidance.
 
 ## macOS
 
-Import the verified `infra-tools-ca.crt` into the **System** keychain with
+Import the verified `basaltwater-ca.crt` into the **System** keychain with
 Keychain Access. Double-click the imported certificate, expand **Trust**, and
 set certificate trust to **Always Trust** only after confirming its SHA-256
 fingerprint. Authenticate the change when macOS requests administrator
@@ -170,7 +170,7 @@ For one Windows account, open PowerShell or Command Prompt as that user and
 run:
 
 ```powershell
-certutil -user -addstore -f Root .\infra-tools-ca.crt
+certutil -user -addstore -f Root .\basaltwater-ca.crt
 ```
 
 For every account on a managed computer, an administrator can omit `-user` to
@@ -196,19 +196,19 @@ command and the distinction between
 
 On a personally managed Chromebook:
 
-1. Transfer the verified `infra-tools-ca.crt` file to the Chromebook.
+1. Transfer the verified `basaltwater-ca.crt` file to the Chromebook.
 2. Open `chrome://certificate-manager` in Chrome.
 3. Open **Authorities**, select **Import**, and choose the certificate.
 4. Enable trust for identifying websites, then finish the import.
 5. Fully close and reopen the T3 Code tab or browser window before retrying
-   the infra-tools URL.
+   the Basaltwater URL.
 
 If certificate import controls are unavailable, check whether the Chromebook
 is managed. A school administrator can disable user CA management, and users
 should not try to evade that policy. For a managed school fleet, an authorized
 Google Workspace administrator should instead:
 
-1. Verify the certificate file against the SHA-256 value from `infra-web ca`.
+1. Verify the certificate file against the SHA-256 value from `basaltwater-web ca`.
 2. In the Google Admin console, open **Devices > Networks > Certificates**.
 3. Select the appropriate organizational unit, create a certificate, upload
    the single PEM/CRT file, and mark it as a CA for **Chromebook**.
@@ -247,7 +247,7 @@ download or transfer the verified file, then open:
 **Settings > Security & privacy > More security settings > Encryption &
 credentials > Install a certificate > CA certificate**
 
-Select `infra-tools-ca.crt`, confirm the device warning, and authenticate with
+Select `basaltwater-ca.crt`, confirm the device warning, and authenticate with
 the device screen lock when prompted. Samsung and other devices commonly put
 the same action under **Security and privacy > More security settings >
 Install from device storage > CA certificate**.
@@ -263,7 +263,7 @@ documentation for the application-side behavior.
 
 ## Verify and troubleshoot
 
-After restarting the client, reopen the exact URL printed by `infra-web` and
+After restarting the client, reopen the exact URL printed by `basaltwater-web` and
 confirm that it renders without a certificate warning. On Linux, macOS, or
 Windows, this system-trust check must succeed without `-k` or another insecure
 option:

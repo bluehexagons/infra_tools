@@ -6,7 +6,7 @@ the remote setup process makes a best-effort guess from the target runtime.
 
 ## Officially Supported Configurations
 
-infra_tools officially supports Debian in these configurations:
+basaltwater officially supports Debian in these configurations:
 
 - **Bare metal**: a physical Debian host, detected as `hardware`.
 - **Virtual machine**: a Debian VM on Proxmox or a hosted VPS such as
@@ -88,8 +88,8 @@ Saved configurations retain their explicit machine type. New commands use
 is preserved when patching or deploying. This avoids changing the behavior of
 existing hosts unexpectedly.
 
-For saved configurations, prefer `infra-tools deploy <name-or-host>` or
-`infra-tools patch <host>` over retyping old commands. `infra-tools cmd
+For saved configurations, prefer `basaltw deploy <name-or-host>` or
+`basaltw patch <host>` over retyping old commands. `basaltw cmd
 <name-or-host>` prints an explicit override when the saved configuration is not
 using the new `auto` default.
 
@@ -102,17 +102,17 @@ pending restart; set `--auto-restart` or a nonzero
 
 ```bash
 # Auto-detect the target (the normal direct-setup path)
-infra-tools setup workstation_dev 192.168.1.10
+basaltw setup workstation_dev 192.168.1.10
 
 # Force an officially supported Proxmox LXC profile
-infra-tools setup workstation_dev 192.168.1.10 --machine unprivileged
+basaltw setup workstation_dev 192.168.1.10 --machine unprivileged
 
 # Explicit machine types when needed
-infra-tools setup workstation_dev 192.168.1.10 --machine privileged
-infra-tools setup server_web 192.168.1.20 --machine hardware
+basaltw setup workstation_dev 192.168.1.10 --machine privileged
+basaltw setup server_web 192.168.1.20 --machine hardware
 
 # OCI container (limited features)
-infra-tools setup server_lite 192.168.1.30 --machine oci
+basaltw setup server_lite 192.168.1.30 --machine oci
 ```
 
 ## Provisioning a Proxmox VM
@@ -121,7 +121,7 @@ The regular setup flow defaults to a VM when `--provision-on` is present, so it
 can create the VM through `qm` + cloud-init without `--machine vm`:
 
 ```bash
-infra-tools setup server_web 10.0.0.50 \
+basaltw setup server_web 10.0.0.50 \
     --provision-on proxmox.lan \
     --memory 4G --cores 2 \
     --storage root local-lvm 32G
@@ -160,10 +160,10 @@ default.
 
 ## State Persistence
 
-Machine type is saved through `/opt/infra_tools/state/machine.json` only after
+Machine type is saved through `/opt/basaltwater/state/machine.json` only after
 every requested setup mutation succeeds. The runtime path is a compatibility
-link to durable root-owned storage under `/var/lib/infra_tools`, so refreshing
-the uploaded infra_tools source does not discard release metadata, bundle
+link to durable root-owned storage under `/var/lib/basaltwater`, so refreshing
+the uploaded basaltwater source does not discard release metadata, bundle
 registrations, or maintenance state. Legacy state is migrated automatically.
 An unfinished marker from the old non-persistent layout is retained once as
 `setup-operation.pre-persistence.json` for diagnosis without blocking the
@@ -171,7 +171,7 @@ explicit migration rerun; subsequent operation markers remain durable and
 retain their normal recovery guard.
 The recalled setup is finalized at the same time in `setup.json`.
 
-A real setup first creates `/opt/infra_tools/state/setup-operation.json`. It
+A real setup first creates `/opt/basaltwater/state/setup-operation.json`. It
 records the current step and blocks another setup if execution is interrupted.
 Ordinary failures mark it `recovery_required`. Rerunning the same system type,
 machine type, and setup user resumes that operation and safely reapplies the

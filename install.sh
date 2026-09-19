@@ -3,10 +3,11 @@
 set -eu
 
 REPOSITORY="bluehexagons/infra_tools"
-REPOSITORY_URL="${INFRA_TOOLS_REPOSITORY_URL:-https://github.com/$REPOSITORY.git}"
-CHANNEL="${INFRA_TOOLS_CHANNEL:-dev}"
+# Explicit values, including empty settings, are validated below.
+REPOSITORY_URL="${BASALTWATER_REPOSITORY_URL-https://github.com/$REPOSITORY.git}"
+CHANNEL="${BASALTWATER_CHANNEL-dev}"
 CHANNEL_SET=0
-if [ "${INFRA_TOOLS_CHANNEL+x}" = "x" ]; then
+if [ "${BASALTWATER_CHANNEL+x}" = "x" ]; then
     CHANNEL_SET=1
 fi
 INSTALL_DIR=""
@@ -17,11 +18,10 @@ LOCAL_SETUP_REQUESTED=0
 INSTALL_QEMU_GUEST_AGENT=0
 HOST_OS_SUPPORTED=1
 HOST_OS_ID=""
-MIGRATE_EXISTING=0
 
 usage() {
     cat <<'EOF'
-Install or update infra-tools from a managed Git worktree.
+Install or update Basaltwater from a managed Git worktree.
 
 Usage:
   install.sh [options]
@@ -32,40 +32,38 @@ Options:
   --channel CHANNEL     stable, dev, v[version], branch-[branch], or commit-[hash]
                         (default: dev for the current development release)
   --ref REF             Compatibility alias for --channel; bare refs are branches
-  --install-dir PATH   Source destination (default: /opt/infra_tools as root,
-                       otherwise ~/.local/share/infra_tools)
-  --migrate-existing-install
-                       Permit replacement of a legacy infra-tools source tree
+  --install-dir PATH   Source destination (default: /opt/basaltwater as root,
+                       otherwise ~/.local/share/basaltwater)
   --user USER          User receiving local tools and completions
   --shell SHELL        bash, zsh, fish, or tcsh (default: target user's shell)
   --qemu-guest-agent   Install, start, and enable Proxmox's qemu-guest-agent
                        during self-setup (must appear before --setup/--local-setup)
-  --setup ...          Run `infra-tools setup ...` after installation
-  --local-setup TYPE   Run `infra-tools setup TYPE localhost USER` after installation
+  --setup ...          Run `basaltw setup ...` after installation
+  --local-setup TYPE   Run `basaltw setup TYPE localhost USER` after installation
                        (the target user comes from --user or the invoking user)
   -h, --help           Show this help
 
 Examples:
   Download with wget, then run the script (run each line in order):
-  wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-  sh "$HOME/.infra_tools-install.sh"
-  rm -f "$HOME/.infra_tools-install.sh"
+  wget --timeout=20 --tries=2 -O "$HOME/.basaltwater-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+  sh "$HOME/.basaltwater-install.sh"
+  rm -f "$HOME/.basaltwater-install.sh"
   Download with wget and run a privileged setup:
-  wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-  sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane \
+  wget --timeout=20 --tries=2 -O "$HOME/.basaltwater-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+  sudo sh "$HOME/.basaltwater-install.sh" --user "$USER" --local-setup control_plane \
     --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode
-  rm -f "$HOME/.infra_tools-install.sh"
+  rm -f "$HOME/.basaltwater-install.sh"
   Add qemu-guest-agent when the orchestration host is a Proxmox VM by placing
   --qemu-guest-agent before --local-setup:
-  sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --qemu-guest-agent --local-setup control_plane
-  rm -f "$HOME/.infra_tools-install.sh"
+  sudo sh "$HOME/.basaltwater-install.sh" --user "$USER" --qemu-guest-agent --local-setup control_plane
+  rm -f "$HOME/.basaltwater-install.sh"
   Download with curl instead by replacing the wget command with:
-  curl --fail --location --connect-timeout 15 --max-time 120 -o "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+  curl --fail --location --connect-timeout 15 --max-time 120 -o "$HOME/.basaltwater-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
 EOF
 }
 
 fail() {
-    printf 'infra-tools installer: %s\n' "$*" >&2
+    printf 'Basaltwater installer: %s\n' "$*" >&2
     exit 1
 }
 
@@ -197,7 +195,7 @@ resolve_channel_ref() {
 }
 
 write_channel_state() {
-    state_dir="$INSTALL_DIR/.infra_tools"
+    state_dir="$INSTALL_DIR/.basaltwater"
     mkdir -p "$state_dir"
     commit=$(git -C "$INSTALL_DIR" rev-parse --verify HEAD)
     state_path="$state_dir/channel.json"
@@ -208,8 +206,9 @@ write_channel_state() {
     mv "$temporary_state" "$state_path"
 }
 
-if [ -n "${INFRA_TOOLS_REF:-}" ] && [ "${INFRA_TOOLS_CHANNEL+x}" != "x" ]; then
-    normalize_ref "$INFRA_TOOLS_REF"
+INSTALL_REF="${BASALTWATER_REF-}"
+if [ -n "$INSTALL_REF" ] && [ "$CHANNEL_SET" -eq 0 ]; then
+    normalize_ref "$INSTALL_REF"
     CHANNEL_SET=1
 fi
 
@@ -231,10 +230,6 @@ while [ "$#" -gt 0 ]; do
             [ "$#" -ge 2 ] || fail "--install-dir requires a value"
             INSTALL_DIR=$2
             shift 2
-            ;;
-        --migrate-existing-install)
-            MIGRATE_EXISTING=1
-            shift
             ;;
         --user)
             [ "$#" -ge 2 ] || fail "--user requires a value"
@@ -272,8 +267,9 @@ while [ "$#" -gt 0 ]; do
 done
 
 validate_channel
+[ -n "$REPOSITORY_URL" ] || fail "repository URL must not be empty"
 validate_host_os
-printf '%s\n' "infra-tools installer: host validated; checking prerequisites and package sources..."
+printf '%s\n' "Basaltwater installer: host validated; checking prerequisites and package sources..."
 
 if [ "$RUN_SETUP" -eq 1 ] && [ "$LOCAL_SETUP_REQUESTED" -eq 0 ] && [ "$#" -lt 2 ]; then
     fail "--setup requires at least SYSTEM_TYPE and HOST"
@@ -306,9 +302,9 @@ TARGET_HOME=$(getent passwd "$TARGET_USER" | awk -F: 'NR == 1 { print $6 }')
 
 if [ -z "$INSTALL_DIR" ]; then
     if [ "$(id -u)" -eq 0 ]; then
-        INSTALL_DIR=/opt/infra_tools
+        INSTALL_DIR=/opt/basaltwater
     else
-        INSTALL_DIR="${XDG_DATA_HOME:-$TARGET_HOME/.local/share}/infra_tools"
+        INSTALL_DIR="${XDG_DATA_HOME:-$TARGET_HOME/.local/share}/basaltwater"
     fi
 fi
 case "$INSTALL_DIR" in
@@ -420,10 +416,10 @@ keyring=/usr/share/keyrings/debian-archive-keyring.pgp
 if [ ! -r "$keyring" ]; then
     keyring=/usr/share/keyrings/debian-archive-keyring.gpg
 fi
-managed_path="$source_dir/infra_tools-debian.sources"
+managed_path="$source_dir/basaltwater-debian.sources"
 
 [ -r "$keyring" ] || {
-    printf '%s\n' "infra-tools installer: Debian archive keyring is missing at $keyring" >&2
+    printf '%s\n' "Basaltwater installer: Debian archive keyring is missing at $keyring" >&2
     exit 1
 }
 
@@ -432,9 +428,9 @@ mkdir -p "$source_dir"
 for source_path in "$apt_dir/sources.list" "$source_dir"/*.list; do
     [ -f "$source_path" ] || continue
     if grep -Eq '^[[:space:]]*deb[[:space:]]+(\[[^]]*\][[:space:]]+)?cdrom:' "$source_path"; then
-        backup_path="$source_path.infra_tools.bak"
+        backup_path="$source_path.basaltwater.bak"
         [ -e "$backup_path" ] || cp -p "$source_path" "$backup_path"
-        sed -i -E 's/^([[:space:]]*deb[[:space:]]+(\[[^]]*\][[:space:]]+)?cdrom:)/# Disabled by infra_tools: \1/' "$source_path"
+        sed -i -E 's/^([[:space:]]*deb[[:space:]]+(\[[^]]*\][[:space:]]+)?cdrom:)/# Disabled by basaltwater: \1/' "$source_path"
     fi
 done
 
@@ -445,9 +441,9 @@ for source_path in "$source_dir"/*.sources; do
         /(^|[[:space:]])cdrom:/ { found=1; exit }
         END { exit found ? 0 : 1 }
     ' "$source_path"; then
-        backup_path="$source_path.infra_tools.bak"
+        backup_path="$source_path.basaltwater.bak"
         [ -e "$backup_path" ] || cp -p "$source_path" "$backup_path"
-        sed -i 's/^/# Disabled by infra_tools: /' "$source_path"
+        sed -i 's/^/# Disabled by basaltwater: /' "$source_path"
     fi
 done
 
@@ -481,20 +477,20 @@ done
 
 if [ "$has_current_base" -eq 1 ] && [ "$has_current_security" -eq 1 ]; then
     if [ -e "$managed_path" ]; then
-        grep -q '^# Managed by infra_tools' "$managed_path" || {
-            printf '%s\n' "infra-tools installer: refusing to remove unmanaged APT source $managed_path" >&2
+        grep -q '^# Managed by basaltwater' "$managed_path" || {
+            printf '%s\n' "Basaltwater installer: refusing to remove unmanaged APT source $managed_path" >&2
             exit 1
         }
-        backup_path="$managed_path.infra_tools.bak"
+        backup_path="$managed_path.basaltwater.bak"
         [ -e "$backup_path" ] || cp -p "$managed_path" "$backup_path"
         rm -f "$managed_path"
-        printf '%s\n' "Removed redundant infra_tools APT source; existing Debian sources already cover $codename."
+        printf '%s\n' "Removed redundant basaltwater APT source; existing Debian sources already cover $codename."
     fi
     exit 0
 fi
 
 temporary_path="$managed_path.new.$$"
-printf '%s\n' '# Managed by infra_tools. Do not edit; rerun infra_tools after a Debian release change.' > "$temporary_path"
+printf '%s\n' '# Managed by basaltwater. Do not edit; rerun basaltw after a Debian release change.' > "$temporary_path"
 if [ "$has_current_base" -eq 0 ]; then
     cat >> "$temporary_path" <<SOURCE
 
@@ -518,15 +514,15 @@ fi
 chmod 0644 "$temporary_path"
 
 if [ -e "$managed_path" ]; then
-    grep -q '^# Managed by infra_tools' "$managed_path" || {
+    grep -q '^# Managed by basaltwater' "$managed_path" || {
         rm -f "$temporary_path"
-        printf '%s\n' "infra-tools installer: refusing to overwrite unmanaged APT source $managed_path" >&2
+        printf '%s\n' "Basaltwater installer: refusing to overwrite unmanaged APT source $managed_path" >&2
         exit 1
     }
     if cmp -s "$temporary_path" "$managed_path"; then
         rm -f "$temporary_path"
     else
-        backup_path="$managed_path.infra_tools.bak"
+        backup_path="$managed_path.basaltwater.bak"
         [ -e "$backup_path" ] || cp -p "$managed_path" "$backup_path"
         mv "$temporary_path" "$managed_path"
     fi
@@ -568,7 +564,7 @@ if [ "$HOST_OS_SUPPORTED" -eq 1 ] && [ "$missing_prerequisite" -eq 1 ]; then
         ca-certificates git openssh-client python3 rsync
 fi
 
-python3 - "$INSTALL_DIR" "$TARGET_HOME" "$MIGRATE_EXISTING" <<'EOF'
+python3 - "$INSTALL_DIR" "$TARGET_HOME" <<'EOF'
 from __future__ import annotations
 import os
 from pathlib import Path
@@ -577,7 +573,7 @@ import sys
 target = Path(sys.argv[1])
 home = Path(sys.argv[2])
 def refuse(reason: str) -> None:
-    sys.exit(f"infra-tools installer: refusing install directory {target}: {reason}")
+    sys.exit(f"Basaltwater installer: refusing install directory {target}: {reason}")
 
 if str(target) != os.path.normpath(sys.argv[1]) or '..' in target.parts:
     refuse('use a normalized absolute path')
@@ -590,19 +586,19 @@ for part in (target, *target.parents):
         refuse('symlink path component')
 if os.path.ismount(target):
     refuse('mount point')
+if target.name == 'basaltwater' and (target.parent / 'infra_tools' / 'infra_tools.py').exists():
+    refuse('recent infra-tools installation present; run the one-time Basaltwater migration first')
 if target.exists():
-    marker = target / '.infra_tools' / 'managed-install'
-    managed = marker.is_file() and not marker.is_symlink() and marker.read_text() == 'infra-tools-v1\n'
+    marker = target / '.basaltwater' / 'managed-install'
+    managed = marker.is_file() and not marker.is_symlink() and marker.read_text() == 'basaltwater-v1\n'
     if not managed:
-        legacy = (target / 'infra_tools.py').is_file() and (target / 'remote_setup.py').is_file() and (target / 'lib').is_dir()
-        if sys.argv[3] != '1' or not legacy:
-            refuse('unmanaged directory; legacy source trees require --migrate-existing-install')
+        refuse('unmanaged directory; use basaltw migrate for recent infra-tools installations')
 EOF
 
-if [ "$CHANNEL_SET" -eq 0 ] && [ -f "$INSTALL_DIR/.infra_tools/channel.json" ]; then
+if [ "$CHANNEL_SET" -eq 0 ] && [ -f "$INSTALL_DIR/.basaltwater/channel.json" ]; then
     existing_channel=$(python3 -c \
         'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("channel", ""))' \
-        "$INSTALL_DIR/.infra_tools/channel.json" 2>/dev/null || true)
+        "$INSTALL_DIR/.basaltwater/channel.json" 2>/dev/null || true)
     if [ -n "$existing_channel" ]; then
         CHANNEL=$existing_channel
         validate_channel
@@ -656,7 +652,7 @@ INSTALL_PARENT=$(dirname "$INSTALL_DIR")
 mkdir -p "$INSTALL_PARENT"
 [ ! -e "$STAGED_DIR" ] && [ ! -L "$STAGED_DIR" ] || fail "staging path already exists: $STAGED_DIR"
 
-printf 'Cloning infra_tools repository (%s)...\n' "$CHANNEL"
+printf 'Cloning Basaltwater repository (%s)...\n' "$CHANNEL"
 if ! git clone "$REPOSITORY_URL" "$STAGED_DIR"; then
     fail "could not clone repository: $REPOSITORY_URL"
 fi
@@ -667,6 +663,8 @@ resolve_channel_ref
 if ! git -C "$STAGED_DIR" checkout --detach "$TARGET_REF" >/dev/null; then
     fail "could not check out channel: $CHANNEL"
 fi
+
+[ -f "$STAGED_DIR/basaltwater.py" ] || fail "selected source predates Basaltwater; historical releases are unsupported"
 
 if [ -e "$INSTALL_DIR" ]; then
     BACKUP_DIR="${INSTALL_DIR}.backup.$(date +%s).$$"
@@ -682,16 +680,16 @@ if ! mv "$STAGED_DIR" "$INSTALL_DIR"; then
 fi
 if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/state" ]; then
     if ! cp -a "$BACKUP_DIR/state" "$INSTALL_DIR/state"; then
-        fail "could not preserve existing infra_tools state"
+        fail "could not preserve existing basaltwater state"
     fi
 fi
-if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/.infra_tools" ]; then
-    if ! cp -a "$BACKUP_DIR/.infra_tools" "$INSTALL_DIR/.infra_tools"; then
+if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/.basaltwater" ]; then
+    if ! cp -a "$BACKUP_DIR/.basaltwater" "$INSTALL_DIR/.basaltwater"; then
         fail "could not preserve existing channel state"
     fi
 fi
 write_channel_state
-printf 'infra-tools-v1\n' > "$INSTALL_DIR/.infra_tools/managed-install"
+printf 'basaltwater-v1\n' > "$INSTALL_DIR/.basaltwater/managed-install"
 
 if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
     TARGET_UID=$(getent passwd "$TARGET_USER" | awk -F: 'NR == 1 { print $3 }')
@@ -704,15 +702,16 @@ if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
     fi
 fi
 
-printf 'Installing infra-tools for %s...\n' "$TARGET_USER"
+ENTRY_SCRIPT="$INSTALL_DIR/basaltwater.py"
+printf 'Installing Basaltwater for %s...\n' "$TARGET_USER"
 if [ "$(id -u)" -eq 0 ]; then
-    if ! run_bootstrap env HOME="$TARGET_HOME" python3 "$INSTALL_DIR/infra_tools.py" bootstrap \
+    if ! run_bootstrap env HOME="$TARGET_HOME" python3 "$ENTRY_SCRIPT" bootstrap \
         --shell "$SHELL_NAME" \
         --user "$TARGET_USER"; then
         exit 1
     fi
 else
-    if ! run_bootstrap env HOME="$TARGET_HOME" USER="$TARGET_USER" python3 "$INSTALL_DIR/infra_tools.py" bootstrap \
+    if ! run_bootstrap env HOME="$TARGET_HOME" USER="$TARGET_USER" python3 "$ENTRY_SCRIPT" bootstrap \
         --shell "$SHELL_NAME" \
         --user "$TARGET_USER" \
         --skip-system-packages; then
@@ -720,7 +719,7 @@ else
     fi
 fi
 
-USER_LAUNCHER="$TARGET_HOME/.local/bin/infra-tools"
+USER_LAUNCHER="$TARGET_HOME/.local/bin/basaltw"
 if [ ! -x "$USER_LAUNCHER" ]; then
     fail "bootstrap completed without creating $USER_LAUNCHER"
 fi
@@ -729,7 +728,7 @@ if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
 fi
 ACTIVATION_PENDING=0
 
-printf '\ninfra-tools installed successfully.\n'
+printf '\nBasaltwater installed successfully.\n'
 printf '  Source: %s\n' "$INSTALL_DIR"
 printf '  Channel: %s\n' "$CHANNEL"
 printf '  Command: %s\n' "$USER_LAUNCHER"
@@ -751,7 +750,7 @@ run_for_target() {
 
 run_local_setup() {
     if [ "$HOST_OS_ID" = cachyos ]; then
-        run_for_target python3 "$INSTALL_DIR/infra_tools.py" setup "$@"
+        run_for_target python3 "$ENTRY_SCRIPT" setup "$@"
         return
     fi
     if [ -t 2 ] && [ -r /dev/tty ]; then
@@ -759,13 +758,13 @@ run_local_setup() {
             HOME="$TARGET_HOME" \
             USER="$TARGET_USER" \
             SUDO_USER="$TARGET_USER" \
-            python3 "$INSTALL_DIR/infra_tools.py" setup "$@" < /dev/tty
+            python3 "$ENTRY_SCRIPT" setup "$@" < /dev/tty
     else
         run_privileged env \
             HOME="$TARGET_HOME" \
             USER="$TARGET_USER" \
             SUDO_USER="$TARGET_USER" \
-            python3 "$INSTALL_DIR/infra_tools.py" setup "$@"
+            python3 "$ENTRY_SCRIPT" setup "$@"
     fi
 }
 
@@ -774,8 +773,8 @@ if [ "$RUN_SETUP" -eq 1 ]; then
     if [ "$LOCAL_SETUP" -eq 1 ]; then
         run_local_setup "$@"
     elif [ -t 2 ] && [ -r /dev/tty ]; then
-        run_for_target python3 "$INSTALL_DIR/infra_tools.py" setup "$@" < /dev/tty
+        run_for_target python3 "$ENTRY_SCRIPT" setup "$@" < /dev/tty
     else
-        run_for_target python3 "$INSTALL_DIR/infra_tools.py" setup "$@"
+        run_for_target python3 "$ENTRY_SCRIPT" setup "$@"
     fi
 fi

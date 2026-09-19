@@ -1,18 +1,18 @@
 # Saved configuration operations
 
-infra-tools stores setup arguments, host metadata, credentials, run status, and
+Basaltwater stores setup arguments, host metadata, credentials, run status, and
 history under the active workspace. These commands operate on saved
 configurations without requiring a new setup command line each time.
 
 ## Inspect saved hosts
 
 ```bash
-infra-tools list
-infra-tools list production
-infra-tools info production
-infra-tools list --json
-infra-tools info --compact
-infra-tools cmd production
+basaltw list
+basaltw list production
+basaltw info production
+basaltw list --json
+basaltw info --compact
+basaltw cmd production
 ```
 
 `list` filters by host, friendly name, or tag. `info` shows configuration and
@@ -39,7 +39,7 @@ Tool and profile selection accepts the documented per-tool
 recorded privately before downloaded code executes.
 
 Local and SSH setup execution has a four-hour deadline, including the SSH
-upload. Set `INFRA_TOOLS_SETUP_TIMEOUT` to a positive number of seconds to
+upload. Set `BASALTWATER_SETUP_TIMEOUT` to a positive number of seconds to
 override it on the controller. Source preparation occurs before this budget.
 Output streams during upload and execution; a stalled input or inherited output
 pipe cannot suppress the deadline. Timeout/cancellation terminates the local
@@ -49,7 +49,7 @@ Already completed changes and work detached into separate services are not
 rolled back. Inspect the target and its operation marker before retrying.
 
 Setup credentials and argument files travel in a separate archive and are
-staged under `/run/infra-tools-setup/payload-*` (directories 0700, files 0600).
+staged under `/run/basaltwater-setup/payload-*` (directories 0700, files 0600).
 The installed source tree contains only temporary links to that private lease.
 Normal exit removes it; reboot clears `/run`. Each lease records its owner,
 process ID and expiry (setup deadline plus one minute). Startup removes expired
@@ -75,7 +75,7 @@ Failed writes, reloads or activation restore previous files, modes, ownership,
 enablement and active state. Timer/path updates do not restart a running oneshot.
 This restores unit configuration, not application data changed during startup.
 
-A crash or failed rollback leaves `/etc/systemd/system/.infra-tools-unit-operation.json`
+A crash or failed rollback leaves `/etc/systemd/system/.basaltwater-unit-operation.json`
 and blocks further replacements. Its `backup_dir` contains private `previous.json`
 with the old unit text, metadata and activation states. After confirming the
 original setup process has stopped, restore those files (remove units recorded
@@ -94,15 +94,15 @@ continue without the answer.
 remote setup flow:
 
 ```bash
-infra-tools patch production --ssl --ssl-email admin@example.com
-infra-tools patch production --deploy api.example.com https://github.com/user/api.git
+basaltw patch production --ssl --ssl-email admin@example.com
+basaltw patch production --deploy api.example.com https://github.com/user/api.git
 ```
 
 Use `deploy` to rerun saved configurations:
 
 ```bash
-infra-tools deploy production
-infra-tools deploy production --yes
+basaltw deploy production
+basaltw deploy production --yes
 ```
 
 Some capabilities have narrower fast paths. Use
@@ -112,15 +112,15 @@ without running unrelated setup work.
 ## Recall and reconstruction
 
 ```bash
-infra-tools recall example.com admin
-infra-tools recall example.com admin --key ~/.ssh/id_ed25519
-infra-tools reconstruct
+basaltw recall example.com admin
+basaltw recall example.com admin --key ~/.ssh/id_ed25519
+basaltw reconstruct
 ```
 
 `reconstruct` analyzes the current host; `recall` targets a remote host.
 If the remote tool is missing, recall uploads source into an exclusively created
-`/tmp/infra-tools-recall.*` directory and runs reconstruction there. It does not
-replace or populate `/opt/infra_tools`. The remote command has a 60-second
+`/tmp/basaltwater-recall.*` directory and runs reconstruction there. It does not
+replace or populate `/opt/basaltwater`. The remote command has a 60-second
 deadline and a five-second termination grace; the local SSH process group has
 a 120-second deadline. Remote hosts need `timeout`, `base64`, `tar`, and Python 3.
 Connection/probe failures abort before upload. Normal completion, extraction
@@ -134,19 +134,19 @@ Removal affects workspace metadata only; it does not uninstall software from a
 target:
 
 ```bash
-infra-tools rm old-server
-infra-tools rm old-server --yes
+basaltw rm old-server
+basaltw rm old-server --yes
 ```
 
 ## Interactive shell
 
 ```bash
-infra-tools shell
+basaltw shell
 ```
 
 Useful commands include `list`, `info`, `cmd`, `new`, `setup`, `deploy`, `rm`,
 `recall`, `workspace`, and `proxmox`. Startup commands can be placed in
-`~/.infra_toolsrc`; history is stored at `~/.local/share/infra_tools/shell_history`.
+`~/.basaltwaterrc`; history is stored at `~/.local/share/basaltwater/shell_history`.
 
 ## Testing
 
@@ -163,7 +163,7 @@ The default runner captures test stdout/stderr and reports only the unittest
 failure or error report. Use `--show-output` when diagnosing a noisy failing
 test; use `-v` when you deliberately want every test name and live task log.
 Setup command echoes are also quiet by default because each setup step already
-reports progress. Set `INFRA_TOOLS_VERBOSE=1` to echo every command, and use a
+reports progress. Set `BASALTWATER_VERBOSE=1` to echo every command, and use a
 setup dry run to validate the configuration and preview its handoff without
 applying the target setup. It does not execute or enumerate every target-side
 command.

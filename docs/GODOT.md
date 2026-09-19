@@ -2,19 +2,19 @@
 
 Use `--godot` with any setup profile to install the newest stable standard
 Godot Engine release. The installer resolves the engine version at run time;
-the `v2.0.0` infra-tools release therefore does not pin a Godot version in its
+the `v2.0.0` Basaltwater release therefore does not pin a Godot version in its
 operator contract.
 
 ```bash
 # Graphical editor on an agent workstation
-infra-tools setup agent_workstation 192.168.1.40 agent --godot
+basaltw setup agent_workstation 192.168.1.40 agent --godot
 
 # Headless editor/runtime on an SSH-only agent VM
-infra-tools setup agent_vm 192.168.1.41 agent --godot
+basaltw setup agent_vm 192.168.1.41 agent --godot
 ssh agent@192.168.1.41 'godot --headless --version'
 
 # Web export and itch.io/Steam publishing tools
-infra-tools setup agent_workstation 192.168.1.42 agent \
+basaltw setup agent_workstation 192.168.1.42 agent \
   --godot-bundle web \
   --godot-bundle publishing
 ```
@@ -49,7 +49,7 @@ and agents running as that account see the same export targets.
 The web bundle also installs an isolated Nginx origin on TCP 8443. Setup opens
 that port through the same UFW and `--access-source` policy as other managed
 web ports, creates a publishing directory for the configured account, and
-installs `infra-web` plus the `godot-web-publish` compatibility command
+installs `basaltwater-web` plus the `godot-web-publish` compatibility command
 system-wide. A project with a `Web` export preset can be exported and activated
 without writing a game-specific service or Nginx configuration:
 
@@ -57,9 +57,9 @@ without writing a game-specific service or Nginx configuration:
 cd ~/repos/my-game
 # Complete resource imports on a fresh checkout or after asset changes:
 godot --headless --path . --import
-infra-web publish godot --json
+basaltwater-web publish godot --json
 # Use another preset or create a debug export when needed:
-infra-web publish godot my-game --preset "Web Threads" --debug --json
+basaltwater-web publish godot my-game --preset "Web Threads" --debug --json
 ```
 
 The resulting URL is
@@ -99,10 +99,10 @@ leave the previous publication and files outside the staging directory intact.
 Use the same utility for inspection and cleanup:
 
 ```bash
-infra-web list
-infra-web url my-game
-infra-web doctor my-game
-infra-web remove my-game --yes
+basaltwater-web list
+basaltwater-web url my-game
+basaltwater-web doctor my-game
+basaltwater-web remove my-game --yes
 ```
 
 `doctor` verifies trusted HTTPS, the secure-context and cross-origin isolation
@@ -112,7 +112,7 @@ progress and diagnostics directly to stderr without buffering the export log.
 Stdout reports elapsed time, exported artifact counts and sizes, and whether
 the prior snapshot was replaced. `--open` opens a successful
 publication in the user's default browser. Treat the URL returned by
-`infra-web` as authoritative: static games are paths behind the shared Nginx
+`basaltwater-web` as authoritative: static games are paths behind the shared Nginx
 HTTPS listener, not processes bound to game-specific ports.
 
 ### Live HTTPS forwarding
@@ -121,12 +121,12 @@ Static game exports share port 8443 and do not consume one port per game. For a
 live development server, use the supervised preview lifecycle:
 
 ```bash
-sudo infra-web preview start my-preview --project . --profile godot -- \
+sudo basaltwater-web preview start my-preview --project . --profile godot -- \
   my-preview-server --host '{host}' --port '{port}'
 
-infra-web preview list
-infra-web doctor my-preview
-sudo infra-web preview stop my-preview
+basaltwater-web preview list
+basaltwater-web doctor my-preview
+sudo basaltwater-web preview stop my-preview
 ```
 
 When another process manager already owns the service, bind it to a loopback
@@ -137,14 +137,14 @@ address and register a low-level managed HTTPS listener:
 my-preview-server --host 127.0.0.1 --port 3000
 
 # In another shell, allocate HTTPS and apply Godot's required headers.
-sudo infra-web forward add my-preview \
+sudo basaltwater-web forward add my-preview \
   --listen auto \
   --to 127.0.0.1:3000 \
   --profile godot
 
-infra-web forward list
-infra-web doctor my-preview
-sudo infra-web forward remove my-preview
+basaltwater-web forward list
+basaltwater-web doctor my-preview
+sudo basaltwater-web forward remove my-preview
 ```
 
 See [Internal HTTPS sites and live previews](INTERNAL_WEB.md) for static-site
@@ -153,7 +153,7 @@ cleanup, and certificate trust.
 
 The configured account already has the VM setup's non-interactive sudo access;
 preview and forward mutations require it, while publication and inspection do
-not. `infra-web` allocates TCP 8444–8999 by default, restricts upstreams to
+not. `basaltwater-web` allocates TCP 8444–8999 by default, restricts upstreams to
 unprivileged loopback ports, reuses the managed certificate, enables WebSocket
 proxying, inherits the saved `--access-source` policy, and reconciles
 comment-tagged UFW rules. It validates Nginx before a reload and restores the
@@ -179,10 +179,10 @@ internal hostname. Setup prints the CA file fingerprint, and the user-readable
 certificate is available on the VM at:
 
 ```text
-/srv/infra-tools/web/infra-tools-ca.crt
+/srv/basaltwater/web/basaltwater-ca.crt
 ```
 
-Run `infra-web ca` to print the active CA path and SHA-256 fingerprint. When an
+Run `basaltwater-web ca` to print the active CA path and SHA-256 fingerprint. When an
 existing publicly trusted certificate is in use, the command reports that no
 private CA enrollment is required. Follow [Client CA trust](CLIENT_CA_TRUST.md)
 to verify and enroll the public CA on a Linux, macOS, Windows, ChromeOS,
@@ -197,14 +197,14 @@ needed.
 
 The publishing bundle installs verified Butler GitHub releases system-wide as
 `butler`. It also installs Valve's pinned SteamCMD bootstrap in the configured
-account's `~/.local/share/infra_tools/steamcmd` directory and exposes it as
+account's `~/.local/share/basaltwater/steamcmd` directory and exposes it as
 `~/.local/bin/steamcmd`. SteamCMD performs its supported self-update when setup
 or weekly maintenance runs. Valve does not provide a Linux ARM64 SteamCMD
 client, so ARM64 targets receive Butler and report that SteamCMD was skipped.
 Because SteamCMD updates its own user-owned installation, the publishing
 bundle requires a non-root setup account.
 
-infra-tools does not collect, stage, or persist publishing credentials. Sign in
+Basaltwater does not collect, stage, or persist publishing credentials. Sign in
 as the configured account only when needed:
 
 ```bash
@@ -218,7 +218,7 @@ system-wide, so browser-capable agents can test the same URL shown after
 publishing without a separate server process.
 
 When Codex or OpenCode is selected on the target, the web bundle adds the
-`infra-tools-godot-web` and `infra-tools-web-gateway` capability skills under
+`basaltwater-godot-web` and `basaltwater-web-gateway` capability skills under
 `~/.agents/skills`, alongside the base workflow set. Both agents discover that
 shared standard location. The skills teach agents to publish and diagnose the
 managed origin, use loopback for live servers, and avoid direct Nginx/UFW edits
@@ -252,7 +252,7 @@ See [Godot's pause behavior](https://docs.godotengine.org/en/stable/tutorials/sc
 Screenshots alone cannot quantify physics feel. When the project task includes
 physics investigation, add or reuse project-owned instrumentation, disabled by
 default and gated by `OS.is_debug_build()`. For web debugging, export with
-`infra-web publish godot my-game-debug --debug --json` using a distinct chosen slug
+`basaltwater-web publish godot my-game-debug --debug --json` using a distinct chosen slug
 so the diagnostic build does not replace the normal game. A debug export alone
 does not add telemetry or expose Godot scene objects to the browser.
 
@@ -374,7 +374,7 @@ debug instrumentation and paused captures do not establish release performance.
 
 ## Release and integrity policy
 
-Godot itself is not installed from Debian's default APT sources. infra-tools
+Godot itself is not installed from Debian's default APT sources. Basaltwater
 queries stable releases from the official `godotengine/godot` repository,
 selects the matching x86_64 or arm64 Linux archive, requires the
 publisher-provided SHA-256 from GitHub release metadata, and verifies the

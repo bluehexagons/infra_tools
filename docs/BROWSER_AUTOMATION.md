@@ -1,6 +1,6 @@
 # Agent browser automation
 
-infra-tools can provision a browser that Codex and OpenCode use directly from
+Basaltwater can provision a browser that Codex and OpenCode use directly from
 their agent sessions. This is separate from the workstation browser selected
 with `--browser`: agent automation uses a pinned Playwright MCP package and its
 matching Chromium build, while `--browser` installs an interactive desktop or
@@ -11,7 +11,7 @@ terminal browser for a person.
 Select at least one compatible agent and request the provider explicitly:
 
 ```bash
-infra-tools setup workstation_dev 192.168.0.41 agent \
+basaltw setup workstation_dev 192.168.0.41 agent \
   --provision-on ts1 --name agent-1 \
   --image-storage ts1-storage \
   --memory 4G --balloon-min 1G --storage root ts1-storage 32G \
@@ -23,7 +23,7 @@ infra-tools setup workstation_dev 192.168.0.41 agent \
 
 `--browser-automation playwright` currently requires `--agent-tool codex`
 or `--agent-tool opencode`. It registers the managed
-`infra-tools-playwright` MCP server
+`basaltwater-playwright` MCP server
 only for the compatible tools selected by that setup. GitHub CLI, Claude Code,
 and T3 Code do not receive a browser integration. The browser capability owns
 its system Node.js dependency, so `--node` is not required unless projects on
@@ -40,16 +40,16 @@ For an explicit `--steps` setup, include `install_browser_automation` after
 installing the selected compatible agent; it is available as a registered
 custom step as well.
 
-Compatible agent setups install `infra-tools-playwright-testing` when this is
+Compatible agent setups install `basaltwater-playwright-testing` when this is
 the only browser capability. A VM that also provisions T3 Code receives the
-combined `infra-tools-browser-testing` skill instead. Setup removes a stale
-infra-tools-managed browser variant when that capability combination changes;
+combined `basaltwater-browser-testing` skill instead. Setup removes a stale
+Basaltwater-managed browser variant when that capability combination changes;
 see [Managed agent workflow skills](AGENT_SKILLS.md).
 
 ## Installed components and agent configuration
 
-Setup installs the exact Playwright MCP version declared by infra-tools under
-`/opt/infra-tools-playwright`, verifies the npm package version and registry
+Setup installs the exact Playwright MCP version declared by Basaltwater under
+`/opt/basaltwater-playwright`, verifies the npm package version and registry
 integrity metadata, installs native browser dependencies, and downloads the
 matching Chromium build into the target user's Playwright cache. npm lifecycle
 scripts are disabled during the root-owned package install.
@@ -59,15 +59,15 @@ download.
 
 The managed launchers are:
 
-- `/usr/local/bin/infra-tools-playwright-mcp` for MCP clients;
-- `/usr/local/bin/infra-tools-playwright-doctor` for a local smoke test.
+- `/usr/local/bin/basaltwater-playwright-mcp` for MCP clients;
+- `/usr/local/bin/basaltwater-playwright-doctor` for a local smoke test.
 
 Codex registration is performed through `codex mcp`; OpenCode's existing JSON
 or JSONC configuration is merged atomically. JSONC comments and formatting are
 normalized during the rewrite, while configuration values are preserved. If
 `--agent-config active` copied a config,
 the browser registration is applied afterward, so the explicit setup choice
-owns the `infra-tools-playwright` entry while preserving unrelated settings and
+owns the `basaltwater-playwright` entry while preserving unrelated settings and
 MCP servers.
 Malformed target configuration is rejected. Symlinked, hard-linked, or
 non-regular target files are rejected before their contents are read or merged.
@@ -88,7 +88,7 @@ browser profile is required.
 
 Generated snapshots, console captures, screenshots, and other MCP evidence
 default to the private
-`~/.local/state/infra_tools/playwright-mcp` directory instead of the current
+`~/.local/state/basaltwater/playwright-mcp` directory instead of the current
 project. The launcher applies a 256 MiB output ceiling so older evidence is
 evicted without dirtying or filling active Git worktrees. An agent may still
 name an explicit output file when the evidence belongs in a requested
@@ -98,7 +98,7 @@ explicit name deliberately resolves in the active workspace.
 
 ## What agents can do
 
-Once provisioned, Codex or OpenCode can ask the `infra-tools-playwright` MCP server to open
+Once provisioned, Codex or OpenCode can ask the `basaltwater-playwright` MCP server to open
 pages, inspect rendered content, click controls, fill forms, and capture
 screenshots. The vision tools include safe viewport-coordinate mouse input for
 canvas applications that expose no internal DOM controls, avoiding unrestricted
@@ -112,7 +112,7 @@ process limit, so a cold browser can complete while a small ballooned VM is
 temporarily swapping. Exceeding that limit reports likely memory, swap, or
 storage pressure instead of an ambiguous locator timeout.
 
-Website authentication is deliberately not part of infra-tools credential
+Website authentication is deliberately not part of Basaltwater credential
 copying. Supply site-specific credentials through the application or a scoped
 secret workflow appropriate to the task; do not put passwords or session tokens
 in setup commands, repository files, prompts intended for logging, or agent
@@ -227,8 +227,8 @@ continuous screenshots before attributing capture overhead to the game.
 T3 Code's collaborative preview and the managed Playwright fallback do not use
 the same network origin. The collaborative browser runs in the connected
 client's context, while managed Playwright runs on the agent VM. Consequently,
-an internal `infra-web` URL such as `https://192.168.x.x:8443/...` can pass
-`curl` and `infra-web doctor` on the VM yet fail in the collaborative preview
+an internal `basaltwater-web` URL such as `https://192.168.x.x:8443/...` can pass
+`curl` and `basaltwater-web doctor` on the VM yet fail in the collaborative preview
 when the client lacks a route to that LAN, is outside the gateway's allowed
 source ranges, or has not enrolled the local CA.
 
@@ -242,7 +242,7 @@ unreachable through both `environment-port` and a direct loopback URL. Treat a
 failed navigation that leaves the tab at `about:blank` with no network request
 as a client/VM routing boundary after verifying the VM endpoint. Do not rebind
 the development server or widen firewall policy solely for automation; use
-the managed VM-local fallback, or use an explicit `infra-web` publication when
+the managed VM-local fallback, or use an explicit `basaltwater-web` publication when
 client access is part of the task.
 
 Collaborative preview is an opportunistic test surface. During normal agent
@@ -334,12 +334,12 @@ snapshot and network error. Use the observed failure to choose the next step:
 | Observation | Next step |
 | --- | --- |
 | No automation host or unavailable capture | Use healthy VM-local Playwright when VM-origin coverage fits; otherwise report the browser gap. |
-| Explicit `ERR_CERT_AUTHORITY_INVALID` | Offer `infra-web ca` and [Client CA trust](CLIENT_CA_TRUST.md) only when the user wants client access restored. Otherwise skip that client-origin check. |
+| Explicit `ERR_CERT_AUTHORITY_INVALID` | Offer `basaltwater-web ca` and [Client CA trust](CLIENT_CA_TRUST.md) only when the user wants client access restored. Otherwise skip that client-origin check. |
 | Timeout, refused connection, or unreachable address | Check client routing and the gateway's source policy; CA enrollment will not repair connectivity. |
 | Background DOM works but no visible surface or snapshot | Follow the bounded stale-preview recovery above. |
 
 Before using provisioned Playwright as the fallback, run
-`infra-tools agent doctor --capability browser --json`. If the capability is
+`basaltw agent doctor --capability browser --json`. If the capability is
 absent or unhealthy, continue non-browser checks and report the missing
 coverage. Do not install another browser stack merely to fill that gap.
 
@@ -353,7 +353,7 @@ optional and does not block unrelated work.
 Run the browser check on the configured VM as the setup user:
 
 ```bash
-infra-tools agent doctor --capability browser --json
+basaltw agent doctor --capability browser --json
 ```
 
 This checks the browser capability without requiring unrelated terminal tools.
@@ -365,7 +365,7 @@ launchers are executable, root-owned regular files without group or world write
 access; explicit managed-Chromium selection and current private, bounded
 evidence, safe-coordinate, and one-second-settle defaults are present; every
 installed compatible agent has the managed MCP registration; exactly one
-infra-tools-managed Playwright-capable browser workflow skill is installed as
+Basaltwater-managed Playwright-capable browser workflow skill is installed as
 a bounded, user-owned file without group or world write access;
 active managed MCP processes use those same safe defaults; and the local
 interaction/rendering smoke test passes. A stale or unsafe launcher is
@@ -391,12 +391,12 @@ and support bundles.
 For lower-level checks:
 
 ```bash
-/usr/local/bin/infra-tools-playwright-doctor
+/usr/local/bin/basaltwater-playwright-doctor
 codex mcp list
 ```
 
 Inspect `~/.config/opencode/opencode.json` or `opencode.jsonc` for OpenCode's
-`mcp.infra-tools-playwright` entry. The managed OpenCode entry uses a 30-second tool
+`mcp.basaltwater-playwright` entry. The managed OpenCode entry uses a 30-second tool
 discovery timeout to accommodate cold VM startup. Do not print agent auth files
 while troubleshooting.
 
@@ -414,5 +414,5 @@ Chromium retains its browser sandbox; VM targets are recommended. Browser
 namespaces and sandboxes may not work in every container policy, so use a VM
 when browser automation must be reproducible. Rerunning setup reconciles the
 managed registration and package version. Version changes are delivered through
-an infra-tools update and should be reviewed like other executable dependency
+a Basaltwater update and should be reviewed like other executable dependency
 updates.

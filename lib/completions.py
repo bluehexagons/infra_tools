@@ -5,42 +5,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
-INFRA_TOOLS_COMMAND = "infra-tools"
-LEGACY_INFRA_TOOLS_COMMANDS = ("infra_tools", "infra_tools.py")
-LEGACY_COMPLETION_MARKER = "# infra_tools shell completions"
+BASALTWATER_COMMAND = "basaltw"
 
 
-def _retire_legacy_completion_files(completions_dir: Path, names: tuple[str, ...]) -> None:
-    """Remove legacy generated completion files without touching directories."""
-    for name in names:
-        path = completions_dir / name
-        if path.is_symlink() or path.is_file():
-            path.unlink()
 
 
-def _retire_legacy_shell_registrations(config_file: Path) -> None:
-    """Remove generated registrations for the old command from one shell config."""
-    if not config_file.is_file():
-        return
-
-    legacy_registration_lines = {
-        f'eval "$(register-python-argcomplete {name})"'
-        for name in LEGACY_INFRA_TOOLS_COMMANDS
-    }
-    original_lines = config_file.read_text(encoding="utf-8").splitlines(keepends=True)
-    cleaned_lines = [
-        line
-        for line in original_lines
-        if line.strip() != LEGACY_COMPLETION_MARKER
-        and line.strip() not in legacy_registration_lines
-    ]
-    if cleaned_lines != original_lines:
-        config_file.write_text("".join(cleaned_lines), encoding="utf-8")
 
 
-def _retire_legacy_user_completions(config_file: Path) -> None:
-    """Remove old generated registrations when installing the new command."""
-    _retire_legacy_shell_registrations(config_file)
 
 
 def detect_shell() -> str:
@@ -85,8 +56,8 @@ def _find_register_argcomplete() -> str | None:
     return shutil.which("register-python-argcomplete")
 
 
-def setup_bash_completions(command_name: str = INFRA_TOOLS_COMMAND, global_install: bool = False) -> bool:
-    """Setup bash completions for infra-tools."""
+def setup_bash_completions(command_name: str = BASALTWATER_COMMAND, global_install: bool = False) -> bool:
+    """Setup bash completions for basaltw."""
     register_cmd = _find_register_argcomplete()
     if register_cmd is None:
         print("Error: register-python-argcomplete not found in PATH")
@@ -113,19 +84,12 @@ def setup_bash_completions(command_name: str = INFRA_TOOLS_COMMAND, global_insta
                 return False
 
             completion_file.write_text(result.stdout)
-            if command_name == INFRA_TOOLS_COMMAND:
-                _retire_legacy_completion_files(
-                    completions_dir,
-                    LEGACY_INFRA_TOOLS_COMMANDS,
-                )
             print(f"Created: {completion_file}")
             print(f"\nSystem-wide bash completions installed in {completions_dir}")
             print("New shells will have tab completion enabled automatically.")
             return True
 
         config_file = get_bash_config_file()
-        if command_name == INFRA_TOOLS_COMMAND:
-            _retire_legacy_user_completions(config_file)
         if config_file.exists():
             content = config_file.read_text()
             if "argcomplete" in content and command_name in content:
@@ -133,7 +97,7 @@ def setup_bash_completions(command_name: str = INFRA_TOOLS_COMMAND, global_insta
                 return True
 
         lines = [
-            "# infra-tools shell completions",
+            "# Basaltwater shell completions",
             f'eval "$(register-python-argcomplete {command_name})"',
         ]
         with open(config_file, "a", encoding="utf-8") as handle:
@@ -147,8 +111,8 @@ def setup_bash_completions(command_name: str = INFRA_TOOLS_COMMAND, global_insta
         return False
 
 
-def setup_zsh_completions(command_name: str = INFRA_TOOLS_COMMAND, global_install: bool = False) -> bool:
-    """Setup zsh completions for infra-tools."""
+def setup_zsh_completions(command_name: str = BASALTWATER_COMMAND, global_install: bool = False) -> bool:
+    """Setup zsh completions for basaltw."""
     register_cmd = _find_register_argcomplete()
     if register_cmd is None:
         print("Error: register-python-argcomplete not found in PATH")
@@ -190,19 +154,12 @@ def setup_zsh_completions(command_name: str = INFRA_TOOLS_COMMAND, global_instal
                 return False
 
             completion_file.write_text(result.stdout)
-            if command_name == INFRA_TOOLS_COMMAND:
-                _retire_legacy_completion_files(
-                    completions_dir,
-                    tuple(f"_{name}" for name in LEGACY_INFRA_TOOLS_COMMANDS),
-                )
             print(f"Created: {completion_file}")
             print(f"\nZsh completions installed in {completions_dir}")
             print("You may need to run 'compinit' or restart your shell.")
             return True
 
         config_file = get_zsh_config_file()
-        if command_name == INFRA_TOOLS_COMMAND:
-            _retire_legacy_user_completions(config_file)
         if config_file.exists():
             content = config_file.read_text()
             if "argcomplete" in content and command_name in content:
@@ -210,7 +167,7 @@ def setup_zsh_completions(command_name: str = INFRA_TOOLS_COMMAND, global_instal
                 return True
 
         lines = [
-            "# infra-tools shell completions",
+            "# Basaltwater shell completions",
             f'eval "$(register-python-argcomplete {command_name})"',
         ]
         with open(config_file, "a", encoding="utf-8") as handle:
@@ -224,8 +181,8 @@ def setup_zsh_completions(command_name: str = INFRA_TOOLS_COMMAND, global_instal
         return False
 
 
-def setup_fish_completions(command_name: str = INFRA_TOOLS_COMMAND, global_install: bool = False) -> bool:
-    """Setup fish completions for infra-tools."""
+def setup_fish_completions(command_name: str = BASALTWATER_COMMAND, global_install: bool = False) -> bool:
+    """Setup fish completions for basaltw."""
     del global_install
 
     register_cmd = _find_register_argcomplete()
@@ -249,11 +206,6 @@ def setup_fish_completions(command_name: str = INFRA_TOOLS_COMMAND, global_insta
             return False
 
         completion_file.write_text(result.stdout)
-        if command_name == INFRA_TOOLS_COMMAND:
-            _retire_legacy_completion_files(
-                completions_dir,
-                tuple(f"{name}.fish" for name in LEGACY_INFRA_TOOLS_COMMANDS),
-            )
         print(f"Created: {completion_file}")
         print(f"\nFish completions installed in {completions_dir}")
         print("Completions are active immediately in new fish shells.")
@@ -263,16 +215,16 @@ def setup_fish_completions(command_name: str = INFRA_TOOLS_COMMAND, global_insta
         return False
 
 
-def setup_tcsh_completions(command_name: str = INFRA_TOOLS_COMMAND, global_install: bool = False) -> bool:
-    """Setup tcsh completions for infra-tools."""
+def setup_tcsh_completions(command_name: str = BASALTWATER_COMMAND, global_install: bool = False) -> bool:
+    """Setup tcsh completions for basaltw."""
     del command_name, global_install
     print("Note: tcsh completion support is limited.")
     print("Consider using bash or zsh for full tab completion support.")
     return False
 
 
-def run_completion_setup(shell: str, global_install: bool, command_name: str = INFRA_TOOLS_COMMAND) -> int:
-    """Install shell completion for the main infra-tools CLI."""
+def run_completion_setup(shell: str, global_install: bool, command_name: str = BASALTWATER_COMMAND) -> int:
+    """Install shell completion for the Basaltwater CLI."""
     if shell == "auto":
         shell = detect_shell()
         print(f"Detected shell: {shell}")

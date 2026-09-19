@@ -24,7 +24,7 @@ the notification API contract.
 HTTPS is recommended:
 
 ```bash
-infra-tools setup agent_vm 192.168.1.50 agent \
+basaltw setup agent_vm 192.168.1.50 agent \
   --web-panel \
   --web-panel-password 'replace-this-value' \
   --ssl
@@ -34,7 +34,7 @@ The default port is 80 for HTTP or 443 with `--ssl`. Use another port when
 needed:
 
 ```bash
-infra-tools patch 192.168.1.50 agent \
+basaltw patch 192.168.1.50 agent \
   --web-panel 9443 \
   --web-panel-password 'replace-this-value' \
   --ssl
@@ -63,7 +63,7 @@ agent and user workflow.
 Enable the HTTPS receiver on an existing panel:
 
 ```bash
-infra-tools patch 192.168.1.50 agent \
+basaltw patch 192.168.1.50 agent \
   --web-panel --ssl --web-panel-notification-ingest
 ```
 
@@ -72,7 +72,7 @@ a sender. It contains a bearer token, so treat it as a credential. The sender
 uses the normal webhook setup:
 
 ```bash
-infra-tools setup agent_vm sender.example agent \
+basaltw setup agent_vm sender.example agent \
   --notify webhook 'https://PANEL_HOST/api/v1/notifications#TOKEN'
 ```
 
@@ -87,10 +87,10 @@ retries.
 Run these checks on the panel host:
 
 ```bash
-sudo systemctl status infra-tools-web-panel.service
-sudo journalctl -u infra-tools-web-panel.service -n 100 --no-pager
-sudo systemctl status infra-tools-web-panel-audit.timer
-sudo journalctl -u infra-tools-web-panel-audit.service -n 100 --no-pager
+sudo systemctl status basaltwater-web-panel.service
+sudo journalctl -u basaltwater-web-panel.service -n 100 --no-pager
+sudo systemctl status basaltwater-web-panel-audit.timer
+sudo journalctl -u basaltwater-web-panel-audit.service -n 100 --no-pager
 sudo nginx -t
 ```
 
@@ -99,7 +99,7 @@ sudo nginx -t
 | Setup rejects notification ingest | Include both `--web-panel` and `--ssl` |
 | No sender events | Confirm sender URL, token, and HTTPS reachability |
 | Audit activity is stale | Check the audit timer and service journal |
-| Login is repeatedly rejected | Check Nginx and the `infra-tools-web-panel` fail2ban jail |
+| Login is repeatedly rejected | Check Nginx and the `basaltwater-web-panel` fail2ban jail |
 | Browser warns about the certificate | Follow [Client CA trust](CLIENT_CA_TRUST.md) |
 
 Failed browser logins are written to a privacy-preserving Nginx log. Passwords

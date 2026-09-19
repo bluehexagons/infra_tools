@@ -16,15 +16,15 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_WHEEL_PATHS = (
-    "infra_tools.py",
+    "basaltwater.py",
     "remote_setup.py",
     "lib/config.py",
     "plugins/common.py",
     "common/agent_steps.py",
     "common/cachyos_steps.py",
-    "common/agent_skills/infra-tools-cachyos-workstation/SKILL.md",
-    "common/agent_skills/infra-tools-cachyos-workspace/SKILL.md",
-    "common/agent_skills/infra-tools-cachyos-t3code/SKILL.md",
+    "common/agent_skills/basaltwater-cachyos-workstation/SKILL.md",
+    "common/agent_skills/basaltwater-cachyos-workspace/SKILL.md",
+    "common/agent_skills/basaltwater-cachyos-t3code/SKILL.md",
     "deploy/deploy_steps.py",
     "desktop/config/xrdp.ini.template",
     "security/security_steps.py",
@@ -39,7 +39,7 @@ SOURCE_COPY_IGNORE = shutil.ignore_patterns(
     ".env",
     ".env.*",
     ".git",
-    ".infra_tools",
+    ".basaltwater",
     ".nox",
     ".tox",
     ".venv",
@@ -81,6 +81,8 @@ def _check_wheel_contents(wheel: Path) -> None:
         raise RuntimeError(
             "Wheel is missing required runtime files: " + ", ".join(missing)
         )
+    if "infra_tools.py" in names or any("common/agent_skills/infra-tools-" in name for name in names):
+        raise RuntimeError("Wheel includes retired entry points or skill IDs")
     generated = sorted(
         name
         for name in names
@@ -98,7 +100,9 @@ def _venv_command(venv_dir: Path, command: str) -> Path:
     return venv_dir / bin_dir / command
 
 
-def _smoke_installed_wheel(wheel: Path, work_dir: Path) -> None:
+def _smoke_installed_wheel(
+    wheel: Path, work_dir: Path,
+) -> None:
     venv_dir = work_dir / "venv"
     venv.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
     python = _venv_command(venv_dir, "python")
@@ -107,19 +111,24 @@ def _smoke_installed_wheel(wheel: Path, work_dir: Path) -> None:
     environment.pop("PYTHONPATH", None)
     environment.pop("PYTHONHOME", None)
 
+
+
     subprocess.run(
         [str(pip), "install", "--no-deps", str(wheel)],
         check=True,
         cwd=work_dir,
         env=environment,
     )
+    for retired in ("infra-tools", "infra_tools", "basaltwater"):
+        if _venv_command(venv_dir, retired).exists():
+            raise RuntimeError(f"Wheel installed an unexpected launcher: {retired}")
     subprocess.run(
         [
             str(python),
             "-I",
             "-c",
             (
-                "import common, deploy, desktop, game, infra_tools, lib, plugins, "
+                "import common, deploy, desktop, game, basaltwater, lib, plugins, "
                 "remote_setup, security, smb, sync, web; "
                 "import sync.service_tools.scrub_par2; "
                 "import web.service_tools.webhook_manager"
@@ -130,7 +139,7 @@ def _smoke_installed_wheel(wheel: Path, work_dir: Path) -> None:
         env=environment,
     )
     subprocess.run(
-        [str(_venv_command(venv_dir, "infra-tools")), "--help"],
+        [str(_venv_command(venv_dir, "basaltw")), "--help"],
         check=True,
         cwd=work_dir,
         env=environment,
@@ -141,7 +150,7 @@ def _smoke_installed_wheel(wheel: Path, work_dir: Path) -> None:
             str(python),
             "-I",
             "-c",
-            "from importlib.metadata import version; print(version('infra_tools'))",
+            "from importlib.metadata import version; print(version('basaltwater'))",
         ],
         check=True,
         cwd=work_dir,
@@ -150,15 +159,15 @@ def _smoke_installed_wheel(wheel: Path, work_dir: Path) -> None:
         text=True,
     ).stdout.strip()
     version_result = subprocess.run(
-        [str(_venv_command(venv_dir, "infra-tools")), "--version"],
+        [str(_venv_command(venv_dir, "basaltw")), "--version"],
         check=True,
         cwd=work_dir,
         env=environment,
         capture_output=True,
         text=True,
     )
-    if version_result.stdout.strip() != f"infra-tools {installed_version}":
-        raise RuntimeError("Installed infra-tools launcher returned the wrong version")
+    if version_result.stdout.strip() != f"basaltw {installed_version}":
+        raise RuntimeError("Installed basaltw launcher returned the wrong version")
     subprocess.run(
         [str(_venv_command(venv_dir, "webhook_manager")), "--help"],
         check=True,
@@ -166,6 +175,7 @@ def _smoke_installed_wheel(wheel: Path, work_dir: Path) -> None:
         env=environment,
         stdout=subprocess.DEVNULL,
     )
+
 
 
 def main() -> int:
@@ -176,9 +186,9 @@ def main() -> int:
         type=Path,
         help="Existing wheel to inspect; omit to build one in a temporary directory",
     )
-    args = parser.parse_args()
 
-    with tempfile.TemporaryDirectory(prefix="infra-tools-wheel-") as temp_dir:
+    args = parser.parse_args()
+    with tempfile.TemporaryDirectory(prefix="basaltw-wheel-") as temp_dir:
         work_dir = Path(temp_dir)
         wheel = args.wheel.resolve() if args.wheel else _build_wheel(work_dir / "dist")
         if not wheel.is_file():

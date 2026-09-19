@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 
-WORKSPACE_ENV_VAR = "INFRA_TOOLS_WORKSPACE"
-DEFAULT_WORKSPACE_DIR = "~/.config/infra_tools"
+
+WORKSPACE_ENV_VAR = "BASALTWATER_WORKSPACE"
+DEFAULT_WORKSPACE_DIR = "~/.config/basaltwater"
 
 
 def normalize_workspace_dir(path: str | None = None) -> str:
-    """Return an absolute workspace root path."""
+    """Resolve the workspace, migrating recent default client data on access."""
     raw_path = path if path is not None else os.environ.get(WORKSPACE_ENV_VAR, DEFAULT_WORKSPACE_DIR)
     expanded_path = os.path.expanduser(raw_path)
-    return os.path.abspath(expanded_path)
+    workspace = os.path.abspath(expanded_path)
+    if workspace == os.path.abspath(os.path.expanduser(DEFAULT_WORKSPACE_DIR)):
+        from lib.client_migration import migrate_client_workspace
+
+        migrate_client_workspace(Path(workspace))
+    return workspace
 
 
 def set_workspace_dir(path: str | None) -> str:

@@ -29,11 +29,16 @@ criteria.
 The live operator contract is maintained under `docs/`; these plans may
 intentionally describe work deferred beyond `v2.0.0`.
 
+Current examples use `basaltw`. Dated audits and historical proposals retain
+the names used when their evidence was recorded; they do not override the
+[current CLI reference](../COMMAND_LINE.md). Rename implementation and public
+release are separate states, tracked in the [release checklist](../BASALTWATER_RELEASE.md).
+
 ## Project portfolio
 
 | Project | State | Priority | Issue alignment | Canonical plan and next boundary |
 | --- | --- | --- | --- | --- |
-| Basaltwater identity and rename | Name and CLI selected; implementation unscheduled | Unscheduled | No dedicated issue | [Basaltwater rename](BASALTWATER_RENAME.md): use Basaltwater / `basaltwater` / `basaltw`; inventory existing contracts, define upgrade migration, and develop the shared visual identity before public cutover. |
+| Basaltwater identity and rename | Repository implementation complete; release qualification pending | Unscheduled | No dedicated issue | [Basaltwater rename](BASALTWATER_RENAME.md): full source/runtime rename, recent-install migration, documentation, skills and visual identity delivered; [release checklist](../BASALTWATER_RELEASE.md) tracks live VM qualification and external publication. |
 | Transactional execution and state | Active; setup/deploy markers landed | P0 | [#97](https://github.com/bluehexagons/infra_tools/issues/97) | [Transactional execution](TRANSACTIONAL_EXECUTION.md): add safe phase-specific recovery, tighten corrupt-state handling, and finish the command-caller inventory. |
 | Application platform ownership and Coolify | Deferred | Unscheduled | No dedicated issue | [Coolify integration](COOLIFY_INTEGRATION.md): record the decision to keep the controller lightweight and revisit Coolify only as an optional, isolated platform for a concrete complex application. |
 | Manifest deployment platform | Queued behind P0 | P1 | [#63](https://github.com/bluehexagons/infra_tools/issues/63) and the remaining deployment scope of [#97](https://github.com/bluehexagons/infra_tools/issues/97) | Implement [deploy secrets](DEPLOY_SECRETS.md), transactional activation, then [CI/CD manifest reuse](CICD_MANIFEST_REUSE.md) for the native path. |

@@ -1,6 +1,6 @@
 # XRDP configuration and troubleshooting
 
-`infra-tools` configures one shared XRDP desktop owned by the setup account, with
+`basaltw` configures one shared XRDP desktop owned by the setup account, with
 dynamic resolution. The supported path uses Xorg with `xorgxrdp`; it does not
 use Xvnc or a Proxmox emulated display as the RDP display.
 
@@ -38,7 +38,7 @@ files without prompting, then reapplies the managed versions after the
 package transaction completes.
 
 Generic APT repair preserves this exact managed source only with its matching
-low-priority pin. It restores sources commented out by older infra-tools repair
+low-priority pin. It restores sources commented out by older basaltwater repair
 runs; desktop setup also reconciles the source when packages are already
 installed. Package upgrades still require `--refresh-packages` for this pinned
 XRDP path; restoring the source alone does not upgrade the running server.
@@ -46,7 +46,7 @@ XRDP path; restoring the source alone does not upgrade the running server.
 For a remote target, provide the Unix account password through a secret source:
 
 ```bash
-infra-tools setup workstation_dev 10.0.0.25 agent \
+basaltw setup workstation_dev 10.0.0.25 agent \
   --desktop xfce --rdp --password "$RDP_PASSWORD" \
   --lan-access
 ```
@@ -55,7 +55,7 @@ For local setup of an existing non-root desktop account, reuse its password
 without placing it in process arguments:
 
 ```bash
-sudo "$(command -v infra-tools)" setup workstation_dev localhost "$USER" \
+sudo "$(command -v basaltw)" setup workstation_dev localhost "$USER" \
   --control-plane --desktop xfce --rdp --rdp-existing-password
 ```
 
@@ -75,7 +75,7 @@ Add `--rdp-source IP_OR_CIDR` when a source should reach RDP without being
 added to the generic policy; RDP uses the union of both lists. Without either
 kind of source, XRDP remains reachable through the globally rate-limited rule.
 Use `--rdp-bind-address IP` to bind the listener to one local address. The
-firewall reconciles only rules tagged `infra_tools RDP` and does not remove
+firewall reconciles only rules tagged `basaltwater RDP` and does not remove
 unrelated UFW rules.
 This reconciliation also runs for `server_lite --rdp`, before starting XRDP.
 
@@ -98,13 +98,13 @@ keep independent long-running work in SSH, tmux, or supervised agent services.
 As the configured account, without sudo:
 
 ```bash
-infra-tools desktop status
-infra-tools desktop start
-infra-tools desktop exec -- thunar
-infra-tools desktop screenshot --output /tmp/desktop-1.png
-infra-tools desktop control pause
-infra-tools desktop control resume
-infra-tools desktop logout
+basaltw desktop status
+basaltw desktop start
+basaltw desktop exec -- thunar
+basaltw desktop screenshot --output /tmp/desktop-1.png
+basaltw desktop control pause
+basaltw desktop control resume
+basaltw desktop logout
 ```
 
 All commands return JSON. `status` observes without starting a session; `start`
@@ -170,9 +170,9 @@ The desktop skill documents capture selection and response attachment guidance.
 Use those exact values for bounded input, then inspect the result:
 
 ```bash
-infra-tools desktop input --generation GENERATION --geometry 1280 720 click --x 100 --y 200
-infra-tools desktop input --generation GENERATION --geometry 1280 720 key --key ctrl+s
-infra-tools desktop input --generation GENERATION --geometry 1280 720 text --text 'Example'
+basaltw desktop input --generation GENERATION --geometry 1280 720 click --x 100 --y 200
+basaltw desktop input --generation GENERATION --geometry 1280 720 key --key ctrl+s
+basaltw desktop input --generation GENERATION --geometry 1280 720 text --text 'Example'
 ```
 
 `move` takes coordinates; click buttons 4–7 scroll. Each mutation acquires a
@@ -186,7 +186,7 @@ paths, never overwritten; delete temporary evidence after use.
 For almost all browser testing, use available T3 Code collaborative preview or
 managed Playwright. Desktop input is for native applications, desktop-specific
 integration, or a justified fallback. These browsers have separate profiles
-and authentication. The managed `infra-tools-desktop` skill provides routing
+and authentication. The managed `basaltwater-desktop` skill provides routing
 and command guidance for Codex/OpenCode.
 
 ## Native application productivity
@@ -195,18 +195,18 @@ Setup installs `wmctrl` and `python3-tk` from the normal package repositories
 and adds **Shared Desktop Control** to the application menu. Rerun setup to
 install these additions; setup handles managed desktop logout. The control
 window shows agent status and offers pause/resume; closing it leaves pause in
-effect. Agents can open it with `infra-tools desktop handoff` before handing over.
+effect. Agents can open it with `basaltw desktop handoff` before handing over.
 
 ```bash
-infra-tools desktop doctor
-infra-tools desktop open /home/agent/document.txt
-infra-tools desktop open /home/agent/document.txt --reveal
-infra-tools desktop exec --wait-window Mousepad --timeout 15 -- mousepad
-infra-tools desktop windows
-infra-tools desktop window focus --window WINDOW --identity IDENTITY --generation GENERATION
-infra-tools desktop window resize --window WINDOW --identity IDENTITY --generation GENERATION --width 800 --height 600
-infra-tools desktop wait --window WINDOW --condition active --generation GENERATION
-infra-tools desktop screenshot --active-window
+basaltw desktop doctor
+basaltw desktop open /home/agent/document.txt
+basaltw desktop open /home/agent/document.txt --reveal
+basaltw desktop exec --wait-window Mousepad --timeout 15 -- mousepad
+basaltw desktop windows
+basaltw desktop window focus --window WINDOW --identity IDENTITY --generation GENERATION
+basaltw desktop window resize --window WINDOW --identity IDENTITY --generation GENERATION --width 800 --height 600
+basaltw desktop wait --window WINDOW --condition active --generation GENERATION
+basaltw desktop screenshot --active-window
 ```
 
 Use the configured account's actual document paths. `open` accepts existing local
@@ -235,7 +235,7 @@ human pause remains available. Timeout defaults to 15 seconds (maximum 120),
 plus any in-flight bounded request. A timeout does not kill or relaunch the app.
 
 Screenshots without `--output` receive unique persistent paths under private
-`~/Pictures/infra-tools/` and return a capture timestamp. These files are never
+`~/Pictures/basaltwater/` and return a capture timestamp. These files are never
 automatically removed; retain linked response artifacts and clean disposable ones.
 
 `sequence PATH --generation GENERATION` accepts a JSON list of 1–20 `input`,
@@ -292,7 +292,7 @@ Unknown display-manager aliases require operator migration. OCI and
 are required. XFCE is the primary target; other environments and LXC need the
 live qualification below before relying on them.
 
-The dedicated `infra-desktop` group contains only the configured owner. SSH's
+The dedicated `basaltwater-desktop` group contains only the configured owner. SSH's
 `remoteusers` group remains separate. User window-manager overrides and alternate
 RDP shells are disabled. Legacy `~/startwm.sh` files are no longer executed.
 The startup wrapper owns a private D-Bus session; applications launched by the
@@ -310,9 +310,9 @@ incorporate vendor unit changes. The obsolete `shared-desktop.conf` drop-in is
 removed during migration.
 
 Managed XRDP files keep first-install `.bak` copies. Desktop configuration is
-versioned at `/etc/infra-tools/desktop.json`, with a `.json.bak` on replacement.
+versioned at `/etc/basaltwater/desktop.json`, with a `.json.bak` on replacement.
 The former display-manager symlink is retained as
-`/etc/systemd/system/display-manager.service.infra-tools-backup`.
+`/etc/systemd/system/display-manager.service.basaltwater-backup`.
 Setup failure stops the setup operation; inspect its error and rerun during a
 session-free window. There is no automatic rollback that logs users out.
 For administrator rollback, first log out, stop XRDP, restore the backed-up
@@ -358,7 +358,7 @@ PID and generation. The human handoff cycle passed.
 The default XFCE Lock action did nothing: Light Locker is intentionally disabled
 for the display-manager-free XRDP session, and no replacement locker is installed.
 Lock/unlock is outside the default support contract. Do not treat disconnect or
-agent pause as a screen lock. No automatic lock timer is configured by infra-tools;
+agent pause as a screen lock. No automatic lock timer is configured by Basaltwater;
 an operator may deliberately add a locker and timers. An optional manual locker
 requires its own authentication, reconnect and recovery qualification before
 being offered as supported. Existing lock UI entries may remain visible.
@@ -412,13 +412,13 @@ audio or multi-monitor compatibility.
 | `/etc/xrdp/xrdp.ini` | RDP protocol and channel settings |
 | `/etc/X11/xrdp/xorg.conf` | `xrdpdev` display with automatic glamor/software selection |
 | `/etc/X11/Xwrapper.config` | X server permissions |
-| `/etc/apt/sources.list.d/infra-tools-sid.sources` | Official Sid source for newer XRDP packages on Debian |
-| `/etc/apt/preferences.d/infra-tools-sid.pref` | Keeps Sid packages low priority outside the XRDP transaction |
+| `/etc/apt/sources.list.d/basaltwater-sid.sources` | Official Sid source for newer XRDP packages on Debian |
+| `/etc/apt/preferences.d/basaltwater-sid.pref` | Keeps Sid packages low priority outside the XRDP transaction |
 | `/etc/apparmor.d/local/Xorg` | Allows xorgxrdp sockets, capture buffers, and the selected render node |
 | `~/.local/share/xorg/Xorg.<display>.log` | Per-session Xorg diagnostics |
-| `/etc/xrdp/infra-tools-startwm.sh` | Root-owned shared desktop supervisor entry point |
-| `/etc/infra-tools/desktop.json` | Versioned owner and environment declaration |
-| `/run/user/UID/infra-tools-desktop/control.sock` | Private same-UID control channel |
+| `/etc/xrdp/basaltwater-startwm.sh` | Root-owned shared desktop supervisor entry point |
+| `/etc/basaltwater/desktop.json` | Versioned owner and environment declaration |
+| `/run/user/UID/basaltwater-desktop/control.sock` | Private same-UID control channel |
 
 The Xwrapper configuration requires:
 
@@ -444,7 +444,7 @@ RDP frame capture; without this rule, `g_alloc_shm_map_fd` fails and the
 capture path can terminate Xorg as soon as a client connects. The rule is
 limited to user-owned shared-memory entries and does not disable AppArmor.
 
-At setup time, infra-tools probes `/dev/dri/renderD*` and the corresponding
+At setup time, Basaltwater probes `/dev/dri/renderD*` and the corresponding
 kernel driver. It enables the xorgxrdp glamor path only when the driver is on
 xorgxrdp's supported allowlist (`amdgpu`, `i915`, `xe`, `msm`, or `radeon`)
 and the desktop user can read and write the render node. In that case the
@@ -601,7 +601,7 @@ Distribution-packaged Remmina clients are the compatibility target; an older
 client comparison is diagnostic, not a deployment requirement. Record the
 running FreeRDP version as well as Remmina's version.
 
-XRDP 0.10.6.1 does not recognize `enable_gfx=false`. Older infra-tools templates
+XRDP 0.10.6.1 does not recognize `enable_gfx=false`. Older basaltwater templates
 included that ineffective setting while claiming to force classic RDP. The
 template now documents actual negotiation: `max_bpp=32` permits GFX/H.264.
 Removing the ignored setting does not change behavior or fix the cached-pointer
@@ -623,7 +623,7 @@ test another RDP client. Confirm that the session uses `xrdpdev`, that
 RANDR. If the freeze persists, capture the XRDP, Xorg, and session logs while
 reproducing it.
 
-Use `infra-tools desktop exec -- xterm` in a running session to isolate an
+Use `basaltw desktop exec -- xterm` in a running session to isolate an
 application problem. Do not bypass the managed startup wrapper or restart
 sesman while applications are running.
 

@@ -27,10 +27,10 @@ SYSTEM_UNITS = {
     "xrdp.service": "Remote desktop",
     "fail2ban.service": "Login protection",
     "auditd.service": "System audit",
-    "infra-tools-web-panel.service": "Web panel",
+    "basaltwater-web-panel.service": "Web panel",
 }
 JOB_SERVICES = {
-    "infra-tools-web-panel-audit.service": "Audit snapshot exporter",
+    "basaltwater-web-panel-audit.service": "Audit snapshot exporter",
     "auto-update-apt.service": "Package updates",
     "auto-update-uv.service": "uv updates",
     "auto-update-node.service": "Node.js updates",
@@ -328,7 +328,7 @@ def render_diagnostics(
         *([] if query.service == "t3code.service" else ["sudo"]),
         *_journal_command(query), "--output=short-iso", "--utc",
     ])
-    header = f'''<header><p class="eyebrow">infra-tools web panel</p><h1>Service diagnostics</h1>
+    header = f'''<header><p class="eyebrow">Basaltwater web panel</p><h1>Service diagnostics</h1>
 <p class="lede">Inspect runtime details and recent logs on <code>{html.escape(host)}</code>.</p></header>'''
     body = f'''<form class="diagnostic-filters" method="get" action="/logs">
 <div><label for="service-filter">Service</label><select id="service-filter" name="service">{_options(SOURCES, query.service)}</select></div>

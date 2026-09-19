@@ -1,6 +1,6 @@
 # Protected device pairing
 
-infra-tools can run a small, password-protected enrollment portal for services
+Basaltwater can run a small, password-protected enrollment portal for services
 that use provider-native device sessions. T3 Code is the first supported
 provider. The portal lets a new browser or app obtain its own short-lived,
 one-time pairing link without an operator being present in an SSH terminal.
@@ -10,7 +10,7 @@ This is deliberately separate from the service being paired:
 ```text
 browser or app
     -> managed HTTPS gateway and Nginx Basic Auth portal
-    -> local infra-tools pairing broker
+    -> local Basaltwater pairing broker
     -> provider's supported pairing command
     -> one-time administrative link on the primary T3 HTTPS origin
     -> provider-native administrative device session
@@ -18,7 +18,7 @@ browser or app
 
 Basic Auth protects the ability to issue a link. T3 still authenticates the
 resulting connection, owns the per-device session, and provides session
-revocation. infra-tools does not create a permanent shared T3 token.
+revocation. Basaltwater does not create a permanent shared T3 token.
 
 This protected portal is for the managed Debian/VM profiles. The `agent_cachyos`
 profile intentionally does not install the portal or its gateway; use the
@@ -44,7 +44,7 @@ unset pairing_hash
 Then include device pairing with the T3 Code web service:
 
 ```bash
-infra-tools setup workstation_dev 192.168.0.41 agent \
+basaltw setup workstation_dev 192.168.0.41 agent \
   --agent-tool codex --agent-tool opencode \
   --web-interface t3code \
   --web-interface-source 192.168.0.0/24 \
@@ -54,10 +54,10 @@ infra-tools setup workstation_dev 192.168.0.41 agent \
 
 The portal defaults to port `3774`; T3 defaults to `3773`. Override only the
 portal with `--device-pairing-port PORT`. The two ports must differ. The portal
-inherits the web-interface bind address and source CIDRs, and infra-tools adds
+inherits the web-interface bind address and source CIDRs, and Basaltwater adds
 matching managed UFW rules for both ports.
 
-When T3 Code web setup is installed, infra-tools also configures the shared
+When T3 Code web setup is installed, Basaltwater also configures the shared
 internal HTTPS gateway and publishes the T3 web service and pairing page through
 managed HTTPS forwards. Setup prints their URLs. A VM-local CA is used when a
 publicly trusted certificate is not available; install that CA once on client
@@ -104,12 +104,12 @@ plus `access:read`, `access:write`, and `relay:write`. Its temporary two-minute
 administrative bearer session is revoked immediately after the pairing link is
 created. Pairing URLs are returned only to the authenticated request. They are
 not written to setup output, Nginx access logs, the broker journal, provider
-configuration, or saved infra-tools commands.
+configuration, or saved Basaltwater commands.
 
 The original SSH-based path remains available:
 
 ```bash
-infra-tools agent web pair 192.168.0.41 agent
+basaltw agent web pair 192.168.0.41 agent
 ```
 
 It is useful for recovery, for a loopback-only service, or when the pairing
@@ -125,7 +125,7 @@ page cleans up terminal control sequences and displays readable installation
 progress and authorization instructions. The known relay-install confirmation
 is accepted automatically; use the input only for an authorization code or
 other response requested by T3. T3 installs its pinned relay client;
-infra-tools does not download or manage a second relay service.
+Basaltwater does not download or manage a second relay service.
 
 After authorization, the portal shows a completion message and requests a
 restart of the per-user `t3code.service`. T3 then reconciles the saved Connect
@@ -153,13 +153,13 @@ are rejected.
 The target copy is root-owned, group-readable by `www-data`, and stored at:
 
 ```text
-/etc/infra-tools/device-pairing/htpasswd
+/etc/basaltwater/device-pairing/htpasswd
 ```
 
 The uploaded source payload is removed after setup succeeds or fails. The
 source path and interactive password are excluded from saved configurations.
 A normal rerun reuses the installed target file. To rotate portal credentials,
-rerun setup or patch with a new `--device-pairing-auth-file`; infra-tools
+rerun setup or patch with a new `--device-pairing-auth-file`; Basaltwater
 replaces the file and reloads Nginx only after `nginx -t` succeeds.
 Reconciliation also retains the last validated primary T3 HTTPS port until the
 gateway confirms its current named endpoints, avoiding an HTTP-link window
@@ -168,7 +168,7 @@ while the managed routes are refreshed.
 To remove enrollment from a saved host:
 
 ```bash
-infra-tools patch 192.168.0.41 agent --no-device-pairing
+basaltw patch 192.168.0.41 agent --no-device-pairing
 ```
 
 This disables and removes the broker service, Nginx site, pairing-port firewall
@@ -233,25 +233,25 @@ T3 endpoint, and required to return a link for the expected T3 origin.
 
 ```text
 ~/.config/systemd/user/t3code.service
-~/.config/systemd/user/t3code.service.d/infra-tools.conf
-infra-tools-device-pairing.service
-infra-tools-t3code-connect.path
-infra-tools-t3code-connect.service
-/etc/nginx/sites-available/infra-tools-device-pairing
-/etc/infra-tools/internal-web/policy.json
-/etc/infra-tools/internal-web/forwards.json
-/etc/infra-tools/device-pairing/providers.json
-/etc/infra-tools/device-pairing/htpasswd
-/run/infra-tools-device-pairing/http.sock
+~/.config/systemd/user/t3code.service.d/basaltwater.conf
+basaltwater-device-pairing.service
+basaltwater-t3code-connect.path
+basaltwater-t3code-connect.service
+/etc/nginx/sites-available/basaltwater-device-pairing
+/etc/basaltwater/internal-web/policy.json
+/etc/basaltwater/internal-web/forwards.json
+/etc/basaltwater/device-pairing/providers.json
+/etc/basaltwater/device-pairing/htpasswd
+/run/basaltwater-device-pairing/http.sock
 ```
 
 Check the local components without revealing pairing credentials:
 
 ```bash
 systemctl --user status t3code.service
-sudo systemctl status infra-tools-device-pairing.service
+sudo systemctl status basaltwater-device-pairing.service
 sudo nginx -t
-sudo fail2ban-client status infra-tools-device-pairing
+sudo fail2ban-client status basaltwater-device-pairing
 sudo ss -lntp | grep -E ':(3773|3774)\b'
 curl -I http://BIND_ADDRESS:3774/
 ```

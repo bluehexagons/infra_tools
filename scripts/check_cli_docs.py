@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import infra_tools
+import basaltwater
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,10 +17,10 @@ DOC = ROOT / "docs" / "COMMAND_LINE.md"
 
 
 def main() -> int:
-    parser, _, _ = infra_tools.create_infra_tools_parser()
+    parser, _, _ = basaltwater.create_basaltwater_parser()
     documented = set(
         re.findall(
-            r"^infra-tools ([a-z][a-z0-9-]*)",
+            r"^basaltw ([a-z][a-z0-9-]*)",
             DOC.read_text(encoding="utf-8"),
             re.MULTILINE,
         )

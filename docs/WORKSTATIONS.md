@@ -13,10 +13,10 @@ profile with `--control-plane` and select the agent tools you need (GitHub CLI
 and Codex CLI in this example):
 
 ```bash
-wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup agent_workstation \
+wget --timeout=20 --tries=2 -O "$HOME/.basaltwater-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sudo sh "$HOME/.basaltwater-install.sh" --user "$USER" --local-setup agent_workstation \
   --control-plane --desktop xfce --rdp --rdp-existing-password
-rm -f "$HOME/.infra_tools-install.sh"
+rm -f "$HOME/.basaltwater-install.sh"
 ```
 
 This keeps the graphical workstation setup while adding the SSH, rsync,
@@ -36,7 +36,7 @@ For agent-controlled page previews and interaction, see
 [Agent browser automation](BROWSER_AUTOMATION.md); it is independent of the
 human-operated browser described in this guide.
 
-infra-tools manages only T3 Code's server-side `--web-interface t3code` path.
+Basaltwater manages only T3 Code's server-side `--web-interface t3code` path.
 Install desktop and mobile clients separately using upstream's supported
 distribution. The server, pairing, and update model is documented in
 [T3_CODE.md](T3_CODE.md).
@@ -67,7 +67,7 @@ without a desktop or RDP, use `agent_vm`. Add only the language runtimes your
 projects need:
 
 ```bash
-infra-tools setup agent_vm 10.0.0.24 agent \
+basaltw setup agent_vm 10.0.0.24 agent \
   --node --python --go --agent-config active \
   --git-access read --repo https://github.com/user/project.git
 ```
@@ -89,7 +89,7 @@ capacity, project language runtimes, browser fallback, and network access
 remain operator choices:
 
 ```bash
-infra-tools setup agent_code_vm 10.0.0.25 agent \
+basaltw setup agent_code_vm 10.0.0.25 agent \
   --provision-on pve1 --name agent-1 \
   --image-storage local \
   --memory 4G --cores 4 \
@@ -123,7 +123,7 @@ language runtime.
 Add `--gl-tools` for a minimal OpenGL inspection and debugging bundle containing
 Mesa utilities such as `glxinfo` plus apitrace. It does not install a compiler,
 graphics SDK, Vulkan tools, or GPU drivers.
-The guided `infra-tools shell` workstation-development flow offers the
+The guided `basaltw shell` workstation-development flow offers the
 data-analysis bundle as a separate, default-off choice and uses the saved
 choice as the default when starting from a template.
 
@@ -135,7 +135,7 @@ including SSH-only sessions and checks that must continue while the T3 Code
 application is closed:
 
 ```bash
-infra-tools setup agent_code_vm 10.0.0.25 agent \
+basaltw setup agent_code_vm 10.0.0.25 agent \
   --browser-automation playwright
 ```
 
@@ -150,7 +150,7 @@ For a graphical Debian workstation, keep the default desktop profile, select
 XFCE for the RDP session, and restrict RDP to the management network:
 
 ```bash
-infra-tools setup agent_workstation 10.0.0.25 agent \
+basaltw setup agent_workstation 10.0.0.25 agent \
   --control-plane --desktop xfce --rdp \
   --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24 \
   --agent-config active \
@@ -182,7 +182,7 @@ reboots explicitly.
 Minimal developer workstation with RDP:
 
 ```bash
-infra-tools setup workstation_dev 10.0.0.25 alice \
+basaltw setup workstation_dev 10.0.0.25 alice \
   --desktop xfce --rdp --password "$RDP_PASSWORD" \
   --rdp-source 10.0.0.0/24
 ```
@@ -190,17 +190,17 @@ infra-tools setup workstation_dev 10.0.0.25 alice \
 Add a lightweight graphical IDE using Debian's package:
 
 ```bash
-infra-tools setup workstation_dev 10.0.0.25 alice --editor geany
+basaltw setup workstation_dev 10.0.0.25 alice --editor geany
 ```
 
 Or explicitly select Visual Studio Code:
 
 ```bash
-infra-tools setup workstation_dev 10.0.0.25 alice --editor vscode
+basaltw setup workstation_dev 10.0.0.25 alice --editor vscode
 ```
 
 The VS Code choice verifies Microsoft's published signing-key fingerprint and
-uses an infra-tools-owned keyring plus a source restricted to
+uses a Basaltwater-owned keyring plus a source restricted to
 `https://packages.microsoft.com/repos/code`. It does not enable Extrepo's
 global `non-free` policy. Because the editor was explicitly requested, a key,
 repository, or package failure stops setup instead of reporting a completed
@@ -209,14 +209,14 @@ editor step.
 PC with office and SMB tools:
 
 ```bash
-infra-tools setup pc_dev 10.0.0.26 alice \
+basaltw setup pc_dev 10.0.0.26 alice \
   --desktop cinnamon --office --browser brave
 ```
 
 Install several browsers and use a dark theme:
 
 ```bash
-infra-tools setup workstation_desktop 10.0.0.27 alice \
+basaltw setup workstation_desktop 10.0.0.27 alice \
   --browser librewolf --browser firefox --dark
 ```
 
@@ -265,9 +265,9 @@ the same time, so its launcher does not fall back to the optional
 created, so XFCE's Preferred Applications dialog and `exo-open --launch
 WebBrowser` resolve the selected browser rather than falling back to an
 unregistered command. These files are managed defaults: workstation setup
-recreates them rather than merging older infra-tools state. The `v2.0.0` setup
+recreates them rather than merging older basaltwater state. The `v2.0.0` setup
 is intended for clean workstation builds; rebuild a workstation created by an
-older infra-tools release instead of attempting an in-place migration.
+older basaltwater release instead of attempting an in-place migration.
 
 On VM and hardware targets, AppArmor is enabled and its distro service reloads
 the installed policy without blanket-enforcing package profiles. This preserves
@@ -275,7 +275,7 @@ each profile's declared `enforce`, `complain`, or `unconfined` mode. LibreWolf's
 own browser sandbox remains responsible for browser confinement. Setup replaces
 the package profile with its managed unconfined compatibility profile and
 reloads it. The `v2.0.0` setup is intended for clean workstation builds rather
-than in-place migration of older infra-tools state.
+than in-place migration of older basaltwater state.
 
 Debian 13's AppArmor policy also supplies the `unprivileged_userns` transition
 used by otherwise-unconfined applications that create a user namespace. Setup
@@ -290,7 +290,7 @@ error instead of leaving browser automation silently broken.
 ## Flatpak and containers
 
 Flatpak requires a desktop-capable host and is unreliable in unprivileged
-containers. On a container target, infra_tools warns and falls back to apt for
+containers. On a container target, basaltwater warns and falls back to apt for
 browsers; other Flatpak bundles may also fall back to apt when Flatpak cannot
 be installed. Prefer `--machine vm` when a reproducible Flatpak desktop is
 required.
@@ -332,10 +332,10 @@ Use `--no-rdp-clipboard`, `--rdp-drive-redirection`, or `--rdp-audio` to change
 the explicitly managed channel policy.
 
 XRDP permits one session owned by the setup account. Human RDP login or
-`infra-tools desktop start` creates it; disconnect retains it until logout.
+`basaltw desktop start` creates it; disconnect retains it until logout.
 `--rdp-idle-timeout` disconnects an idle client without ending applications.
 Session-count and disconnect-cleanup flags have been removed. Use
-`infra-tools desktop exec -- APPLICATION` to launch into the same session.
+`basaltw desktop exec -- APPLICATION` to launch into the same session.
 For browser testing, prefer T3 Code or managed Playwright over desktop input.
 
 The `pc_dev` profile includes Remmina with RDP and VNC plugins. Other profiles

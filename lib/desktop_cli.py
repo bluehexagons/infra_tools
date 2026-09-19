@@ -19,7 +19,7 @@ def add_desktop_subparser(subparsers: argparse._SubParsersAction) -> None:
         commands.add_parser(name).add_argument("--json", action="store_true")
     commands.add_parser("smoke", help="Live Geany edit/save/dialog check in an isolated test instance")
     screenshot = commands.add_parser("screenshot")
-    screenshot.add_argument("--output", help="New PNG path; defaults to private Pictures/infra-tools artifact storage")
+    screenshot.add_argument("--output", help="New PNG path; defaults to private Pictures/basaltwater artifact storage")
     screenshot.add_argument("--json", action="store_true")
     target = screenshot.add_mutually_exclusive_group()
     target.add_argument("--window", help="Capture a window ID from 'desktop windows'")
@@ -103,10 +103,10 @@ def run_desktop_command(args: argparse.Namespace) -> int:
             if current["state"] != "running":
                 state = current["state"]
                 if state == "stopped":
-                    raise RuntimeError("Desktop is stopped; run 'infra-tools desktop start' first")
+                    raise RuntimeError("Desktop is stopped; run 'basaltw desktop start' first")
                 if state == "starting":
-                    raise RuntimeError("Desktop is starting; run 'infra-tools desktop start' to wait for readiness")
-                raise RuntimeError(f"Desktop is {state}; inspect 'infra-tools desktop status' before retrying")
+                    raise RuntimeError("Desktop is starting; run 'basaltw desktop start' to wait for readiness")
+                raise RuntimeError(f"Desktop is {state}; inspect 'basaltw desktop status' before retrying")
             payload = {"action": command, "generation": current["generation"]}
             wait_title = getattr(args, "wait_window", None)
             baseline = []
