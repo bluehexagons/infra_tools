@@ -564,7 +564,7 @@ if [ "$HOST_OS_SUPPORTED" -eq 1 ] && [ "$missing_prerequisite" -eq 1 ]; then
         ca-certificates git openssh-client python3 rsync
 fi
 
-python3 - "$INSTALL_DIR" "$TARGET_HOME" <<'EOF'
+python3 - "$INSTALL_DIR" "$TARGET_HOME" "$HOST_OS_ID" <<'EOF'
 from __future__ import annotations
 import os
 from pathlib import Path
@@ -590,11 +590,12 @@ if target.exists():
     marker = target / '.basaltwater' / 'managed-install'
     managed = marker.is_file() and not marker.is_symlink() and marker.read_text() == 'basaltwater-v1\n'
     data_only = (
-        target == home / '.local/share/basaltwater'
+        sys.argv[3] == 'cachyos'
+        and target == home / '.local/share/basaltwater'
         and target.is_dir()
         and (target / 'cachyos-t3').is_dir()
-        and not (target / 'basaltwater.py').exists()
-        and not (target / '.git').exists()
+        and not (target / 'cachyos-t3').is_symlink()
+        and sorted(path.name for path in target.iterdir()) == ['cachyos-t3']
     )
     migrated = (
         target.name == 'basaltwater'
@@ -616,11 +617,14 @@ if [ "$CHANNEL_SET" -eq 0 ] && [ -f "$INSTALL_DIR/.basaltwater/channel.json" ]; 
 fi
 
 if [ -e "$INSTALL_DIR" ] && [ -d "$INSTALL_DIR/.git" ]; then
-    if [ -d "$INSTALL_DIR/cachyos-t3" ] && [ ! -L "$INSTALL_DIR/cachyos-t3" ]; then
-        existing_changes=$(git -C "$INSTALL_DIR" status --porcelain -- . ':(exclude)cachyos-t3')
-    else
-        existing_changes=$(git -C "$INSTALL_DIR" status --porcelain)
-    fi
+    for data_name in .basaltwater state deployments worktrees cachyos-t3; do
+        if [ -n "$(git -C "$INSTALL_DIR" ls-files -- "$data_name")" ]; then
+            fail "managed data path is tracked by the source repository: $data_name"
+        fi
+    done
+    existing_changes=$(git -C "$INSTALL_DIR" status --porcelain -- . \
+        ':(exclude).basaltwater' ':(exclude)state' \
+        ':(exclude)cachyos-t3' ':(exclude)deployments' ':(exclude)worktrees')
     if [ -n "$existing_changes" ]; then
         fail "existing install has local changes; commit or stash them before reinstalling"
     fi
@@ -689,7 +693,7 @@ if [ "$HOST_OS_ID" = cachyos ]; then
     fi
 fi
 
-python3 - "$INSTALL_DIR" "$TARGET_HOME" <<'EOF'
+python3 - "$INSTALL_DIR" "$TARGET_HOME" "$HOST_OS_ID" <<'EOF'
 from __future__ import annotations
 import os
 from pathlib import Path
@@ -715,11 +719,12 @@ if target.exists():
     marker = target / '.basaltwater' / 'managed-install'
     managed = marker.is_file() and not marker.is_symlink() and marker.read_text() == 'basaltwater-v1\n'
     data_only = (
-        target == home / '.local/share/basaltwater'
+        sys.argv[3] == 'cachyos'
+        and target == home / '.local/share/basaltwater'
         and target.is_dir()
         and (target / 'cachyos-t3').is_dir()
-        and not (target / 'basaltwater.py').exists()
-        and not (target / '.git').exists()
+        and not (target / 'cachyos-t3').is_symlink()
+        and sorted(path.name for path in target.iterdir()) == ['cachyos-t3']
     )
     migrated = (
         target.name == 'basaltwater'
@@ -752,14 +757,16 @@ if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/.basaltwater" ]; then
         fail "could not preserve existing channel state"
     fi
 fi
-if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/cachyos-t3" ]; then
-    if [ -e "$INSTALL_DIR/cachyos-t3" ]; then
-        fail "could not preserve existing CachyOS T3 data"
+for data_name in deployments worktrees cachyos-t3; do
+    if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/$data_name" ]; then
+        if [ -e "$INSTALL_DIR/$data_name" ]; then
+            fail "could not preserve existing $data_name data"
+        fi
+        if ! cp -a "$BACKUP_DIR/$data_name" "$INSTALL_DIR/$data_name"; then
+            fail "could not preserve existing $data_name data"
+        fi
     fi
-    if ! cp -a "$BACKUP_DIR/cachyos-t3" "$INSTALL_DIR/cachyos-t3"; then
-        fail "could not preserve existing CachyOS T3 data"
-    fi
-fi
+done
 write_channel_state
 printf 'basaltwater-v1\n' > "$INSTALL_DIR/.basaltwater/managed-install"
 

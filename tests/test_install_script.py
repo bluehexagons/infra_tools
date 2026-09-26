@@ -316,6 +316,39 @@ class TestInstallScript(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             with open(t3_data, encoding="utf-8") as file_obj:
                 self.assertEqual(file_obj.read(), "preserve me")
+            rerun = subprocess.run(
+                ["sh", INSTALL_SCRIPT, "--install-dir", install_dir],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(rerun.returncode, 0, rerun.stderr)
+            with open(t3_data, encoding="utf-8") as file_obj:
+                self.assertEqual(file_obj.read(), "preserve me")
+
+    def test_cachyos_installer_rejects_other_unmanaged_data_beside_t3(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake_home, _log_path, environment = self._create_fixture(directory)
+            environment.update(BASALTWATER_TEST_NON_ROOT="1", BASALTWATER_TEST_OS_ID="cachyos")
+            install_dir = os.path.join(fake_home, ".local", "share", "basaltwater")
+            os.makedirs(os.path.join(install_dir, "cachyos-t3"))
+            other_data = os.path.join(install_dir, "other.txt")
+            with open(other_data, "w", encoding="utf-8") as file_obj:
+                file_obj.write("keep me")
+
+            result = subprocess.run(
+                ["sh", INSTALL_SCRIPT, "--install-dir", install_dir],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("refusing install directory", result.stderr)
+            with open(other_data, encoding="utf-8") as file_obj:
+                self.assertEqual(file_obj.read(), "keep me")
 
 
     def test_empty_new_installer_settings_do_not_fall_back(self):
@@ -634,6 +667,11 @@ class TestInstallScript(unittest.TestCase):
             os.makedirs(old_state)
             with open(os.path.join(old_state, "setup.json"), "w", encoding="utf-8") as file_obj:
                 file_obj.write("{}")
+            for data_name in ("deployments", "worktrees"):
+                data_dir = os.path.join(install_dir, data_name)
+                os.makedirs(data_dir)
+                with open(os.path.join(data_dir, "saved.txt"), "w", encoding="utf-8") as file_obj:
+                    file_obj.write(data_name)
 
             result = subprocess.run(
                 ["sh", INSTALL_SCRIPT, "--install-dir", install_dir],
@@ -650,8 +688,36 @@ class TestInstallScript(unittest.TestCase):
             self.assertTrue(os.path.isfile(
                 os.path.join(install_dir, "state", "setup.json")
             ))
+            for data_name in ("deployments", "worktrees"):
+                with open(os.path.join(install_dir, data_name, "saved.txt"), encoding="utf-8") as file_obj:
+                    self.assertEqual(file_obj.read(), data_name)
+
             self.assertTrue(os.path.isdir(os.path.join(install_dir, ".git")))
             self.assertEqual(os.stat(backups[0]).st_mode & 0o777, 0o700)
+
+            rerun = subprocess.run(
+                ["sh", INSTALL_SCRIPT, "--install-dir", install_dir],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(rerun.returncode, 0, rerun.stderr)
+            for data_name in ("deployments", "worktrees"):
+                with open(os.path.join(install_dir, data_name, "saved.txt"), encoding="utf-8") as file_obj:
+                    self.assertEqual(file_obj.read(), data_name)
+
+            with open(os.path.join(install_dir, "basaltwater.py"), "a", encoding="utf-8") as file_obj:
+                file_obj.write("# local source change\n")
+            changed_source = subprocess.run(
+                ["sh", INSTALL_SCRIPT, "--install-dir", install_dir],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertNotEqual(changed_source.returncode, 0)
+            self.assertIn("local changes", changed_source.stderr)
 
     def test_channel_option_checks_out_release_tag(self):
         with tempfile.TemporaryDirectory() as directory:

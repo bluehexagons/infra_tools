@@ -33,7 +33,12 @@ not contain it.
 When the installer finds recent `infra_tools` user data, it runs the one-time
 Basaltwater migration from the selected checkout before installing and starting
 the CachyOS setup. Migration conflicts stop the installer with the reported
-path or recovery instructions.
+path or recovery instructions. An existing `cachyos-t3` data directory at the
+default Basaltwater install path is retained during migration and reinstall.
+Installer updates also carry forward managed `state`, `deployments`, and
+`worktrees` directories.
+If that path also contains other unmanaged files, move or resolve them before
+rerunning the installer.
 
 No account, password, group, sudo, provider, or Git identity changes are made.
 Log in to providers through their normal commands when needed:

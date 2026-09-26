@@ -76,6 +76,75 @@ class RenameMigrationTests(unittest.TestCase):
             self.assertEqual((destination / 'basaltwater.py').read_text(), '# new runtime')
             self.assertFalse((root / '.local/share/infra_tools').exists())
 
+    @patch('lib.setup_common.copy_project_files')
+    def test_runtime_merges_with_existing_t3_data_and_recovers_without_losing_it(self, copy):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            t3 = self.write(root, '.local/share/basaltwater/cachyos-t3/state.json', 'keep T3')
+            legacy_data = self.write(root, '.local/share/infra-tools/cache.json', 'keep cache')
+            legacy_cli = self.write(root, '.local/share/infra_tools/infra_tools.py', '# old CLI')
+            self.write(root, '.local/share/infra_tools/lib/installation_info.py', '# recent provenance')
+            copy.side_effect = self.copy_runtime
+            source = Path(migration.__file__).resolve().parents[1]
+            plan = migration.build_plan(root, system=False, runtime_source=source)
+            with patch.object(migration, '_reload_integrations', side_effect=OSError('interrupted')):
+                with self.assertRaisesRegex(OSError, 'interrupted'):
+                    migration.apply_plan(plan)
+            self.assertEqual(t3.read_text(), 'keep T3')
+            self.assertTrue((t3.parents[1] / 'basaltwater.py').is_file())
+
+            runtime_action = next(action for action in plan['actions'] if action['kind'] == 'runtime')
+            additions = runtime_action.pop('merge_added')
+            migration._save(plan)
+            with self.assertRaisesRegex(ValueError, 'no recovery manifest'):
+                migration.recover(root, system=False)
+            self.assertEqual(t3.read_text(), 'keep T3')
+            runtime_action['merge_added'] = additions
+            migration._save(plan)
+            migration.recover(root, system=False)
+
+            self.assertEqual(t3.read_text(), 'keep T3')
+            self.assertEqual(legacy_data.read_text(), 'keep cache')
+            self.assertTrue(legacy_cli.is_file())
+            self.assertFalse((t3.parents[1] / 'basaltwater.py').exists())
+
+    @patch('lib.setup_common.copy_project_files')
+    def test_partial_runtime_merge_recovers_existing_t3_data(self, copy):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            t3 = self.write(root, '.local/share/basaltwater/cachyos-t3/state.json', 'keep T3')
+            legacy_cli = self.write(root, '.local/share/infra_tools/infra_tools.py', '# old CLI')
+            self.write(root, '.local/share/infra_tools/lib/installation_info.py', '# recent provenance')
+            copy.side_effect = self.copy_runtime
+            source = Path(migration.__file__).resolve().parents[1]
+            plan = migration.build_plan(root, system=False, runtime_source=source)
+
+            def interrupt_merge(stage, destination):
+                first = sorted(stage.iterdir())[0]
+                first.rename(destination / first.name)
+                raise OSError('interrupted merge')
+
+            with patch.object(migration, '_merge_runtime_stage', side_effect=interrupt_merge):
+                with self.assertRaisesRegex(OSError, 'interrupted merge'):
+                    migration.apply_plan(plan)
+            migration.recover(root, system=False)
+
+            self.assertEqual(t3.read_text(), 'keep T3')
+            self.assertTrue(legacy_cli.is_file())
+            self.assertFalse((t3.parents[1] / '.basaltwater').exists())
+
+    def test_existing_runtime_destination_with_other_data_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy_cli = self.write(root, '.local/share/infra_tools/infra_tools.py', '# old CLI')
+            self.write(root, '.local/share/infra_tools/lib/installation_info.py', '# recent provenance')
+            other = self.write(root, '.local/share/basaltwater/other.txt', 'keep')
+            source = Path(migration.__file__).resolve().parents[1]
+            with self.assertRaisesRegex(ValueError, 'Runtime destination already exists'):
+                migration.build_plan(root, system=False, runtime_source=source)
+            self.assertEqual(other.read_text(), 'keep')
+            self.assertTrue(legacy_cli.is_file())
+
     def worktree_fixture(self, root: Path) -> tuple[Path, Path]:
         tree = root / '.local/share/infra_tools/worktrees/project/task'
         metadata = root / 'repos/project/.git/worktrees/task'

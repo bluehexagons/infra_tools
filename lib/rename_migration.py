@@ -343,6 +343,18 @@ def _project_table_line(line: str, moves: list[tuple[Path, Path]]) -> str | None
     return line
 
 
+def _t3_data_only_destination(destination: Path, root: Path) -> bool:
+    """Recognize user-owned T3 data left at the default runtime path."""
+    if (destination != root / ".local/share/basaltwater" or destination.is_symlink()
+            or not destination.is_dir() or os.path.ismount(destination)):
+        return False
+    if destination.stat().st_uid != os.geteuid():
+        return False
+    entries = list(destination.iterdir())
+    return (len(entries) == 1 and entries[0].name == "cachyos-t3"
+            and entries[0].is_dir() and not entries[0].is_symlink())
+
+
 def build_plan(root: Path, *, system: bool, runtime_source: Path | None = None, installation: Path | None = None) -> dict:
     """Inspect a recent installation; the preview performs no system changes."""
     root = root.absolute()
@@ -373,7 +385,7 @@ def build_plan(root: Path, *, system: bool, runtime_source: Path | None = None, 
         if runtime_source is None or not (runtime_source / "basaltwater.py").is_file():
             raise ValueError("A complete Basaltwater source tree is required for runtime cutover")
         destination = legacy_runtime.with_name("basaltwater")
-        if os.path.lexists(destination) and destination not in occupied:
+        if os.path.lexists(destination) and destination not in occupied and not _t3_data_only_destination(destination, root):
             raise ValueError(f"Runtime destination already exists: {destination}")
     for parent in SYSTEM_DIRS if system else USER_DIRS:
         directory = root / parent
@@ -407,7 +419,7 @@ def build_plan(root: Path, *, system: bool, runtime_source: Path | None = None, 
         elif not system and state.is_dir() and not state.is_symlink():
             edits.extend(_state_edits(state, legacy_runtime.with_name("basaltwater") / "state"))
         actions.append({"kind": "runtime", "old": str(legacy_runtime), "new": str(legacy_runtime.with_name("basaltwater")), "source": str(runtime_source),
-                        "merge": legacy_runtime.with_name("basaltwater") in occupied,
+                        "merge": legacy_runtime.with_name("basaltwater") in occupied or os.path.lexists(legacy_runtime.with_name("basaltwater")),
                         "archive": str(legacy_runtime.with_name(".basaltwater-migration-" + uuid.uuid4().hex))})
     resources = list(RESOURCE_DIRS if system else (".config/systemd/user", ".local/bin"))
     if system and (root / "etc/pve/nodes").is_dir():
@@ -792,6 +804,21 @@ def _merge_runtime_stage(stage: Path, destination: Path) -> None:
     stage.rmdir()
 
 
+def _runtime_merge_additions(stage: Path, destination: Path) -> list[str]:
+    """Preflight a merge and record only paths the staged runtime will add."""
+    additions = []
+    for source in sorted(stage.iterdir()):
+        target = destination / source.name
+        if os.path.lexists(target):
+            if source.is_dir() and not source.is_symlink() and target.is_dir() and not target.is_symlink():
+                additions.extend(str(Path(source.name) / child) for child in _runtime_merge_additions(source, target))
+            else:
+                raise ValueError(f"Conflicting runtime destination: {target}")
+        else:
+            additions.append(source.name)
+    return additions
+
+
 def apply_plan(plan: dict) -> None:
     handles = []
     try:
@@ -962,8 +989,11 @@ def _apply_plan(plan: dict, lock_handles: list) -> None:
                     shutil.copytree(existing, stage / name, symlinks=True, copy_function=shutil.copy2)
             (stage / ".basaltwater").mkdir(mode=0o700)
             (stage / ".basaltwater/managed-install").write_text("basaltwater-v1\n")
-            old.rename(archive / "previous-runtime")
             new = Path(action["new"])
+            if action.get("merge"):
+                action["merge_added"] = _runtime_merge_additions(stage, new)
+                _save(plan)
+            old.rename(archive / "previous-runtime")
             if action.get("merge"):
                 _merge_runtime_stage(stage, new)
             else:
@@ -1044,7 +1074,17 @@ def recover(root: Path, *, system: bool) -> None:
             previous = archive / "previous-runtime"
             new = Path(action["new"])
             if previous.exists():
-                if new.exists():
+                if action.get("merge"):
+                    if "merge_added" not in action:
+                        raise ValueError(f"Merged runtime has no recovery manifest; inspect {archive} before recovering")
+                    failed = archive / "failed-runtime"
+                    for relative in action.get("merge_added", []):
+                        added = new / relative
+                        if os.path.lexists(added):
+                            saved = failed / relative
+                            saved.parent.mkdir(parents=True, exist_ok=True)
+                            added.rename(saved)
+                elif new.exists():
                     new.rename(archive / "failed-runtime")
                 previous.rename(old)
         plan["completed"] = index
