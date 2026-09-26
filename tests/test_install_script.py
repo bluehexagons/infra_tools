@@ -280,7 +280,7 @@ class TestInstallScript(unittest.TestCase):
     def test_cachyos_installer_runs_migration_before_bootstrap(self):
         with tempfile.TemporaryDirectory() as directory:
             _, log_path, environment = self._create_fixture(directory)
-            environment["BASALTWATER_TEST_OS_ID"] = "cachyos"
+            environment.update(BASALTWATER_TEST_NON_ROOT="1", BASALTWATER_TEST_OS_ID="cachyos")
             install_dir = os.path.join(directory, "home", ".local", "share", "basaltwater")
             result = subprocess.run(
                 ["sh", INSTALL_SCRIPT, "--install-dir", install_dir],
@@ -298,7 +298,7 @@ class TestInstallScript(unittest.TestCase):
     def test_cachyos_installer_preserves_existing_t3_data_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             fake_home, _log_path, environment = self._create_fixture(directory)
-            environment["BASALTWATER_TEST_OS_ID"] = "cachyos"
+            environment.update(BASALTWATER_TEST_NON_ROOT="1", BASALTWATER_TEST_OS_ID="cachyos")
             install_dir = os.path.join(fake_home, ".local", "share", "basaltwater")
             t3_data = os.path.join(install_dir, "cachyos-t3", "state.json")
             os.makedirs(os.path.dirname(t3_data))
